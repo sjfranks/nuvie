@@ -38,6 +38,9 @@ const TYPES = new Map<number, ActorType>();
 for (const r of ACTOR_TYPES) {
   if (!TYPES.has(r[0] as number)) TYPES.set(r[0] as number, { framesPerDir: r[1] as number, tilesPerDir: r[2] as number, tilesPerFrame: r[3] as number, tileStart: r[4] as number });
 }
+/** Creatures two squares long, their back half a square behind them (U6Actor::init_splitactor). */
+export const SPLIT: ReadonlySet<number> = new Set([426, 427, 428, 429, 430, 431]);
+
 const DEFAULT_TYPE: ActorType = { framesPerDir: 0, tilesPerDir: 0, tilesPerFrame: 1, tileStart: 0 };
 
 export class Actor {
@@ -109,6 +112,17 @@ export class Actor {
     this.frameN = t.tileStart + d * t.tilesPerDir + this.walkFrame * t.tilesPerFrame + t.tilesPerFrame - 1;
   }
 
+  /** Where a two-square creature's back half is, and its frame (set_direction_of_surrounding_splitactor_objs). */
+  back(): { x: number; y: number; frame: number } | null {
+    if (this.kind !== 'u6' || !SPLIT.has(this.objN)) return null;
+    const t = TYPES.get(this.objN) ?? DEFAULT_TYPE;
+    const w = this.z === 0 ? 1023 : 255;
+    const [dx, dy] = [[0, 1], [-1, 0], [0, -1], [1, 0]][this.direction & 3];
+    // A "mutant" (the Pushme Pullyu) has a second front where the back would be.
+    const frame = this.objFlags & 0x40 ? ((this.direction + 2) & 3) * t.tilesPerDir + t.tilesPerFrame - 1 : 8 + this.direction * t.tilesPerDir + t.tilesPerFrame - 1;
+    return { x: (this.x + dx) & w, y: (this.y + dy) & w, frame };
+  }
+
   /** Martian Dreams' and Savage Empire's walk (MDActor::set_direction, Actor::set_direction). */
   private wouDirection(d: number): void {
     this.direction = d;
@@ -162,7 +176,9 @@ export class Actors {
       const q = 0x400 + i * 2;
       a.objN = r1(q) | ((r1(q + 1) & 0x3) << 8);
       a.frameN = r1(q + 1) >> 2;
-      a.direction = (a.frameN >> 2) & 3;
+      // Which way they face, from their frame (U6Actor::discover_direction).
+      const t = TYPES.get(a.objN);
+      a.direction = this.kind === 'u6' && t && t.tilesPerDir ? Math.floor((a.frameN - t.tileStart) / t.tilesPerDir) & 3 : (a.frameN >> 2) & 3;
       a.visible = a.objN !== 0;
       if (a.objN === 0) a.x = a.y = a.z = 0;
       a.objFlags = r1(i);
@@ -218,11 +234,17 @@ export class Actors {
     }
   }
 
-  /** The living, visible actor standing on a square. */
+  /** The living, visible actor standing on a square - either half of a two-square one. */
   at(x: number, y: number, z: number): Actor | null {
+    let behind: Actor | null = null;
     for (const a of this.list) {
-      if (a.x === x && a.y === y && a.z === z && a.visible && a.alive && a.objN !== 0) return a;
+      if (a.z !== z || !a.visible || !a.alive || a.objN === 0) continue;
+      if (a.x === x && a.y === y) return a;
+      if (!behind && SPLIT.has(a.objN)) {
+        const b = a.back();
+        if (b && b.x === x && b.y === y) behind = a;
+      }
     }
-    return null;
+    return behind;
   }
 }

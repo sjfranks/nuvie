@@ -6,16 +6,18 @@
 import type { GameFiles } from '../files/gamefiles.ts';
 import { Lib } from '../files/lib.ts';
 import { lzwDecompress, lzwFile } from '../files/lzw.ts';
-import { Actor, Actors, STATUS_IN_PARTY, WT } from './actors.ts';
+import { Actor, Actors, SPLIT, STATUS_IN_PARTY, WT } from './actors.ts';
 import { Converse, ConverseLib, checkKeywords, type ConvAsk, type ConvWorld } from './converse.ts';
+import { Combat } from './combat.ts';
+import { Magic, type Spell } from './magic.ts';
 import { invCount, invDelete, invFind, invNew, invWeight } from './inventory.ts';
 import { Journal, type JournalData } from './journal.ts';
 import { detectKind, mdPortrait, OFFSETS, PALETTE, type Kind } from './kind.ts';
 import { readShape, type Shape } from '../files/shape.ts';
 import { GameMap, wrap } from './map.ts';
-import { Obj, Objects, STATUS_OK_TO_TAKE, type Loc } from './objects.ts';
+import { Obj, Objects, STATUS_OK_TO_TAKE, STATUS_TEMPORARY, type Loc } from './objects.ts';
 import { Tiles } from './tiles.ts';
-import { OBJ } from './u6tables.ts';
+import { OBJ, READY_SLOT } from './u6tables.ts';
 
 export type LogKind = 'sys' | 'npc' | 'you' | 'read';
 
@@ -48,6 +50,7 @@ export interface SaveState {
   version: 1;
   clock: Clock;
   turns: number;
+  light?: number;
   party: { id: number; name: string }[];
   flags: { karma: number; quest: number; garg: number; gender: number };
   actors: number[][];
@@ -61,6 +64,17 @@ const DIRS = [
   [0, -1], [1, 0], [0, 1], [-1, 0],
 ] as const;
 const MAX_LOG = 300;
+/** Where a red moongate goes, by its place round the one who opened it (U6UseCode.cpp red_moongate_tbl). */
+const RED_GATES: readonly [number, number, number][] = [
+  [0, 0, 0], [0x383, 0x1f3, 0], [0x3a7, 0x106, 0], [0x1b3, 0x18b, 0], [0x1f7, 0x166, 0], [0x93, 0x373, 0],
+  [0x397, 0x3a6, 0], [0x44, 0x2d, 5], [0x133, 0x160, 0], [0xbc, 0x2d, 5], [0x9f, 0x3ae, 0], [0x2e3, 0x2bb, 0],
+  [0, 0, 0], [0, 0, 0], [0, 0, 0], [0xe3, 0x83, 0], [0x17, 0x16, 1], [0x80, 0x56, 5], [0x6c, 0xdd, 5],
+  [0x39b, 0x36c, 0], [0x127, 0x26, 0], [0x4b, 0x1fb, 0], [0x147, 0x336, 0], [0x183, 0x313, 0], [0x33f, 0xa6, 0],
+  [0x29b, 0x43, 0],
+];
+const LORD_BRITISH = 5;
+const ORB_FLAG = 0x20;
+
 const READABLE: ReadonlySet<number> = new Set([
   OBJ.SIGN, OBJ.SIGN_ARROW, OBJ.BOOK, OBJ.SCROLL, OBJ.GRAVE, OBJ.CROSS, OBJ.PICTURE,
 ]);
@@ -81,6 +95,10 @@ export class Game implements ConvWorld {
   readonly actors: Actors;
   readonly lib: ConverseLib;
   readonly journal = new Journal();
+  readonly combat: Combat;
+  readonly magic: Magic;
+  /** Turns left of a Light spell's glow round the party. */
+  lightTurns = 0;
   readonly clock: Clock;
   party: PartyMember[] = [];
   log: LogLine[] = [];
@@ -96,6 +114,8 @@ export class Game implements ConvWorld {
   questFlag = 0;
   gargFlag = 0;
   turns = 0;
+  /** Something wants a square chosen on the map (the orb's gate): what to say, and what to do with it. */
+  askWhere: { label: string; then: (x: number, y: number) => void } | null = null;
   /** A container opened to look in. */
   openContainer: Obj | null = null;
   private readonly books: Lib | null;
@@ -143,8 +163,12 @@ export class Game implements ConvWorld {
       this.party.push({ actor: a, name: 'Avatar' });
     }
     for (const a of this.actors.list) a.schedPos = a.schedulePos(this.clock.hour);
+    if (this.kind === 'u6' && !saved) this.gatherBackHalves();
+    this.combat = new Combat(this);
+    this.magic = new Magic(this);
     if (saved) this.restore(saved);
     else this.say('sys', 'The world is loaded. Tap the map to walk.');
+    this.combat.update(!saved);
   }
 
   /** Read every object, and return the objlist: a new game's packed files, else a saved game's. */
@@ -205,6 +229,20 @@ export class Game implements ConvWorld {
     const objlist = f.get('objlist');
     if (!objlist) throw new Error('missing game file: objlist');
     return objlist;
+  }
+
+  /** The back halves of two-square creatures are drawn with them (Actor.back), so their objects leave the map. */
+  private gatherBackHalves(): void {
+    for (const a of this.actors.list) {
+      if (!SPLIT.has(a.objN) || !a.visible) continue;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          for (const o of [...(this.objects.list(a.x + dx, a.y + dy, a.z) ?? [])]) {
+            if (o.objN === a.objN && (o.quality === a.id || o.quality === 0)) this.objects.unlink(o);
+          }
+        }
+      }
+    }
   }
 
   // ---- the party ----
@@ -336,6 +374,7 @@ export class Game implements ConvWorld {
         }
       }
       this.updateSchedules();
+      if (this.kind === 'u6') this.magic.hourly();
     }
   }
 
@@ -343,9 +382,10 @@ export class Game implements ConvWorld {
   where(): string {
     const p = this.player;
     if (p.z !== 0) return `underground, level ${p.z}`;
-    const lat = Math.round((p.y - 512) / 8);
-    const lon = Math.round((p.x - 512) / 8);
-    return `${Math.abs(lat)}${lat < 0 ? 'N' : 'S'} ${Math.abs(lon)}${lon < 0 ? 'W' : 'E'}`;
+    // As the Locate spell has it (locate.lua): eighths of the map from 38 across and 45 down.
+    const x = p.x >> 3;
+    const y = p.y >> 3;
+    return `${Math.abs(y - 45)}${y > 45 ? 'S' : 'N'} ${Math.abs(x - 38)}${x > 38 ? 'E' : 'W'}`;
   }
 
   // ---- moving ----
@@ -368,6 +408,11 @@ export class Game implements ConvWorld {
     const ny = wrap(p.y + dy, p.z);
     this.openContainer = null;
     const other = this.actors.at(nx, ny, p.z);
+    if (other && this.combat.hostile(other)) {
+      this.combat.attack(p, other);
+      this.endTurn();
+      return true;
+    }
     if (other && other.inParty) {
       // Change places with a companion.
       other.x = p.x;
@@ -389,8 +434,9 @@ export class Game implements ConvWorld {
     p.x = nx;
     p.y = ny;
     p.setDirection(facing(dx, dy));
-    // Each companion takes the square the one ahead has left.
-    for (let i = 1; i < this.party.length; i++) {
+    // Each companion takes the square the one ahead has left - but in a fight, each fights.
+    const fighting = this.combat.fighting;
+    for (let i = 1; i < this.party.length && !fighting; i++) {
       const a = this.party[i].actor;
       if (a === other || a.z !== p.z) continue;
       const t = trail[i - 1];
@@ -401,6 +447,7 @@ export class Game implements ConvWorld {
         a.y = t.y;
       }
     }
+    if (this.kind === 'u6') this.enterGate(nx, ny, p.z);
     this.endTurn();
     return true;
   }
@@ -415,8 +462,17 @@ export class Game implements ConvWorld {
   private endTurn(): void {
     this.turns++;
     if (this.turns % 2 === 0) this.advance(1);
+    if (this.lightTurns > 0) this.lightTurns--;
+    this.combat.update();
+    this.combat.round();
     this.moveNpcs();
     this.onChange();
+  }
+
+  /** Move the party to a place, as a ladder or death does, and let the eggs there hatch. */
+  relocate(x: number, y: number, z: number): void {
+    this.teleport(x, y, z);
+    this.combat.update(true);
   }
 
   /** Put the whole party at a place (ladders, dungeon mouths). */
@@ -589,6 +645,40 @@ export class Game implements ConvWorld {
           break;
       }
     }
+  }
+
+  // ---- casting ----
+
+  /** Cast a spell (at a square, where it is aimed); a turn passes if it was cast. */
+  castSpell(caster: Actor, spell: Spell, x?: number, y?: number): void {
+    if (this.converse) return;
+    if (this.magic.cast(caster, spell, x, y)) this.endTurn();
+    else this.onChange();
+  }
+
+  // ---- fighting ----
+
+  /** Attack whoever is at a square, if the party's leader can reach them from here. Returns false where not. */
+  attackAt(x: number, y: number): boolean {
+    if (this.converse) return false;
+    const p = this.player;
+    const foe = this.actors.at(x, y, p.z);
+    if (!foe || foe === p) {
+      this.say('sys', 'Nothing to attack there.');
+      this.onChange();
+      return true;
+    }
+    if (foe.inParty) {
+      this.say('sys', 'Not a party member!');
+      this.onChange();
+      return true;
+    }
+    if (this.combat.range(p, x, y) > this.combat.reach(p) || !this.combat.clearLine(p.x, p.y, x, y, p.z)) return false;
+    this.say('you', `Attack ${this.lookActor(foe).replace(/^(a|an|the) /, '')}`);
+    if (!this.combat.hostile(foe) && !foe.inParty && foe.objN !== OBJ.LORD_BRITISH) this.karma = Math.max(0, this.karma - 5);
+    this.combat.attack(p, foe);
+    this.endTurn();
+    return true;
   }
 
   // ---- looking ----
@@ -816,7 +906,7 @@ export class Game implements ConvWorld {
       z = o.z - 1;
     }
     if (z < 0 || z > 5) return;
-    this.teleport(x, y, z);
+    this.relocate(x, y, z);
     this.say('sys', down ? 'Down the party goes.' : 'Up the party goes.');
   }
 
@@ -863,7 +953,12 @@ export class Game implements ConvWorld {
         this.openContainer = o;
         this.say('sys', o.container.length ? `Searching the ${name}: ${o.container.map((c) => this.objects.look(c)).join(', ')}.` : `The ${name} is empty.`);
       }
-    } else if (FOOD.has(o.objN)) {
+    } else if (o.objN === OBJ.TORCH && this.kind === 'u6') this.useTorch(o);
+    else if (o.objN === OBJ.ORB_OF_THE_MOONS && this.kind === 'u6') {
+      this.useOrb();
+      return;
+    }
+    else if (FOOD.has(o.objN)) {
       if (o.qty > 1) o.qty--;
       else this.objects.unlink(o);
       this.say('sys', 'You eat the food.');
@@ -919,6 +1014,131 @@ export class Game implements ConvWorld {
     this.objects.add(o);
     this.say('sys', `Drop ${what}.`);
     this.endTurn();
+  }
+
+  /**
+   * The Orb of the Moons (U6UseCode::use_orb): once Lord British has told of it, it opens a red moongate on a square
+   * near the party, and where the gate leads is told by which square.
+   */
+  private useOrb(): void {
+    const lb = this.actors.get(LORD_BRITISH);
+    if (!lb || !(lb.talkFlags & ORB_FLAG)) {
+      this.say('sys', "You can't figure out how to use it.");
+      this.onChange();
+      return;
+    }
+    this.say('sys', 'Where?');
+    this.askWhere = {
+      label: 'Orb: tap where',
+      then: (ox, oy) => {
+        this.askWhere = null;
+        const p = this.player;
+        const px = 3 + ox - p.x;
+        const py = 2 + oy - p.y;
+        if (px < 0 || py < 0 || px > 5 || py > 4 || this.actors.at(ox, oy, p.z) || !this.map.isPassable(ox, oy, p.z)) {
+          this.say('sys', 'Failed.');
+          this.onChange();
+          return;
+        }
+        let place = px + py * 5;
+        if (place >= 12 && place <= 14) place = 0;
+        const gate = this.objects.create(OBJ.RED_GATE, 1, place);
+        gate.status |= STATUS_TEMPORARY;
+        [gate.x, gate.y, gate.z] = [ox, oy, p.z];
+        this.objects.add(gate);
+        this.say('sys', 'A red moongate appears.');
+        this.endTurn();
+      },
+    };
+    this.onChange();
+  }
+
+  /** Stepping into a red moongate (U6UseCode::enter_moongate): away, if it goes anywhere. */
+  private enterGate(x: number, y: number, z: number): boolean {
+    const gate = this.objects.list(x, y, z)?.find((o) => o.objN === OBJ.RED_GATE && o.x === x);
+    if (!gate) return false;
+    const to = RED_GATES[gate.quality] ?? RED_GATES[0];
+    if (!this.party.some((m) => invFind(this.objects, m.actor.id, OBJ.ORB_OF_THE_MOONS))) {
+      this.say('sys', 'You forgot the Orb of the Moons!');
+      return false;
+    }
+    this.objects.unlink(gate);
+    if (to[0] === 0 && to[1] === 0) {
+      this.say('sys', 'The gate leads nowhere, and fades.');
+      return true;
+    }
+    this.relocate(to[0], to[1], to[2]);
+    this.say('sys', 'The world shimmers...');
+    return true;
+  }
+
+  /** Light a torch and hold it, or put one out (U6UseCode::use_torch, simplified). */
+  private useTorch(o: Obj): void {
+    if (o.frameN === 1) {
+      o.frameN = 0;
+      if (o.loc === 'readied') o.loc = 'inv';
+      this.say('sys', 'The torch goes out.');
+      return;
+    }
+    const holder = o.loc === 'inv' || o.loc === 'readied' ? this.actors.get(o.holder) : this.player;
+    if (!holder) return;
+    if (o.loc === 'map') this.objects.toInventory(o, holder.id);
+    if (this.ready(o, holder)) {
+      const lit = this.objects.inventories[holder.id].find((t) => t.objN === OBJ.TORCH && t.loc === 'readied' && t.frameN === 0);
+      if (lit) lit.frameN = 1;
+      this.say('sys', 'The torch is lit.');
+    }
+  }
+
+  /** Whether a thing can be worn or held (Ultima VI). */
+  readiable(o: Obj): boolean {
+    return this.kind === 'u6' && READY_SLOT.has(o.objN);
+  }
+
+  /**
+   * Wear or hold a thing (Actor::add_readied_object): a slot each for head, neck, body and feet; two arms, a weapon
+   * held in both taking both; two hands for rings.
+   */
+  ready(o: Obj, a: Actor): boolean {
+    const slot = READY_SLOT.get(o.objN);
+    const what = this.objects.look(o);
+    if (slot === undefined || this.kind !== 'u6') {
+      this.say('sys', `${what} cannot be readied.`);
+      this.onChange();
+      return false;
+    }
+    const worn = this.objects.inventories[a.id].filter((r) => r.loc === 'readied' && r !== o).map((r) => READY_SLOT.get(r.objN) ?? -1);
+    const arms = worn.filter((w) => w === 3).length + worn.filter((w) => w === 4).length * 2;
+    const ok =
+      slot === 3 ? arms < 2 : slot === 4 ? arms === 0 : slot === 5 ? worn.filter((w) => w === 5).length < 2 : !worn.includes(slot);
+    if (!ok) {
+      this.say('sys', `${this.partyMemberName(a.id) || 'They'} cannot ready ${what}: take something off first.`);
+      this.onChange();
+      return false;
+    }
+    // A thing in a bag comes out to be held; a stack gives one of itself.
+    let item = o;
+    if (this.objects.isStackable(o) && o.qty > 1) {
+      o.qty--;
+      item = this.objects.create(o.objN, 1, o.quality);
+      item.frameN = o.frameN;
+    }
+    if (item.loc !== 'inv' || item.holder !== a.id) {
+      this.objects.unlink(item);
+      this.objects.inventories[a.id].unshift(item);
+      item.holder = a.id;
+    }
+    item.loc = 'readied';
+    this.say('sys', `${this.partyMemberName(a.id) || 'They'} readied ${what}.`);
+    this.onChange();
+    return true;
+  }
+
+  unready(o: Obj): void {
+    if (o.loc !== 'readied') return;
+    o.loc = 'inv';
+    this.say('sys', `Unreadied ${this.objects.look(o)}.`);
+    this.onChange();
   }
 
   /** Hand something to another member of the party. */
@@ -992,6 +1212,7 @@ export class Game implements ConvWorld {
       version: 1,
       clock: { ...this.clock },
       turns: this.turns,
+      light: this.lightTurns,
       party: this.party.map((m) => ({ id: m.actor.id, name: m.name })),
       flags: { karma: this.karma, quest: this.questFlag, garg: this.gargFlag, gender: this.gender },
       actors: this.actors.list.map((a) => [
@@ -1007,6 +1228,7 @@ export class Game implements ConvWorld {
   private restore(s: SaveState): void {
     Object.assign(this.clock, s.clock);
     this.turns = s.turns;
+    this.lightTurns = s.light ?? 0;
     this.karma = s.flags.karma;
     this.questFlag = s.flags.quest;
     this.gargFlag = s.flags.garg;

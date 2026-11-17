@@ -35,6 +35,11 @@ Sunset and sunrise glow orange.
 - **Tap to walk**: a tap walks there, round what is in the way, the way marked as it goes. A tap on a person walks up
   and talks; on a door, ladder, sign or chest, walks up and uses it. Walking into a shut door opens it. Tap the party
   to pass a turn or pick up what is underfoot.
+- **Fighting**: tap a foe to walk up and attack it - from as far as the weapon reaches, a bow from across a room -
+  or choose **Attack** and tap. The rest of the party fights by itself; blows land with the game's own hit
+  sparks, and arrows and thrown weapons fly. Monsters hatch from the game's eggs as the party travels.
+- **Magic**: **Cast** opens the spellbook of whoever has one readied: their magic points and reagents, and their
+  spells by circle with the words of power. A spell aimed at someone or somewhere asks for a tap on the map.
 - **Look, Talk, Use, Get**: choose one (the game's own icons), then tap where. **Pass** lets a turn go by; the
   last button opens the journal.
 - **Talking**: the speaker's face shows over the map (which shrinks to give the words room), and the foot becomes a
@@ -58,6 +63,8 @@ Ported from the C++ (each file's header names its source):
 | `src/game/actors.ts`, `u6tables.ts` | `actors/Actor*.cpp`, `U6ActorTypes.h`, `U6objects.h` (`npm run tables` regenerates) |
 | `src/game/converse.ts` | `Converse.cpp`, `ConverseInterpret.cpp` |
 | `src/game/game.ts` | parts of `Game.cpp`, `Event.cpp`, `Player.cpp`, `Party.cpp`, `SaveGame.cpp`, `usecode/U6UseCode.cpp` |
+| `src/game/combat.ts`, `u6combat.ts` | `data/scripts/u6/actor.lua` (attack, hit, damage, death, targets, monster set-up; `npm run tables` regenerates), `EggManager.cpp`, the temporary actors of `ActorManager.cpp` |
+| `src/game/magic.ts` | `Magic.cpp`, `data/scripts/u6/magic.lua` and `magic/circle_*/*.lua` |
 | `src/ui/mapview.ts` | `MapWindow.cpp` (drawing order, line of sight, wall reshaping), `GamePalette.cpp` |
 
 Working: loading a new game or an original saved game; the map, objects, animated tiles and cycling colours; line
@@ -70,10 +77,29 @@ people, schedules, conversations, faces (`mdfaces.lzc`, `faces.lzc`), palette, a
 (`system.lzc`), with Martian Dreams' doors. They have no parchment picture, so they take the plain frame. Their Lua
 usecode (most of what using things does in them) and the scenes behind their faces are not ported.
 
-Not ported yet: combat, magic, Nuvie's Lua scripts (which hold most of both), eggs and monster spawning, vehicles
-and horses, moongates, sound and music, the intro and ending, most other usecode, and creatures made of several
-parts (they draw as one tile). `tests/real.test.ts` runs on your copies put in
-`web/gamedata/ultima6/`, `savage/` and `martian/` (git-ignored): for each it loads a new game, saves and restores
-it, and talks with everyone who has a conversation - 199 in Ultima VI, 68 in Savage Empire, 99 in Martian Dreams.
+**Combat** follows Ultima VI's rules as Nuvie's Lua has them: the hit roll (dexterity, or strength for clubs and
+maces, against the foe's dexterity), weapon damage less a roll against readied armour, half damage for the creatures
+that take it, poison, experience for evil foes slain, bodies that hold what was carried, ammunition, missile walls,
+and death - the Avatar wakes in Lord British's castle with the fallen raised. Simplified: each fighter acts once a
+turn (not by movement points), monsters that cast fight bare-handed, and thrown weapons are not lost.
+
+**Magic** has Magic.cpp's checks - a readied spellbook holding the spell, a level and magic points as high as its
+circle, a reagent of each kind - and magic points come back each hour. Ported spells: Create Food, Douse, Harm,
+Heal, Help, Ignite, Light, Magic Arrow, Poison, Sleep, Unlock Magic, Fireball, Great Light, Mass Awaken, Mass Sleep,
+Great Heal, Locate, Explosion, Lightning, Chain Bolt, Kill and Resurrect; the other 58 are listed and cost their
+reagents, but say they are not yet ported. Torches can be lit and held, and Light and torches widen the party's
+light at night.
+
+**The Orb of the Moons** works as in Ultima VI once Lord British has told of it: use it from the Avatar's sheet,
+tap a square near the party, and a red moongate opens there that leads where that square says; step in.
+
+Not ported yet: most spells, most of Nuvie's other Lua scripts, vehicles and horses, the blue moongates of the
+moons, sound and music, the intro and ending, most other usecode, and the largest creatures (dragons, hydras, the
+silver serpent and ships, which draw as one tile).
+
+`tests/real.test.ts` runs on your copies put in `web/gamedata/ultima6/`, `savage/` and `martian/` (git-ignored).
+For each it loads a new game, saves and restores it, and talks with everyone who has a conversation (199 people in
+Ultima VI, 68 in Savage Empire, 99 in Martian Dreams). For Ultima VI it also hatches the opening gargoyles, fights a
+troll to the death, readies and unreadies, casts spells, and goes through a red moongate.
 
 Licensed as Nuvie is: GPL 2 or later.

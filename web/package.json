@@ -10,7 +10,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "tables": "node tools/gen-tables.mjs"
+    "tables": "node tools/gen-tables.mjs && node tools/gen-combat.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

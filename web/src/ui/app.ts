@@ -8,10 +8,11 @@ import { Game, type SaveState } from '../game/game.ts';
 import { invWeight } from '../game/inventory.ts';
 import type { Obj } from '../game/objects.ts';
 import { OBJ } from '../game/u6tables.ts';
+import { REAGENTS, reagentCounts, reagentNames, words, type Spell } from '../game/magic.ts';
 import { MapView } from './mapview.ts';
 import { haveIcons } from './theme.ts';
 
-type Mode = 'look' | 'talk' | 'use' | 'get' | null;
+type Mode = 'look' | 'talk' | 'use' | 'get' | 'attack' | 'cast' | 'where' | null;
 type Pane = 'log' | 'party';
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', text = ''): HTMLElementTagNameMap[K] => {
@@ -53,9 +54,11 @@ export class App {
   private readonly tabLog: HTMLButtonElement;
   private readonly tabParty: HTMLButtonElement;
   private pane: Pane = 'log';
+  /** A spell chosen in the book, waiting for where. */
+  private pending: { caster: Actor; spell: Spell } | null = null;
   private wasTalking = false;
   private mode: Mode = null;
-  private walk: { x: number; y: number; then: Mode | 'walk' } | null = null;
+  private walk: { x: number; y: number; then: Mode | 'walk'; foe?: Actor } | null = null;
   private walkTimer = 0;
   private seenLog = 0;
   private sheet: HTMLElement | null = null;
@@ -138,6 +141,18 @@ export class App {
     const p = g.player;
     const mode = this.mode;
     this.setMode(null);
+    if (mode === 'where' && g.askWhere) {
+      this.walk = null;
+      g.askWhere.then(sq.x, sq.y);
+      return;
+    }
+    if (mode === 'cast' && this.pending) {
+      const { caster, spell } = this.pending;
+      this.pending = null;
+      this.walk = null;
+      if (this.view.visible(sq.x, sq.y)) g.castSpell(caster, spell, sq.x, sq.y);
+      return;
+    }
     if (mode === 'look') {
       this.walk = null;
       if (this.view.visible(sq.x, sq.y)) g.look(sq.x, sq.y);
@@ -157,10 +172,11 @@ export class App {
       const a = g.actors.at(sq.x, sq.y, p.z);
       const o = g.objects.get(sq.x, sq.y, p.z);
       const door = g.objects.list(sq.x, sq.y, p.z)?.some((d) => g.objects.isDoor(d) && g.objects.isShut(d));
-      if (a && !a.inParty) then = 'talk';
+      if (a && !a.inParty) then = g.combat.hostile(a) ? 'attack' : 'talk';
       else if (door || (o && USABLE.has(o.objN) && !g.map.isPassable(sq.x, sq.y, p.z)) || (o && (o.objN === OBJ.LADDER || o.objN === OBJ.CAVE || o.objN === OBJ.HOLE))) then = 'use';
     }
-    this.walk = { ...sq, then };
+    const foe = then === 'attack' ? g.actors.at(sq.x, sq.y, p.z) ?? undefined : undefined;
+    this.walk = { ...sq, then, foe };
     this.step();
   }
 
@@ -176,7 +192,23 @@ export class App {
     const p = g.player;
     const beside = w.then !== 'walk';
     const near = Math.abs(w.x - p.x) <= 1 && Math.abs(w.y - p.y) <= 1;
-    if (beside && near) {
+    // A foe moves: follow them.
+    if (w.foe) {
+      if (!w.foe.alive || !w.foe.visible || w.foe.objN === 0 || w.foe.z !== g.player.z) {
+        this.walk = null;
+        this.mark();
+        return;
+      }
+      w.x = w.foe.x;
+      w.y = w.foe.y;
+    }
+    // An attack from wherever the weapon reaches.
+    if (w.then === 'attack' && g.attackAt(w.x, w.y)) {
+      this.walk = null;
+      this.mark();
+      return;
+    }
+    if (beside && near && w.then !== 'attack') {
       this.walk = null;
       this.mark();
       if (w.then === 'talk') g.talk(w.x, w.y);
@@ -208,7 +240,7 @@ export class App {
     const w = this.walk;
     this.view.marks = [];
     if (w && path) {
-      const color = w.then === 'talk' ? '#7fb8ff' : w.then === 'walk' ? '#ffd24a' : '#ffffff';
+      const color = w.then === 'talk' ? '#7fb8ff' : w.then === 'attack' ? '#ff4a3a' : w.then === 'walk' ? '#ffd24a' : '#ffffff';
       let { x, y } = this.game.player;
       for (const [dx, dy] of path.slice(0, -1)) {
         x += dx;
@@ -234,13 +266,14 @@ export class App {
       this.walk = null;
       g.move(d[0], d[1]);
     } else if (e.key === ' ') g.pass();
-    else if ('ltug'.includes(e.key)) this.setMode(({ l: 'look', t: 'talk', u: 'use', g: 'get' } as const)[e.key as 'l']);
+    else if (e.key === 'c') this.spellbook();
+    else if ('ltuga'.includes(e.key)) this.setMode(({ l: 'look', t: 'talk', u: 'use', g: 'get', a: 'attack' } as const)[e.key as 'l']);
   }
 
   private setMode(m: Mode): void {
     this.mode = m;
     this.modeTag.hidden = !m;
-    if (m) this.modeTag.textContent = `${m[0].toUpperCase() + m.slice(1)}: tap where`;
+    if (m) this.modeTag.textContent = m === 'where' && this.game.askWhere ? this.game.askWhere.label : m === 'cast' && this.pending ? `${this.pending.spell.name}: tap where` : `${m[0].toUpperCase() + m.slice(1)}: tap where`;
     this.footKey = '';
     this.drawFoot();
   }
@@ -254,6 +287,11 @@ export class App {
 
   private changed(): void {
     const g = this.game;
+    if (g.askWhere && this.mode !== 'where') {
+      this.sheet?.remove();
+      this.sheet = null;
+      this.setMode('where');
+    }
     this.view.render();
     this.status.textContent = `${String(g.clock.hour).padStart(2, '0')}:${String(g.clock.minute).padStart(2, '0')}`;
     // While someone talks, or a container stands open, the pane shows the log whatever was chosen.
@@ -365,6 +403,8 @@ export class App {
       const m = (label: string, mode: Mode, tile: number): HTMLButtonElement =>
         icon(btn(label, () => this.setMode(this.mode === mode ? null : mode), this.mode === mode ? 'on' : ''), tile);
       bar.append(
+        m('Attack', 'attack', 400),
+        icon(btn('Cast', () => this.spellbook()), 401),
         m('Look', 'look', 403), m('Talk', 'talk', 402), m('Use', 'use', 407), m('Get', 'get', 404),
         icon(btn('Pass', () => g.pass()), 408), icon(btn('Notes', () => this.journal()), 409),
       );
@@ -447,6 +487,8 @@ export class App {
               f();
               draw(null);
             };
+            if (o.loc === 'readied') acts.append(btn('Unready', done(() => g.unready(o))));
+            else if (g.readiable(o)) acts.append(btn('Ready', done(() => g.ready(o, a))));
             acts.append(btn('Use', done(() => g.useObj(o))), btn('Drop', done(() => g.drop(o))));
             for (const m of g.party) if (m.actor !== a) acts.append(btn(`Give to ${m.name}`, done(() => g.give(o, m.actor))));
             body.append(acts);
@@ -456,6 +498,62 @@ export class App {
         for (const o of inv) add(o, false);
       };
       draw(null);
+    });
+  }
+
+  /** The spellbook: who casts, their magic and reagents, and the spells in their book by circle. */
+  private spellbook(): void {
+    const g = this.game;
+    const casters = g.magic.casters();
+    this.open('Spellbook', (body) => {
+      const draw = (who: Actor | undefined): void => {
+        body.replaceChildren();
+        if (!who) {
+          body.append(el('p', '', 'No one in the party has a spellbook readied.'), el('p', 'small', 'Spellbooks and reagents are sold in the towns; ready the book from a member\'s sheet (Party, then their name).'));
+          return;
+        }
+        if (casters.length > 1) {
+          const seg = el('div', 'seg');
+          for (const c of casters) seg.append(btn(g.partyMemberName(c.id) || g.lookActor(c), () => draw(c), c === who ? 'on' : ''));
+          body.append(seg);
+        }
+        const counts = reagentCounts(g, who);
+        body.append(
+          el('div', 'partyhead', `Magic ${who.magic}/${g.magic.maxMagic(who)}  Level ${who.level}`),
+          el('p', 'small', REAGENTS.map((r, i) => `${r.name} ${counts[i]}`).join(', ')),
+        );
+        const known = g.magic.known(who);
+        if (!known.length) body.append(el('p', '', 'No spells in the spellbook.'));
+        for (let circle = 1; circle <= 8; circle++) {
+          const these = known.filter((s) => s.circle === circle);
+          if (!these.length) continue;
+          body.append(el('h3', '', `Circle ${circle}`));
+          for (const s of these) {
+            const why = g.magic.cannot(who, s);
+            const row = el('div', 'item spell');
+            const mid = el('div');
+            mid.append(el('div', '', s.name), el('div', 'small', `${words(s)}${reagentNames(s).length ? ' - ' + reagentNames(s).join(', ') : ''}`));
+            const b = btn('Cast', () => {
+              const aim = g.magic.aim(s);
+              if (aim === 'none') {
+                this.close();
+                g.castSpell(who, s);
+                return;
+              }
+              this.pending = { caster: who, spell: s };
+              this.close();
+              this.setMode('cast');
+            });
+            if (why) {
+              b.disabled = true;
+              b.title = why;
+            }
+            row.append(mid, b);
+            body.append(row);
+          }
+        }
+      };
+      draw(casters[0]);
     });
   }
 
