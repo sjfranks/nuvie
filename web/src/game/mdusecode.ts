@@ -230,8 +230,19 @@ export class MdUseCode {
       this.g.ready(o, a);
       return;
     }
-    if (o.quality >= 2) this.say('YOU_MAY_USE_THE_RUBY_SLIPPERS_TO_GO_HOME');
-    else {
+    if (o.quality >= 2) {
+      this.say('YOU_MAY_USE_THE_RUBY_SLIPPERS_TO_GO_HOME');
+      const g = this.g;
+      g.askChoice = {
+        label: 'Go home?',
+        options: ['Yes', 'No'],
+        then: (i) => {
+          g.askChoice = null;
+          if (i === 0) g.won = true; // play_end_sequence
+          g.onChange();
+        },
+      };
+    } else {
       this.say('CLICK');
       o.quality++;
     }
@@ -505,6 +516,10 @@ export class MdUseCode {
   /** After each turn (player_post_move_action): where the party stepped, the conveyor, the doors that open themselves. */
   turn(): void {
     const g = this.g;
+    if (this.endAfterTalk && !g.converse) {
+      this.endAfterTalk = false;
+      g.won = true;
+    }
     if (this.wakeAfterTalk && !g.converse) {
       this.wakeAfterTalk = false;
       this.wake();
@@ -610,6 +625,47 @@ export class MdUseCode {
     back: [number, number] | null;
   } | null = null;
   private wakeAfterTalk = false;
+
+  private endAfterTalk = false;
+
+  /** talk.lua's talk_script: what a conversation sets going. */
+  talkScript(n: number): void {
+    const g = this.g;
+    const at = (x: number, y: number, z: number, objN: number): Obj | undefined => (g.objects.list(x, y, z) ?? []).find((o) => o.objN === objN);
+    if (n === 1) {
+      // talk_script_fix_panels
+      let panels = 0;
+      for (const m of g.party) {
+        for (const o of g.objects.inventories[m.actor.id]) {
+          if (o.objN !== 458) continue;
+          panels++;
+          o.quality &= 0xfd;
+          o.qty = 4;
+        }
+      }
+      this.flag(0x39, 3, panels > 1);
+    } else if (n === 6) {
+      // open_gates_at_olympus_mons
+      const a = at(0x2c3, 0x1f3, 0, 181);
+      if (a) {
+        g.objects.move(a, 0x2c2, 0x1f3, 0);
+        a.frameN = 3;
+      }
+      const b = at(0x2c4, 0x1f3, 0, 181);
+      if (b) b.frameN = 7;
+    } else if (n === 7) {
+      const door = at(0x2c7, 0x1dc, 0, 152);
+      if (door) door.frameN = 7;
+    } else if (n === 9) this.endAfterTalk = true;
+    else if (n === 0x34 || n === 0x36) this.wakeAfterTalk = true;
+    else if (n === 0x35) {
+      const p = g.player;
+      for (let i = 0; i < 6; i++) {
+        const spot = [[0, -1], [1, 0], [0, 1], [-1, 0], [1, 1], [-1, -1], [1, -1], [-1, 1], [2, 0], [-2, 0]].map(([dx, dy]) => [p.x + dx, p.y + dy]).find(([x, y]) => g.canStand(x, y, p.z));
+        if (spot) g.combat.spawn(145, spot[0], spot[1], p.z, 0, 0x8);
+      }
+    }
+  }
 
   /** The dream, for a saved game. */
   saveDream(): unknown {

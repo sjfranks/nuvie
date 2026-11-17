@@ -1778,9 +1778,30 @@ export class Game implements ConvWorld {
       a.magic = h.int * 2;
       a.level = 3;
       a.exp = 0x172;
+    } else if (this.kind === 'md') {
+      // update_objlist_for_new_game_md: a man or a woman to look at, level 4, health strength twice and 96.
+      a.objN = a.baseObjN = h.female ? 344 : 343;
+      a.level = 4;
+      a.exp = 600;
+      a.hp = h.str * 2 + 4 * 24;
+      a.setDirection(a.direction);
     }
     a.hp = Math.min(a.hp, a.maxHp) || a.maxHp;
     this.onChange();
+  }
+
+  /** A conversation's call into the game's own scripts (Martian Dreams' talk.lua). */
+  talkScript(n: number): void {
+    if (this.kind === 'md') this.mdUse.talkScript(n);
+  }
+
+  /** A cutscene's lines (ScriptCutscene::load_text): one item of a .lzc file, a line a string. */
+  sceneText(file: string, item: number): string[] {
+    const data = this.files.get(file) ? new Lib(this.files.get(file)!, 4, true).item(item) : null;
+    if (!data) return [];
+    let t = '';
+    for (const c of data) t += String.fromCharCode(c);
+    return t.split('\r\n');
   }
 
   /** The palette's file. */

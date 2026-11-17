@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import type { GameFiles } from '../src/files/gamefiles.ts';
 import { Game } from '../src/game/game.ts';
 import { SPELLS } from '../src/game/u6combat.ts';
+import { interview } from '../src/ui/freud.ts';
 
 const GAMES = [
   ['Ultima 6', 'ultima6', 199],
@@ -477,6 +478,23 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     expect(g.party.length).toBe(3);
     expect(g.objects.inventories[p.id].length).toBe(carried);
     expect(g.clock.hour).toBe(8);
+  });
+
+  it.runIf(folder === 'martian')('makes the Avatar from Freud\'s interview', () => {
+    const g = new Game(load());
+    expect(g.fresh).toBe(true);
+    const it2 = interview(g.sceneText('scenetxt.lzc', 5), (lo) => lo);
+    let r = it2.next('');
+    let asked = 0;
+    while (!r.done) {
+      if (r.value.ask !== 'go') asked++;
+      r = it2.next(r.value.ask === 'name' ? 'Nellie' : 'b');
+    }
+    expect(asked).toBeGreaterThanOrEqual(5);
+    g.createHero({ ...r.value, face: 0 });
+    const a = g.player;
+    expect([g.playerName(), g.gender, a.objN, a.level]).toEqual(['Nellie', 1, 344, 4]);
+    expect(a.hp).toBe(a.strength * 2 + 96);
   });
 
   it.runIf(folder === 'ultima6')('boards a skiff, sails it, goes ashore; rides a horse', () => {

@@ -12,6 +12,7 @@ import { USED_IN_PLACE } from '../game/usecode.ts';
 import { MD_IN_PLACE } from '../game/mdusecode.ts';
 import { REAGENTS, reagentCounts, reagentNames, words, type Spell } from '../game/magic.ts';
 import { Gypsy } from './gypsy.ts';
+import { interview, type Hero, type Step } from './freud.ts';
 import { MapView } from './mapview.ts';
 import { haveIcons } from './theme.ts';
 import { Music } from '../audio/music.ts';
@@ -180,6 +181,7 @@ export class App {
     this.layout();
     this.changed();
     if (game.fresh && game.kind === 'u6') this.creation();
+    if (game.fresh && game.kind === 'md') this.freud();
   }
 
   // ---- a new Avatar (intro.lua's create_character) ----
@@ -233,6 +235,47 @@ export class App {
       go.append(btn('Sit before the gypsy', () => this.gypsy(name, female, face), 'primary'));
       body.append(go);
     });
+  }
+
+  /** Martian Dreams' new Avatar: Freud's interview aboard the capsule (intro.lua's create_character). */
+  private freud(): void {
+    const g = this.game;
+    const lines = g.sceneText('scenetxt.lzc', 5);
+    if (lines.length < 60) return;
+    const it = interview(lines, (lo, hi) => lo + g.random(hi - lo + 1));
+    const show = (r: IteratorResult<Step, Hero>): void => {
+      if (r.done) {
+        g.createHero({ ...r.value, face: 0 });
+        this.close();
+        return;
+      }
+      const step = r.value;
+      this.open('Sigmund Freud', (body) => {
+        body.append(el('p', step.freud ? 'speech' : '', step.text));
+        const row = el('div', step.ask === 'go' ? 'row' : 'answers');
+        if (step.ask === 'name') {
+          const form = el('form');
+          form.className = 'row';
+          const input = el('input');
+          input.maxLength = 13;
+          input.placeholder = 'Your name';
+          const ok = btn('Answer', () => {}, 'primary');
+          ok.type = 'submit';
+          form.append(input, ok);
+          form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            if (input.value.trim()) show(it.next(input.value));
+          });
+          body.append(form);
+          setTimeout(() => input.focus(), 50);
+          return;
+        }
+        if (step.ask === 'go') row.append(btn('Continue', () => show(it.next('')), 'primary'));
+        else for (const k of step.ask === 'ab' ? ['a', 'b'] : ['a', 'b', 'c']) row.append(btn(k.toUpperCase(), () => show(it.next(k))));
+        body.append(row);
+      });
+    };
+    show(it.next(''));
   }
 
   private gypsy(name: string, female: boolean, face: number): void {
@@ -972,6 +1015,7 @@ export class App {
   /** The game is won: ending.lua's scenes, as pages of its words. */
   private ending(): void {
     const g = this.game;
+    if (g.kind === 'md') return this.mdEnding();
     const name = g.playerName();
     const pages = [
       'Tremors shake the shrine as the Vortex Cube draws the Codex into the Ethereal Void. A glowing portal springs from the floor!',
@@ -1020,6 +1064,29 @@ export class App {
         g.won = false;
         this.music.theme = null;
         this.music.update();
+      };
+    };
+    page(0);
+  }
+
+  /** Martian Dreams' ending (ending.lua): its lines from scenetxt.lzc, a page each. */
+  private mdEnding(): void {
+    const g = this.game;
+    const pages = g.sceneText('scenetxt.lzc', 3).filter((l) => l.trim());
+    const page = (i: number): void => {
+      this.open(i < pages.length ? 'Home' : 'The end', (body) => {
+        body.append(el('p', '', i < pages.length ? pages[i] : `Well done, ${g.playerName()}. Thou mayest go on exploring Mars.`));
+        const row = el('div', 'row');
+        row.append(btn(i < pages.length ? 'Continue' : 'Close', () => {
+          if (i < pages.length) {
+            this.onClose = null;
+            page(i + 1);
+          } else this.close();
+        }, 'primary'));
+        body.append(row);
+      });
+      this.onClose = () => {
+        g.won = false;
       };
     };
     page(0);

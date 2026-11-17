@@ -63,6 +63,8 @@ export interface ConvWorld {
   /** The name of the party member who is actor `n`. */
   partyMemberName(n: number): string;
   partyAdd(a: Actor): void;
+  /** A game's own script run from a conversation (Martian Dreams' talk_script). */
+  talkScript?(n: number): void;
   partyRemove(a: Actor): void;
   /** What an actor is called when looked at ("a guard"). */
   lookActor(a: Actor): string;
@@ -659,6 +661,10 @@ export class Converse {
         this.wait(this.declT === OP.SVAR ? { type: 'text' } : { type: 'number' });
         break;
       }
+      case 0xd1:
+        // MDOP_MISC_ACTION: Martian Dreams' talk scripts (talk.lua).
+        this.w.talkScript?.(pop());
+        break;
       case OP.INPUTNUM:
         this.declV = pop();
         this.declT = pop();

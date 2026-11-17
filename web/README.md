@@ -128,7 +128,11 @@ usecode.lua and dreamworld.lua have it: fit the headgear, power it with radium, 
 Avatar dreams alone - empty-handed, the party waiting - from teleporter to teleporter through the dream's stages (Your
 Mother, the minotaur's pitcher shop); a dream quest done (Lowell's mirror, Twain's manuscript, Melies' door) or a
 nightmare ends it, and the Avatar wakes at eight with the party and their things. A companion in the seat dreams
-until dawn. Not yet: the ruby slippers' way home, and dream stages Nuvie left unfinished.
+until dawn. The ruby slippers, clicked thrice, offer the way home, and the
+ending's words follow (scenetxt.lzc); conversations run talk.lua's scripts - fixing the panels, opening the gates at
+Olympus Mons and the dream machine's door, the monster footprints, the end, waking from a dream. A new game begins
+with Freud's interview in the capsule (intro.lua's create_character): a name, father or mother, and the questions
+whose answers set strength, dexterity and intelligence. Not yet: the dream stages Nuvie left unfinished.
 
 Savage Empire's usecode.lua has only a little in use, and that is ported: corn from a corn stalk, clay with a digging
 stick, and a soft pot shaped from clay.
