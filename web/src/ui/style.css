@@ -137,3 +137,5 @@ button:disabled { opacity: .45; }
   .mapbox { width: calc(min(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom), 58vw) - 2 * var(--edge)); }
   .say { max-height: 60dvh; }
 }
+
+.overhead { display: block; width: 100%; max-width: 512px; aspect-ratio: 1; image-rendering: pixelated; border: 2px solid #000; margin: 0 auto; }

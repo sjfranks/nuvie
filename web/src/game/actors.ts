@@ -40,6 +40,13 @@ for (const r of ACTOR_TYPES) {
 }
 /** Creatures two squares long, their back half a square behind them (U6Actor::init_splitactor). */
 export const SPLIT: ReadonlySet<number> = new Set([426, 427, 428, 429, 430, 431]);
+export const SHIP = 412;
+export const DRAGON = 411;
+export const HYDRA = 374;
+/** The hydra's tentacles are another kind of object (OBJ_U6_HYDRA_BODY). */
+export const HYDRA_BODY = 425;
+/** Every kind that fills more than its own square. */
+export const MANY_SQUARES: ReadonlySet<number> = new Set([...SPLIT, SHIP, DRAGON, HYDRA]);
 
 const DEFAULT_TYPE: ActorType = { framesPerDir: 0, tilesPerDir: 0, tilesPerFrame: 1, tileStart: 0 };
 
@@ -112,15 +119,44 @@ export class Actor {
     this.frameN = t.tileStart + d * t.tilesPerDir + this.walkFrame * t.tilesPerFrame + t.tilesPerFrame - 1;
   }
 
-  /** Where a two-square creature's back half is, and its frame (set_direction_of_surrounding_splitactor_objs). */
-  back(): { x: number; y: number; frame: number } | null {
-    if (this.kind !== 'u6' || !SPLIT.has(this.objN)) return null;
-    const t = TYPES.get(this.objN) ?? DEFAULT_TYPE;
+  /** What the actor was before mounting a horse. */
+  baseObjN = 0;
+
+  /**
+   * The squares an actor fills beyond its own, with the frame drawn on each: a two-square creature's back half
+   * (U6Actor::init_splitactor), a ship's bow and stern (set_direction_of_surrounding_ship_objs).
+   */
+  parts(): { x: number; y: number; frame: number; objN?: number }[] {
+    if (this.kind !== 'u6') return [];
     const w = this.z === 0 ? 1023 : 255;
-    const [dx, dy] = [[0, 1], [-1, 0], [0, -1], [1, 0]][this.direction & 3];
+    const t = TYPES.get(this.objN) ?? DEFAULT_TYPE;
+    const [fx, fy] = [[0, -1], [1, 0], [0, 1], [-1, 0]][this.direction & 3];
+    const step = this.direction * t.tilesPerDir + t.tilesPerFrame - 1;
+    if (this.objN === SHIP) {
+      return [
+        { x: (this.x + fx) & w, y: (this.y + fy) & w, frame: step },
+        { x: (this.x - fx) & w, y: (this.y - fy) & w, frame: 16 + step },
+      ];
+    }
+    if (this.objN === DRAGON) {
+      // Head before, tail behind, a wing to each side (set_direction_of_surrounding_dragon_objs).
+      const [lx, ly] = [fy, -fx];
+      return [
+        { x: (this.x + fx) & w, y: (this.y + fy) & w, frame: 8 + step },
+        { x: (this.x - fx) & w, y: (this.y - fy) & w, frame: 16 + step },
+        { x: (this.x + lx) & w, y: (this.y + ly) & w, frame: 24 + step },
+        { x: (this.x - lx) & w, y: (this.y - ly) & w, frame: 32 + step },
+      ];
+    }
+    if (this.objN === HYDRA) {
+      // Eight tentacles round the body, from the north clockwise (U6Actor::init_hydra).
+      const ring = [[0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1]];
+      return ring.map(([dx, dy], i) => ({ x: (this.x + dx) & w, y: (this.y + dy) & w, frame: i * 4, objN: HYDRA_BODY }));
+    }
+    if (!SPLIT.has(this.objN)) return [];
     // A "mutant" (the Pushme Pullyu) has a second front where the back would be.
-    const frame = this.objFlags & 0x40 ? ((this.direction + 2) & 3) * t.tilesPerDir + t.tilesPerFrame - 1 : 8 + this.direction * t.tilesPerDir + t.tilesPerFrame - 1;
-    return { x: (this.x + dx) & w, y: (this.y + dy) & w, frame };
+    const frame = this.objFlags & 0x40 ? ((this.direction + 2) & 3) * t.tilesPerDir + t.tilesPerFrame - 1 : 8 + step;
+    return [{ x: (this.x - fx) & w, y: (this.y - fy) & w, frame }];
   }
 
   /** Martian Dreams' and Savage Empire's walk (MDActor::set_direction, Actor::set_direction). */
@@ -180,6 +216,7 @@ export class Actors {
       const t = TYPES.get(a.objN);
       a.direction = this.kind === 'u6' && t && t.tilesPerDir ? Math.floor((a.frameN - t.tileStart) / t.tilesPerDir) & 3 : (a.frameN >> 2) & 3;
       a.visible = a.objN !== 0;
+      a.baseObjN = a.objN;
       if (a.objN === 0) a.x = a.y = a.z = 0;
       a.objFlags = r1(i);
       a.statusFlags = r1(0x800 + i);
@@ -240,9 +277,8 @@ export class Actors {
     for (const a of this.list) {
       if (a.z !== z || !a.visible || !a.alive || a.objN === 0) continue;
       if (a.x === x && a.y === y) return a;
-      if (!behind && SPLIT.has(a.objN)) {
-        const b = a.back();
-        if (b && b.x === x && b.y === y) behind = a;
+      if (!behind && MANY_SQUARES.has(a.objN)) {
+        if (a.parts().some((b) => b.x === x && b.y === y)) behind = a;
       }
     }
     return behind;

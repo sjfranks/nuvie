@@ -6,10 +6,11 @@
 import type { GameFiles } from '../files/gamefiles.ts';
 import { Lib } from '../files/lib.ts';
 import { lzwDecompress, lzwFile } from '../files/lzw.ts';
-import { Actor, Actors, SPLIT, STATUS_IN_PARTY, WT } from './actors.ts';
+import { Actor, Actors, HYDRA, HYDRA_BODY, MANY_SQUARES, SHIP, STATUS_IN_PARTY, WT } from './actors.ts';
 import { Converse, ConverseLib, checkKeywords, type ConvAsk, type ConvWorld } from './converse.ts';
 import { Combat } from './combat.ts';
 import { Magic, type Spell } from './magic.ts';
+import type { SfxId } from '../audio/sfx.ts';
 import { invCount, invDelete, invFind, invNew, invWeight } from './inventory.ts';
 import { Journal, type JournalData } from './journal.ts';
 import { detectKind, mdPortrait, OFFSETS, PALETTE, type Kind } from './kind.ts';
@@ -51,6 +52,7 @@ export interface SaveState {
   clock: Clock;
   turns: number;
   light?: number;
+  moonstones?: [number, number, number][];
   party: { id: number; name: string }[];
   flags: { karma: number; quest: number; garg: number; gender: number };
   actors: number[][];
@@ -73,6 +75,15 @@ const RED_GATES: readonly [number, number, number][] = [
   [0x29b, 0x43, 0],
 ];
 const LORD_BRITISH = 5;
+const MOONGATE = 85;
+const TRAMMEL_PHASE = 1.75;
+const FELUCCA_PHASE = 1.1666666666666667;
+const SKIFF = 414;
+const RAFT = 415;
+const BOATS: ReadonlySet<number> = new Set([SHIP, SKIFF, RAFT]);
+const HORSE = 430;
+const HORSE_WITH_RIDER = 431;
+const SHIP_DEED = 149;
 const ORB_FLAG = 0x20;
 
 const READABLE: ReadonlySet<number> = new Set([
@@ -99,6 +110,18 @@ export class Game implements ConvWorld {
   readonly magic: Magic;
   /** Turns left of a Light spell's glow round the party. */
   lightTurns = 0;
+  /** Turns left of Infravision: everyone is seen, even in the dark. */
+  infraTurns = 0;
+  /** Until when (performance.now()) X-ray shows through walls. */
+  xrayUntil = 0;
+  /** What Vanish took, for Reappear. */
+  vanished: { objN: number; frameN: number } | null = null;
+  /** Where the eight moonstones lie, by phase (objlist 0x1c1b); a blue moongate stands at each while a moon is up. */
+  moonstones: [number, number, number][] = [];
+  /** Where the game's sounds go (the interface plays them): a sound's name, and for casting its circle. */
+  sfx: (id: SfxId, circle?: number) => void = () => {};
+  /** The Peer spell asks for the map seen from above. */
+  peer = false;
   readonly clock: Clock;
   party: PartyMember[] = [];
   log: LogLine[] = [];
@@ -144,6 +167,10 @@ export class Game implements ConvWorld {
     const t = OFFSETS[this.kind].gametime;
     this.clock = { minute: r1(t) % 60, hour: r1(t + 1) % 24, day: Math.max(1, r1(t + 2)), month: Math.max(1, r1(t + 3)), year: r1(t + 4) | (r1(t + 5) << 8) };
     this.questFlag = r1(0x1bf1);
+    if (this.kind === 'u6') {
+      const r2 = (o: number): number => r1(o) | (r1(o + 1) << 8);
+      for (let i = 0; i < 8; i++) this.moonstones.push([r2(0x1c1b + i * 6), r2(0x1c1d + i * 6), r2(0x1c1f + i * 6)]);
+    }
     this.karma = r1(0x1bf9);
     this.gargFlag = r1(0x1c5f);
     this.gender = this.kind === 'se' ? 0 : r1(OFFSETS[this.kind].gender);
@@ -169,6 +196,7 @@ export class Game implements ConvWorld {
     if (saved) this.restore(saved);
     else this.say('sys', 'The world is loaded. Tap the map to walk.');
     this.combat.update(!saved);
+    if (this.kind === 'u6' && !saved) this.updateMoongates();
   }
 
   /** Read every object, and return the objlist: a new game's packed files, else a saved game's. */
@@ -231,14 +259,15 @@ export class Game implements ConvWorld {
     return objlist;
   }
 
-  /** The back halves of two-square creatures are drawn with them (Actor.back), so their objects leave the map. */
+  /** The other squares of large creatures are drawn with them (Actor.parts), so their objects leave the map. */
   private gatherBackHalves(): void {
     for (const a of this.actors.list) {
-      if (!SPLIT.has(a.objN) || !a.visible) continue;
+      if (!MANY_SQUARES.has(a.objN) || a.objN === SHIP || !a.visible) continue;
+      const kind = a.objN === HYDRA ? HYDRA_BODY : a.objN;
       for (let dy = -1; dy <= 1; dy++) {
         for (let dx = -1; dx <= 1; dx++) {
           for (const o of [...(this.objects.list(a.x + dx, a.y + dy, a.z) ?? [])]) {
-            if (o.objN === a.objN && (o.quality === a.id || o.quality === 0)) this.objects.unlink(o);
+            if (o.objN === kind && (o.quality === a.id || o.quality === 0)) this.objects.unlink(o);
           }
         }
       }
@@ -246,6 +275,12 @@ export class Game implements ConvWorld {
   }
 
   // ---- the party ----
+
+  /** The boat the party is aboard (actor 0, as in the original), or null. */
+  get vehicle(): Actor | null {
+    const v = this.actors.get(0);
+    return v && v.objN !== 0 && v.visible && BOATS.has(v.objN) ? v : null;
+  }
 
   get player(): Actor {
     return this.party[0].actor;
@@ -374,7 +409,10 @@ export class Game implements ConvWorld {
         }
       }
       this.updateSchedules();
-      if (this.kind === 'u6') this.magic.hourly();
+      if (this.kind === 'u6') {
+        this.magic.hourly();
+        this.updateMoongates();
+      }
     }
   }
 
@@ -403,6 +441,7 @@ export class Game implements ConvWorld {
   /** Step the party one square. Returns whether a turn passed. */
   move(dx: number, dy: number): boolean {
     if (this.converse) return false;
+    if (this.vehicle) return this.sail(dx, dy);
     const p = this.player;
     const nx = wrap(p.x + dx, p.z);
     const ny = wrap(p.y + dy, p.z);
@@ -427,6 +466,7 @@ export class Game implements ConvWorld {
       }
       p.setDirection(facing(dx, dy));
       this.say('sys', 'Blocked!');
+      this.sfx('blocked');
       this.onChange();
       return false;
     }
@@ -463,6 +503,7 @@ export class Game implements ConvWorld {
     this.turns++;
     if (this.turns % 2 === 0) this.advance(1);
     if (this.lightTurns > 0) this.lightTurns--;
+    if (this.infraTurns > 0) this.infraTurns--;
     this.combat.update();
     this.combat.round();
     this.moveNpcs();
@@ -507,7 +548,9 @@ export class Game implements ConvWorld {
     const W = R * 2 + 1;
     const prev = new Int16Array(W * W).fill(-1);
     const idx = (x: number, y: number): number => (y - p.y + R) * W + (x - p.x + R);
+    const boat = this.vehicle;
     const ok = (x: number, y: number): boolean => {
+      if (boat) return this.afloat(boat, x, y);
       if (this.map.isPassable(x, y, p.z)) {
         const a = this.actors.at(wrap(x, p.z), wrap(y, p.z), p.z);
         return !a || a.inParty;
@@ -913,6 +956,15 @@ export class Game implements ConvWorld {
   /** Use what is at a square (beside the party), or an object carried. */
   use(x: number, y: number): void {
     const p = this.player;
+    if (this.vehicle) {
+      this.disembark(x, y);
+      return;
+    }
+    const steed = this.actors.at(x, y, p.z);
+    if (steed && (steed.objN === HORSE || (steed === p && p.objN === HORSE_WITH_RIDER))) {
+      this.horse(steed);
+      return;
+    }
     const l = this.objects.list(x, y, p.z);
     const door = l?.find((o) => this.objects.isDoor(o));
     const o = door ?? this.objects.get(x, y, p.z);
@@ -954,7 +1006,10 @@ export class Game implements ConvWorld {
         this.say('sys', o.container.length ? `Searching the ${name}: ${o.container.map((c) => this.objects.look(c)).join(', ')}.` : `The ${name} is empty.`);
       }
     } else if (o.objN === OBJ.TORCH && this.kind === 'u6') this.useTorch(o);
-    else if (o.objN === OBJ.ORB_OF_THE_MOONS && this.kind === 'u6') {
+    else if (BOATS.has(o.objN) && this.kind === 'u6') {
+      this.board(o);
+      return;
+    } else if (o.objN === OBJ.ORB_OF_THE_MOONS && this.kind === 'u6') {
       this.useOrb();
       return;
     }
@@ -1016,6 +1071,174 @@ export class Game implements ConvWorld {
     this.endTurn();
   }
 
+  // ---- boats and horses (U6UseCode::use_boat, use_horse) ----
+
+  /** Board a ship, skiff or raft beside the party: it becomes the party's vehicle, and the party goes aboard. */
+  private board(o: Obj): void {
+    const p = this.player;
+    let centre = o;
+    if (o.objN === SHIP) {
+      // A ship is three objects; its middle (frames 8 to 15) is the ship.
+      const near: Obj[] = [];
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) near.push(...(this.objects.list(o.x + dx, o.y + dy, o.z) ?? []));
+      const mid = [o, ...near].find((n) => n.objN === SHIP && n.frameN >= 8 && n.frameN < 16);
+      if (!mid) {
+        this.say('sys', 'Ship not usable.');
+        this.onChange();
+        return;
+      }
+      centre = mid;
+    } else if (!this.map.isWater(o.x, o.y, o.z) && !this.map.tile(o.x, o.y, o.z).water) {
+      this.say('sys', 'You must place it in water first.');
+      this.onChange();
+      return;
+    }
+    if (o.loc !== 'map') {
+      this.say('sys', 'Not usable.');
+      this.onChange();
+      return;
+    }
+    // Beside any part of it: a ship's bow and stern reach a square either side of its middle.
+    if (Math.max(Math.abs(centre.x - p.x), Math.abs(centre.y - p.y)) > (centre.objN === SHIP ? 3 : 2)) {
+      this.say('sys', 'Out of range.');
+      this.onChange();
+      return;
+    }
+    if (centre.quality !== 0) {
+      if (!this.party.some((m) => invFind(this.objects, m.actor.id, SHIP_DEED, centre.quality, true))) {
+        this.say('sys', 'A deed is required.');
+        this.onChange();
+        return;
+      }
+      centre.quality = 0;
+    }
+    const v = this.actors.get(0)!;
+    v.objN = centre.objN;
+    v.baseObjN = centre.objN;
+    v.frameN = centre.frameN;
+    v.direction = centre.objN === SHIP ? ((centre.frameN - 8) >> 1) & 3 : centre.objN === SKIFF ? centre.frameN & 3 : 0;
+    [v.x, v.y, v.z] = [centre.x, centre.y, centre.z];
+    v.hp = centre.objN === SHIP ? centre.qty || 100 : 10;
+    v.worktype = WT.PLAYER;
+    v.statusFlags = 0x40; // good
+    v.visible = true;
+    v.setDirection(v.direction);
+    // The ship's bow and stern go with it.
+    if (centre.objN === SHIP) for (const part of v.parts()) for (const n of [...(this.objects.list(part.x, part.y, v.z) ?? [])]) if (n.objN === SHIP) this.objects.unlink(n);
+    this.objects.unlink(centre);
+    for (const m of this.party) {
+      [m.actor.x, m.actor.y, m.actor.z] = [v.x, v.y, v.z];
+      m.actor.visible = false;
+    }
+    this.say('sys', `Board the ${this.tiles.look(this.objects.objToTile[centre.objN], 0, false)}.`);
+    this.endTurn();
+  }
+
+  /**
+   * Whether a boat can lie on a square (U6Actor::check_move): water, nothing else there, and for a ship open water -
+   * not the shore's tiles (16 to 47).
+   */
+  afloat(v: Actor, x: number, y: number): boolean {
+    const other = this.actors.at(wrap(x, v.z), wrap(y, v.z), v.z);
+    if (other && other !== v) return false;
+    if (!this.map.isWater(x, y, v.z)) return false;
+    const n = this.map.tileNum(x, y, v.z);
+    return !(v.objN === SHIP && n >= 16 && n <= 47);
+  }
+
+  /** Sail a square: water only, the party aboard going with the boat. */
+  private sail(dx: number, dy: number): boolean {
+    const v = this.vehicle!;
+    const d = facing(dx, dy);
+    const [ox, oy, od] = [v.x, v.y, v.direction];
+    // A ship turns before it moves.
+    const turning = v.objN === SHIP && d !== v.direction;
+    if (!turning) {
+      v.x = wrap(v.x + dx, v.z);
+      v.y = wrap(v.y + dy, v.z);
+    }
+    v.setDirection(v.objN === SHIP ? d : v.objN === SKIFF ? d : 0);
+    if (!this.afloat(v, v.x, v.y) || v.parts().some((q) => !this.afloat(v, q.x, q.y))) {
+      [v.x, v.y] = [ox, oy];
+      v.setDirection(od);
+      this.say('sys', 'Blocked!');
+      this.sfx('blocked');
+      this.onChange();
+      return false;
+    }
+    for (const m of this.party) [m.actor.x, m.actor.y] = [v.x, v.y];
+    this.endTurn();
+    return true;
+  }
+
+  /** Step off the boat onto land beside it; the boat stays where it is. */
+  disembark(x: number, y: number): void {
+    const v = this.vehicle;
+    if (!v) return;
+    let land: [number, number] | null = null;
+    const isLand = (lx: number, ly: number): boolean => this.map.isPassable(lx, ly, v.z) && !this.map.tile(lx, ly, v.z).water && !this.actors.at(lx, ly, v.z);
+    if (Math.max(Math.abs(x - v.x), Math.abs(y - v.y)) <= 1 && isLand(x, y)) land = [x, y];
+    for (let dy = -1; dy <= 1 && !land; dy++) for (let dx = -1; dx <= 1 && !land; dx++) if (isLand(v.x + dx, v.y + dy)) land = [v.x + dx, v.y + dy];
+    if (!land) {
+      this.say('sys', 'Only next to land.');
+      this.onChange();
+      return;
+    }
+    // The boat is objects on the map again (a ship its three).
+    const put = (objN: number, frame: number, px: number, py: number, qty: number): void => {
+      const o = this.objects.create(objN, qty, 0);
+      o.frameN = frame;
+      [o.x, o.y, o.z] = [px, py, v.z];
+      this.objects.add(o);
+    };
+    put(v.objN, v.frameN, v.x, v.y, v.objN === SHIP ? v.hp : 0);
+    if (v.objN === SHIP) for (const q of v.parts()) put(SHIP, q.frame, q.x, q.y, 150);
+    Object.assign(v, { objN: 0, visible: false, worktype: 0, x: 0, y: 0, z: 0 });
+    for (const m of this.party) m.actor.visible = true;
+    this.relocate(land[0], land[1], v.z === 0 ? this.player.z : this.player.z);
+    this.say('sys', 'The party goes ashore.');
+    this.endTurn();
+  }
+
+  /** Mount a horse beside the leader, or get down from one (only horses that roam may be ridden). */
+  private horse(steed: Actor): void {
+    const p = this.player;
+    if (steed === p) {
+      p.objN = p.baseObjN && p.baseObjN !== HORSE_WITH_RIDER ? p.baseObjN : OBJ.AVATAR;
+      p.setDirection(p.direction);
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if ((dx || dy) && this.canStand(p.x + dx, p.y + dy, p.z)) {
+            this.combat.spawn(HORSE, wrap(p.x + dx, p.z), wrap(p.y + dy, p.z), p.z, 1, 0xc);
+            this.say('sys', 'Dismount.');
+            this.endTurn();
+            return;
+          }
+        }
+      }
+      this.say('sys', 'Dismount.');
+      this.endTurn();
+      return;
+    }
+    if (steed.id < 203) {
+      this.say('sys', 'Horse not boardable!');
+      this.onChange();
+      return;
+    }
+    if (Math.max(Math.abs(steed.x - p.x), Math.abs(steed.y - p.y)) > 1) {
+      this.say('sys', 'Out of range.');
+      this.onChange();
+      return;
+    }
+    p.baseObjN = p.objN;
+    [p.x, p.y] = [steed.x, steed.y];
+    Object.assign(steed, { objN: 0, visible: false, x: 0, y: 0, z: 0, worktype: 0 });
+    p.objN = HORSE_WITH_RIDER;
+    p.setDirection(p.direction);
+    this.say('sys', 'Mount the horse.');
+    this.endTurn();
+  }
+
   /**
    * The Orb of the Moons (U6UseCode::use_orb): once Lord British has told of it, it opens a red moongate on a square
    * near the party, and where the gate leads is told by which square.
@@ -1053,8 +1276,44 @@ export class Game implements ConvWorld {
     this.onChange();
   }
 
-  /** Stepping into a red moongate (U6UseCode::enter_moongate): away, if it goes anywhere. */
+  /** The moons' phases and places in the sky (Weather::is_moon_visible, U6UseCode::enter_moongate). */
+  private moons(): { trammel: number; felucca: number; posT: number; posF: number } {
+    const { day, hour } = this.clock;
+    const trammel = Math.round((day - 1) / TRAMMEL_PHASE) % 8;
+    const pb = ((day - 1) % Math.round(FELUCCA_PHASE * 8)) - 1;
+    const felucca = pb >= 0 ? pb : 0;
+    return { trammel, felucca, posT: (hour + 1 + 3 * trammel) % 24, posF: (((hour - 1 + 3 * felucca) % 24) + 24) % 24 };
+  }
+
+  /** Blue moongates stand at the moonstones while either moon is up (update_moongates in init.lua). */
+  updateMoongates(): void {
+    const m = this.moons();
+    const show = (m.posT >= 5 && m.posT <= 19) || (m.posF >= 5 && m.posF <= 19);
+    for (const [x, y, z] of this.moonstones) {
+      if (x === 0 && y === 0) continue;
+      const gate = this.objects.list(x, y, z)?.find((o) => o.objN === MOONGATE);
+      if (show && !gate) {
+        const o = this.objects.create(MOONGATE, 1, 0);
+        o.frameN = 1;
+        [o.x, o.y, o.z] = [x, y, z];
+        this.objects.add(o);
+      } else if (!show && gate) this.objects.unlink(gate);
+    }
+  }
+
+  /** Stepping into a moongate (U6UseCode::enter_moongate): a red one where its place says, a blue one where the moons do. */
   private enterGate(x: number, y: number, z: number): boolean {
+    const blue = this.objects.list(x, y, z)?.find((o) => o.objN === MOONGATE && o.x === x);
+    if (blue) {
+      // The moon nearer the top of the sky chooses the moonstone.
+      const m = this.moons();
+      const phase = Math.abs(m.posT - 12) < Math.abs(m.posF - 12) ? m.trammel : m.felucca;
+      const to = 8 - phase < 8 ? this.moonstones[8 - phase] : undefined;
+      if (!to || (to[0] === 0 && to[1] === 0)) return false;
+      this.relocate(to[0], to[1], to[2]);
+      this.say('sys', 'The world shimmers...');
+      return true;
+    }
     const gate = this.objects.list(x, y, z)?.find((o) => o.objN === OBJ.RED_GATE && o.x === x);
     if (!gate) return false;
     const to = RED_GATES[gate.quality] ?? RED_GATES[0];
@@ -1213,6 +1472,7 @@ export class Game implements ConvWorld {
       clock: { ...this.clock },
       turns: this.turns,
       light: this.lightTurns,
+      moonstones: this.moonstones,
       party: this.party.map((m) => ({ id: m.actor.id, name: m.name })),
       flags: { karma: this.karma, quest: this.questFlag, garg: this.gargFlag, gender: this.gender },
       actors: this.actors.list.map((a) => [
@@ -1229,6 +1489,7 @@ export class Game implements ConvWorld {
     Object.assign(this.clock, s.clock);
     this.turns = s.turns;
     this.lightTurns = s.light ?? 0;
+    if (s.moonstones) this.moonstones = s.moonstones;
     this.karma = s.flags.karma;
     this.questFlag = s.flags.quest;
     this.gargFlag = s.flags.garg;

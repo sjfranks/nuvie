@@ -23,6 +23,13 @@ With your copy of the game the interface takes its look from the game's own file
 map, the pane and every sheet), its scroll's ink and red keywords, and its command icons on the buttons. None of it
 is in this repository; the demo world uses the same colours with a plain frame.
 
+**Music** (Ultima VI) is the game's own: its `.m` songs played by a port of AdPlug's Ultima 6 player (`u6m.cpp`) on
+DOSBox's FM synthesiser compiled to WebAssembly ([@malvineous/opl](https://github.com/Malvineous/opljs)), changing as
+the original's does - a song of the land, the battle song in a fight, the hornpipe aboard ship, the dungeon's below.
+It starts at the first touch, and Menu turns it off and on. **Sound effects** are the PC speaker's, made as the
+original made them (Nuvie's `PCSpeakerStream.cpp`): blocked, the swing and hit of a blow, casting by circle, failure,
+Kal Lor, the death dirge, the tremor and the hail; Menu turns them off and on.
+
 **Night** is a modern take, not the original's black that closes in square by square: a soft blue dusk over the map,
 deeper underground, with smooth pools of light round the party, and warm firelight from lamps, braziers and torches.
 Sunset and sunrise glow orange.
@@ -32,6 +39,8 @@ Sunset and sunrise glow orange.
 - **Upright**: the map fills the width at the top and takes the taps; under it one pane, the **Log** or the
   **Party**, with tabs beside it to choose (the Log tab is marked when there is news); at the foot, the commands.
 - **Sideways**: the map at the left, the pane and the commands beside it.
+- **Hold to walk**: hold a finger on the map and the party walks towards it, round walls, for as long as it stays
+  down; slide it to steer, lift it to stop. Held, the party walks into no one - talking and fighting are a tap's.
 - **Tap to walk**: a tap walks there, round what is in the way, the way marked as it goes. A tap on a person walks up
   and talks; on a door, ladder, sign or chest, walks up and uses it. Walking into a shut door opens it. Tap the party
   to pass a turn or pick up what is underfoot.
@@ -84,22 +93,30 @@ and death - the Avatar wakes in Lord British's castle with the fallen raised. Si
 turn (not by movement points), monsters that cast fight bare-handed, and thrown weapons are not lost.
 
 **Magic** has Magic.cpp's checks - a readied spellbook holding the spell, a level and magic points as high as its
-circle, a reagent of each kind - and magic points come back each hour. Ported spells: Create Food, Douse, Harm,
-Heal, Help, Ignite, Light, Magic Arrow, Poison, Sleep, Unlock Magic, Fireball, Great Light, Mass Awaken, Mass Sleep,
-Great Heal, Locate, Explosion, Lightning, Chain Bolt, Kill and Resurrect; the other 58 are listed and cost their
-reagents, but say they are not yet ported. Torches can be lit and held, and Light and torches widen the party's
+circle, a reagent of each kind - and magic points come back each hour. 55 of the 80 spells are ported from their Lua:
+the healing, harming and killing spells, the winds and storms, sleep, poison, paralysis, charm, curse, protection,
+invisibility, fear and confusion, Light, Infravision, X-ray and Peer (the land seen from above), locking and
+unlocking, Vanish and Reappear, Conjure, Insect Swarm and Summon, Time Stop, Tremor, Help and Resurrect. The rest
+(fields, Gate Travel, Wizard Eye, Enchant, Clone, Armageddon and the like) cost their reagents but say they are not
+yet ported. Their effects wear off as in the original, poison bites now and then, and the charmed fight for the
+party. Torches can be lit and held, and Light and torches widen the party's
 light at night.
 
 **The Orb of the Moons** works as in Ultima VI once Lord British has told of it: use it from the Avatar's sheet,
-tap a square near the party, and a red moongate opens there that leads where that square says; step in.
+tap a square near the party, and a red moongate opens there that leads where that square says; step in. Blue
+moongates stand at the eight moonstones while either moon is in the sky, and lead where the moons' phases say.
 
-Not ported yet: most spells, most of Nuvie's other Lua scripts, vehicles and horses, the blue moongates of the
-moons, sound and music, the intro and ending, most other usecode, and the largest creatures (dragons, hydras, the
-silver serpent and ships, which draw as one tile).
+**Boats and horses**: tap a ship, skiff or raft beside the party to board it (a ship whose deed the party holds);
+tap water to sail, and land beside the boat to go ashore. Ships keep to open water and must have room to turn.
+Tap a roaming horse to ride it, and the rider to get down.
+
+Not ported yet: the remaining spells, most of Nuvie's other Lua scripts, balloons, music for Martian Dreams and Savage Empire, the intro and ending, most other usecode, and the silver serpent's long body (it draws as
+one tile).
 
 `tests/real.test.ts` runs on your copies put in `web/gamedata/ultima6/`, `savage/` and `martian/` (git-ignored).
 For each it loads a new game, saves and restores it, and talks with everyone who has a conversation (199 people in
 Ultima VI, 68 in Savage Empire, 99 in Martian Dreams). For Ultima VI it also hatches the opening gargoyles, fights a
 troll to the death, readies and unreadies, casts spells, and goes through a red moongate.
 
-Licensed as Nuvie is: GPL 2 or later.
+Licensed as Nuvie is: GPL 2 or later. The music's synthesiser (@malvineous/opl) is GPL 3, so a build that
+includes it is distributed under GPL 3.

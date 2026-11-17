@@ -3,3 +3,4 @@ dist
 *.local
 gamedata/*
 !gamedata/README.md
+public/opl

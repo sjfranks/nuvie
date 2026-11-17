@@ -11,6 +11,8 @@ import { OBJ } from '../game/u6tables.ts';
 import { REAGENTS, reagentCounts, reagentNames, words, type Spell } from '../game/magic.ts';
 import { MapView } from './mapview.ts';
 import { haveIcons } from './theme.ts';
+import { Music } from '../audio/music.ts';
+import { Sfx } from '../audio/sfx.ts';
 
 type Mode = 'look' | 'talk' | 'use' | 'get' | 'attack' | 'cast' | 'where' | null;
 type Pane = 'log' | 'party';
@@ -32,7 +34,7 @@ const esc = (s: string): string => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '
 /** Things a tap uses rather than walks onto. */
 const USABLE: ReadonlySet<number> = new Set([
   OBJ.OAKEN_DOOR, OBJ.WINDOWED_DOOR, OBJ.CEDAR_DOOR, OBJ.STEEL_DOOR, OBJ.LADDER, OBJ.CAVE, OBJ.HOLE, OBJ.SIGN,
-  OBJ.SIGN_ARROW, OBJ.GRAVE, OBJ.CHEST, OBJ.BARREL, OBJ.CRATE, OBJ.DRAWER, OBJ.BOOK, OBJ.SCROLL,
+  OBJ.SIGN_ARROW, OBJ.GRAVE, OBJ.CHEST, OBJ.BARREL, OBJ.CRATE, OBJ.DRAWER, OBJ.BOOK, OBJ.SCROLL, 412, 414, 415,
 ]);
 
 export interface AppHooks {
@@ -57,6 +59,8 @@ export class App {
   /** A spell chosen in the book, waiting for where. */
   private pending: { caster: Actor; spell: Spell } | null = null;
   private wasTalking = false;
+  private readonly music: Music;
+  private readonly sfx: Sfx;
   private mode: Mode = null;
   private walk: { x: number; y: number; then: Mode | 'walk'; foe?: Actor } | null = null;
   private walkTimer = 0;
@@ -93,11 +97,41 @@ export class App {
     this.root.append(wrap, side);
     host.replaceChildren(this.root);
 
+    // A tap acts (tap()); a finger held down walks the party towards it while it stays, sliding to steer.
+    const at = (e: PointerEvent): { x: number; y: number } => {
+      const r = canvas.getBoundingClientRect();
+      return this.view.squareAt(e.clientX - r.left, e.clientY - r.top);
+    };
+    let down: { id: number; sq: { x: number; y: number }; holding: boolean; timer: number } | null = null;
     canvas.addEventListener('pointerdown', (e) => {
       e.preventDefault();
-      const r = canvas.getBoundingClientRect();
-      this.tap(this.view.squareAt(e.clientX - r.left, e.clientY - r.top));
+      canvas.setPointerCapture(e.pointerId);
+      const sq = at(e);
+      down = { id: e.pointerId, sq, holding: false, timer: 0 };
+      const d = down;
+      d.timer = window.setTimeout(() => {
+        // Held: walking, not a tap - unless a command waits on a square, or someone is talking.
+        if (down !== d || this.mode || this.game.converse) return;
+        d.holding = true;
+        this.hold(() => (down === d ? d.sq : null));
+      }, 280);
     });
+    canvas.addEventListener('pointermove', (e) => {
+      if (down && e.pointerId === down.id) down.sq = at(e);
+    });
+    const up = (e: PointerEvent): void => {
+      if (!down || e.pointerId !== down.id) return;
+      const d = down;
+      down = null;
+      clearTimeout(d.timer);
+      if (!d.holding && e.type === 'pointerup') this.tap(d.sq);
+      if (d.holding) {
+        this.walk = null;
+        this.mark();
+      }
+    };
+    canvas.addEventListener('pointerup', up);
+    canvas.addEventListener('pointercancel', up);
     const onKey = (e: KeyboardEvent): void => this.key(e);
     const onSize = (): void => this.layout();
     window.addEventListener('keydown', onKey);
@@ -109,7 +143,20 @@ export class App {
       clearTimeout(this.walkTimer);
       clearTimeout(this.saveTimer);
       this.sheet?.remove();
+      this.music.stop();
     };
+    this.music = new Music(game);
+    this.sfx = new Sfx(() => this.music.context);
+    try {
+      this.sfx.enabled = localStorage.getItem('nuvie.sfx') !== 'off';
+    } catch {
+      // Sound on.
+    }
+    game.sfx = (id, circle) => this.sfx.play(id, circle);
+    // Sound may start only once the player has touched the page.
+    const wake = (): void => void this.music.start();
+    window.addEventListener('pointerdown', wake, { once: true });
+    window.addEventListener('keydown', wake, { once: true });
     game.onChange = () => this.changed();
     this.timers.push(window.setInterval(() => {
       this.view.tick();
@@ -159,6 +206,17 @@ export class App {
       return;
     }
     if (!this.view.visible(sq.x, sq.y)) return;
+    // Afloat or astride: the party itself is tapped to get off; land is tapped to go ashore there.
+    if (!mode && (g.vehicle || p.objN === 431) && sq.x === p.x && sq.y === p.y) {
+      g.use(p.x, p.y);
+      return;
+    }
+    if (!mode && g.vehicle) {
+      const water = g.afloat(g.vehicle, sq.x, sq.y);
+      this.walk = { ...sq, then: water ? 'walk' : 'use' };
+      this.step();
+      return;
+    }
     if (sq.x === p.x && sq.y === p.y && !mode) {
       // The party itself: what is underfoot, or a turn passed.
       const o = g.objects.get(p.x, p.y, p.z);
@@ -172,12 +230,33 @@ export class App {
       const a = g.actors.at(sq.x, sq.y, p.z);
       const o = g.objects.get(sq.x, sq.y, p.z);
       const door = g.objects.list(sq.x, sq.y, p.z)?.some((d) => g.objects.isDoor(d) && g.objects.isShut(d));
-      if (a && !a.inParty) then = g.combat.hostile(a) ? 'attack' : 'talk';
+      if (a && !a.inParty) then = g.combat.hostile(a) ? 'attack' : a.objN === 430 && a.id >= 203 ? 'use' : 'talk';
       else if (door || (o && USABLE.has(o.objN) && !g.map.isPassable(sq.x, sq.y, p.z)) || (o && (o.objN === OBJ.LADDER || o.objN === OBJ.CAVE || o.objN === OBJ.HOLE))) then = 'use';
     }
     const foe = then === 'attack' ? g.actors.at(sq.x, sq.y, p.z) ?? undefined : undefined;
     this.walk = { ...sq, then, foe };
     this.step();
+  }
+
+  /** Walk towards wherever the finger is, a step at a time, while `where` gives a square. */
+  private hold(where: () => { x: number; y: number } | null): void {
+    clearTimeout(this.walkTimer);
+    const g = this.game;
+    const sq = where();
+    if (!sq || g.converse) return;
+    const p = g.player;
+    if (sq.x !== p.x || sq.y !== p.y) {
+      // Held, the party walks into no one: talking and fighting are a tap's.
+      const path = g.pathTo(sq.x, sq.y) ?? g.pathTo(sq.x, sq.y, true);
+      if (path && path.length) {
+        this.walk = { ...sq, then: 'walk' };
+        this.mark(path);
+        const [dx, dy] = path[0];
+        const t = g.actors.at(p.x + dx, p.y + dy, p.z);
+        if (!t || t.inParty || (g.vehicle && t === g.vehicle)) g.move(dx, dy);
+      }
+    }
+    this.walkTimer = window.setTimeout(() => this.hold(where), 170);
   }
 
   /** One step of the way to what was tapped; at the end of it, what the tap was for. */
@@ -287,6 +366,15 @@ export class App {
 
   private changed(): void {
     const g = this.game;
+    this.music?.update();
+    if (g.peer) {
+      g.peer = false;
+      this.open('Peer', (body) => {
+        const map = this.view.overhead(128);
+        map.className = 'overhead';
+        body.append(map, el('p', 'small', `The land about, from above: ${g.where()}.`));
+      });
+    }
     if (g.askWhere && this.mode !== 'where') {
       this.sheet?.remove();
       this.sheet = null;
@@ -614,6 +702,21 @@ export class App {
         body.append(row);
       };
       item('Journal', () => this.journal());
+      item(this.sfx.enabled ? 'Sounds: on' : 'Sounds: off', () => {
+        this.sfx.enabled = !this.sfx.enabled;
+        try {
+          localStorage.setItem('nuvie.sfx', this.sfx.enabled ? 'on' : 'off');
+        } catch {
+          // Not kept.
+        }
+        this.close();
+      });
+      if (this.music.available) {
+        item(this.music.enabled ? 'Music: on' : 'Music: off', () => {
+          this.music.setEnabled(!this.music.enabled);
+          this.close();
+        });
+      }
       item('Save now', () => {
         this.hooks.save(g.save());
         g.say('sys', 'Saved.');

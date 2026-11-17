@@ -208,6 +208,16 @@ export class MapView {
     this.curX = wrap(p.x - (this.cols >> 1), z);
     this.curY = wrap(p.y - (this.rows >> 1), z);
     this.tmp.fill(0);
+    // X-ray: everything near is seen, walls or no.
+    if (performance.now() < g.xrayUntil) {
+      for (let ty = 0; ty < this.th; ty++) {
+        for (let tx = 0; tx < this.tw; tx++) {
+          const n = g.map.tileNum(this.curX - BORDER + tx, this.curY - BORDER + ty, z);
+          this.tmp[ty * this.tw + tx] = n === 0 ? 0x8000 : n;
+        }
+      }
+      return;
+    }
     let x = p.x;
     let y = p.y;
     // Standing in a doorway, look from the square beyond it.
@@ -291,17 +301,19 @@ export class MapView {
     const z = g.player.z;
     for (const a of g.actors.list) {
       if (a.z !== z || !a.visible || a.objN === 0 || !a.alive) continue;
+      // The unseen are not drawn, but for the party's own.
+      if (a.objFlags & 0x02 && !a.inParty) continue;
+      const infra = g.infraTurns > 0;
       const vx = wrap(a.x - this.curX, z);
       const vy = wrap(a.y - this.curY, z);
-      if (vx > this.cols || vy > this.rows || !this.seen(Math.min(vx, this.cols - 1), Math.min(vy, this.rows - 1))) continue;
-      if (vx < this.cols && vy < this.rows && !this.seen(vx, vy)) continue;
+      if (vx > this.cols || vy > this.rows || (!infra && !this.seen(Math.min(vx, this.cols - 1), Math.min(vy, this.rows - 1)))) continue;
+      if (!infra && vx < this.cols && vy < this.rows && !this.seen(vx, vy)) continue;
       const t = g.tiles.get(g.objects.objToTile[a.objN] + a.frameN);
-      const back = a.back();
-      if (back) {
-        const bx = wrap(back.x - this.curX, z);
-        const by = wrap(back.y - this.curY, z);
+      for (const part of a.parts()) {
+        const bx = wrap(part.x - this.curX, z);
+        const by = wrap(part.y - this.curY, z);
         if (bx <= this.cols && by <= this.rows) {
-          const bt = g.tiles.get(g.objects.objToTile[a.objN] + back.frame);
+          const bt = g.tiles.get(g.objects.objToTile[part.objN ?? a.objN] + part.frame);
           this.drawTile(bt, bx, by, false);
           this.drawTile(bt, bx, by, true);
         }
@@ -493,6 +505,51 @@ export class MapView {
     const vx = Math.max(0, Math.min(this.cols - 1, Math.floor((cx / r.width) * this.cols)));
     const vy = Math.max(0, Math.min(this.rows - 1, Math.floor((cy / r.height) * this.rows)));
     return { x: wrap(this.curX + vx, z), y: wrap(this.curY + vy, z) };
+  }
+
+  private avg: Uint32Array | null = null;
+
+  /** Each tile's average colour, for the map seen from above. */
+  private averages(): Uint32Array {
+    if (this.avg) return this.avg;
+    const avg = new Uint32Array(2048);
+    for (let n = 0; n < 2048; n++) {
+      const d = this.game.tiles.original(n).data;
+      let r = 0;
+      let gr = 0;
+      let b = 0;
+      let k = 0;
+      for (let i = 0; i < 256; i += 3) {
+        const c = d[i];
+        if (c === 0xff) continue;
+        r += this.palette[c * 3];
+        gr += this.palette[c * 3 + 1];
+        b += this.palette[c * 3 + 2];
+        k++;
+      }
+      avg[n] = k ? 0xff000000 | (Math.round(b / k) << 16) | (Math.round(gr / k) << 8) | Math.round(r / k) : 0xff000000;
+    }
+    return (this.avg = avg);
+  }
+
+  /** The land round the party seen from above, a pixel a square (Peer): its ground, the party a white mark. */
+  overhead(size = 128): HTMLCanvasElement {
+    const g = this.game;
+    const p = g.player;
+    const avg = this.averages();
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
+    const ctx = c.getContext('2d')!;
+    const img = ctx.createImageData(size, size);
+    const out = new Uint32Array(img.data.buffer);
+    const half = size >> 1;
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) out[y * size + x] = avg[g.map.tileNum(p.x - half + x, p.y - half + y, p.z)];
+    }
+    ctx.putImageData(img, 0, 0);
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(half - 1, half - 1, 3, 3);
+    return c;
   }
 
   /** A tile as a picture (for the party's faces and what they carry). */

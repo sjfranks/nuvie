@@ -61,11 +61,26 @@ export interface Flash {
 
 const isEvil = (al: number): boolean => al === ALIGN.EVIL || al === ALIGN.CHAOTIC;
 
+/** Status: in the actor's status flags... */
+export const PROTECTED = 0x01;
+export const PARALYZED = 0x02;
+export const ASLEEP = 0x04;
+export const POISONED = 0x08;
+/** ...and in its object flags. */
+export const INVISIBLE = 0x02;
+export const CHARMED = 0x04;
+export const CURSED = 0x40;
+
+/** A number as a curse leaves it (actor_str_adj and the like): three less, never under one. */
+export function adj(a: Actor, v: number): number {
+  return a.objFlags & CURSED ? Math.max(1, v - 3) : v;
+}
+
 export function alignment(a: Actor): number {
   return ((a.statusFlags & 0x60) >> 5) + 1;
 }
 
-function setAlignment(a: Actor, al: number): void {
+export function setAlignment(a: Actor, al: number): void {
   a.statusFlags = (a.statusFlags & ~0x60) | (((al - 1) & 3) << 5);
 }
 
@@ -81,6 +96,8 @@ const randomise = (g: Game, base: number): number => {
 
 export class Combat {
   flashes: Flash[] = [];
+  /** Turns left of a Time Stop: no one but the party moves. */
+  timeStop = 0;
   /** Party members fallen since the Avatar last died. */
   fallen: Actor[] = [];
   private block = '';
@@ -109,8 +126,9 @@ export class Combat {
 
   // ---- who fights whom ----
 
-  /** Whether an actor would attack another (actor_find_target's test). */
+  /** Whether an actor would attack another (actor_find_target's test), the unseen excepted (actor_ok_to_attack). */
   canTarget(att: Actor, tgt: Actor): boolean {
+    if (tgt.objFlags & INVISIBLE && !(tgt.inParty && att.inParty)) return false;
     const wt = att.worktype;
     const align = alignment(att);
     const talign = alignment(tgt);
@@ -209,6 +227,8 @@ export class Combat {
   private ac(a: Actor): number {
     let ac = 0;
     for (const o of this.g.objects.inventories[a.id] ?? []) if (o.loc === 'readied') ac += ARMOUR.get(o.objN) ?? 0;
+    if (a.objFlags & CURSED) ac -= 3;
+    if (a.statusFlags & PROTECTED) ac += 3;
     return ac;
   }
 
@@ -216,8 +236,8 @@ export class Combat {
   private hits(att: Actor, foe: Actor, w: Weapon): boolean {
     if (w.objN === 48) return true; // the glass sword
     const useStr = w.obj ? [4, 34, 39, 44].includes(w.objN) : MONSTERS.get(att.objN)?.useStr === 1;
-    const role = useStr ? att.strength : att.dex;
-    const foeDex = foe.statusFlags & 0x04 ? 1 : foe.dex;
+    const role = useStr ? adj(att, att.strength) : adj(att, att.dex);
+    const foeDex = foe.statusFlags & (ASLEEP | PARALYZED) || this.timeStop > 0 ? 1 : adj(foe, foe.dex);
     return Math.floor((foeDex + 30 - role) / 2) < this.rand(1, 30);
   }
 
@@ -259,6 +279,7 @@ export class Combat {
       if (w.objN === 41 || w.objN === 54) invDelete(this.g.objects, att.id, ARROW, 1, 0);
       if (w.objN === 42 || w.objN === 50) invDelete(this.g.objects, att.id, BOLT, 1, 0);
     }
+    if (!ranged && Math.max(Math.abs(att.x - this.g.player.x), Math.abs(att.y - this.g.player.y)) < 6) this.g.sfx('swing');
     const shot = ranged && PROJECTILE.has(w.objN) ? { tile: PROJECTILE.get(w.objN)!, fromX: att.x, fromY: att.y } : undefined;
     if (!hit) {
       this.flash(foe.x, foe.y, foe.z, 'miss', shot);
@@ -283,6 +304,7 @@ export class Combat {
     const ac = this.ac(def);
     if (dmg !== 255 && ac > 0) dmg -= this.rand(1, ac);
     const who = this.cap(this.name(def));
+    if (dmg > 0) this.g.sfx('hit');
     if (dmg > 0) def.statusFlags &= ~0x04;
     if (dmg > 0) att.exp += this.hit(def, dmg);
     else this.g.say('sys', `${who} grazed.`);
@@ -305,6 +327,7 @@ export class Combat {
     const who = this.cap(this.name(def));
     def.statusFlags &= ~0x04; // the hurt wake
     this.flash(def.x, def.y, def.z, 'hit');
+    this.g.sfx('hit');
     att.exp += this.hit(def, dmg);
     if (def.hp > 0) {
       this.hitMessage(def);
@@ -317,6 +340,11 @@ export class Combat {
 
   /** actor_hit: the damage itself. Returns the experience it earns. */
   private hit(def: Actor, dmg: number): number {
+    // The party's boat takes blows to its hull, but is not sunk here.
+    if (def.id === 0) {
+      def.hp = Math.max(1, def.hp - dmg);
+      return 0;
+    }
     if (def.objN === OBJ.LORD_BRITISH) {
       def.hp = 255;
       return 0;
@@ -395,6 +423,8 @@ export class Combat {
   private avatarDeath(): void {
     const g = this.g;
     g.say('sys', 'An unending darkness engulfs thee...');
+    g.sfx('death');
+    setTimeout(() => g.sfx('kallor'), 2400);
     g.say('npc', 'A voice in the darkness intones, "KAL LOR!"');
     // The party's dead are raised with the Avatar.
     for (const a of this.fallen) {
@@ -466,9 +496,16 @@ export class Combat {
     if (g.kind !== 'u6') return;
     const p = g.player;
     for (const a of g.actors.list) {
+      if (a.z === p.z && a.objN !== 0 && a.alive && Math.max(Math.abs(a.x - p.x), Math.abs(a.y - p.y)) <= 16) this.updateFlags(a);
+    }
+    if (this.timeStop > 0) {
+      this.timeStop--;
+      return;
+    }
+    for (const a of g.actors.list) {
       if (!g.party.length || g.player !== p) return; // the Avatar fell
       if (a.inParty || !this.standing(a) || a.z !== p.z || !FIGHTING.has(a.worktype)) continue;
-      if (this.asleep(a)) continue;
+      if (this.asleep(a) || a.statusFlags & PARALYZED) continue;
       if (Math.max(Math.abs(a.x - p.x), Math.abs(a.y - p.y)) > 16) continue;
       this.act(a);
     }
@@ -476,7 +513,7 @@ export class Combat {
     if (this.fighting) {
       for (const m of g.party.slice(1)) {
         const a = m.actor;
-        if (!this.standing(a) || a.z !== p.z || this.asleep(a)) continue;
+        if (!this.standing(a) || a.z !== p.z || this.asleep(a) || a.statusFlags & PARALYZED) continue;
         const t = this.findTarget(a);
         if (!t) continue;
         if (this.range(a, t.x, t.y) <= this.reach(a) && this.clearLine(a.x, a.y, t.x, t.y, a.z)) this.attack(a, t);
@@ -486,6 +523,41 @@ export class Combat {
     }
     const now = typeof performance !== 'undefined' ? performance.now() : 0;
     this.flashes = this.flashes.filter((f) => f.until > now - 2000);
+  }
+
+  /** actor_update_flags: what wears off this turn, and poison's bite. */
+  private updateFlags(a: Actor): void {
+    const g = this.g;
+    const r = (n: number): boolean => g.random(n) === 0;
+    if (a.objFlags & INVISIBLE && r(64) && adj(a, a.intelligence) <= this.rand(1, 30)) a.objFlags &= ~INVISIBLE;
+    if (a.statusFlags & PROTECTED && r(64) && adj(a, a.intelligence) <= this.rand(1, 30)) a.statusFlags &= ~PROTECTED;
+    if (a.objFlags & CURSED && r(16) && adj(a, a.intelligence) >= this.rand(1, 30)) a.objFlags &= ~CURSED;
+    if (a.objFlags & CHARMED && r(8) && adj(a, a.intelligence) >= this.rand(1, 30)) this.uncharm(a);
+    if (a.statusFlags & PARALYZED && r(4) && adj(a, a.strength) >= this.rand(1, 30)) {
+      a.statusFlags &= ~PARALYZED;
+      if (a.inParty) g.say('sys', `${this.cap(this.name(a))} can move again.`);
+    }
+    if (a.statusFlags & POISONED && !(a.statusFlags & PROTECTED) && r(8)) this.hit(a, 1);
+  }
+
+  /** Charmed: fights for the one who charmed them (spell_charm_actor); the old alignment kept in the movement flags. */
+  charm(a: Actor, align: number): void {
+    if (a.objFlags & CHARMED) {
+      this.uncharm(a);
+      return;
+    }
+    a.movementFlags = (a.movementFlags & ~0x60) | (((alignment(a) - 1) & 3) << 5);
+    a.objFlags |= CHARMED;
+    setAlignment(a, align);
+    a.worktype = WT.ASSAULT;
+    this.g.say('sys', `${this.cap(this.name(a))} is charmed.`);
+  }
+
+  uncharm(a: Actor): boolean {
+    if (!(a.objFlags & CHARMED)) return false;
+    a.objFlags &= ~CHARMED;
+    setAlignment(a, a.inParty ? ALIGN.GOOD : ((a.movementFlags & 0x60) >> 5) + 1);
+    return true;
   }
 
   /** Asleep, and stays so this turn (one chance in ten to wake). */
