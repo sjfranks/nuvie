@@ -96,8 +96,16 @@ dropping and giving; saving.
 
 **Martian Dreams and The Savage Empire** load too, from the same screen (the game is told by its files): their map,
 people, schedules, conversations, faces (`mdfaces.lzc`, `faces.lzc`), palette, and their own 8-pixel font
-(`system.lzc`), with Martian Dreams' doors. They have no parchment picture, so they take the plain frame. Their Lua
-usecode (most of what using things does in them) and the scenes behind their faces are not ported.
+(`system.lzc`), with Martian Dreams' doors. They have no parchment picture, so they take the plain frame. Things are
+worn and held by each game's own table (obj_get_readiable_location, by tile).
+
+Martian Dreams fights too, with its own numbers (data/scripts/md): its creatures' strength, dexterity, wits, health,
+damage and nature (actor_tbl), its weapons' damage and reach (combat.lua) and its clothes' armour; guns use their
+rounds, ray guns and sprayers their charges; the freeze ray holds fast, Cupid's bow charms, the heat ray does nothing
+to what heat cannot hurt; some creatures take double harm, some paralyse, some cannot be hurt at all; eggs hatch its
+creatures. Nuvie's own Martian Dreams AI is mostly unwritten, so creatures fight as Ultima VI's do. A fallen party
+wakes at the space capsule (or the Olympus mine) the next morning. Savage Empire's creature table in Nuvie is a
+placeholder, so it has no fighting. Their Lua usecode (most of what using things does in them) is not ported.
 
 **Combat** follows Ultima VI's rules as Nuvie's Lua has them: the hit roll (dexterity, or strength for clubs and
 maces, against the foe's dexterity), weapon damage less a roll against readied armour, half damage for the creatures
@@ -156,7 +164,8 @@ Great creatures take more than one square: ships, dragons (head, wings and tail)
 two-square beasts, and the silver serpent, whose long body follows its head square by square and never turns back
 over its neck (U6Actor's surrounding objects).
 
-Not ported yet: the animated intro and ending pictures, and Savage Empire's and Martian Dreams' own combat, music and usecode.
+Not ported yet: the animated intro and ending pictures; Martian Dreams' and Savage Empire's music and usecode, and Savage
+Empire's fighting (Nuvie has none to port).
 
 `tests/real.test.ts` runs on your copies put in `web/gamedata/ultima6/`, `savage/` and `martian/` (git-ignored).
 For each it loads a new game, saves and restores it, and talks with everyone who has a conversation (199 people in

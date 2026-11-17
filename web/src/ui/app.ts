@@ -7,7 +7,7 @@ import type { Actor } from '../game/actors.ts';
 import { Game, type SaveState } from '../game/game.ts';
 import { invWeight } from '../game/inventory.ts';
 import type { Obj } from '../game/objects.ts';
-import { OBJ, READY_SLOT } from '../game/u6tables.ts';
+import { OBJ } from '../game/u6tables.ts';
 import { USED_IN_PLACE } from '../game/usecode.ts';
 import { REAGENTS, reagentCounts, reagentNames, words, type Spell } from '../game/magic.ts';
 import { Gypsy } from './gypsy.ts';
@@ -745,7 +745,7 @@ export class App {
     const worn: Record<string, Obj | 'barred'> = {};
     for (const o of g.objects.inventories[a.id] ?? []) {
       if (o.loc !== 'readied') continue;
-      const slot = READY_SLOT.get(o.objN);
+      const slot = g.readySlot(o);
       if (slot === 0) worn.head = o;
       else if (slot === 1) worn.neck = o;
       else if (slot === 2) worn.body = o;

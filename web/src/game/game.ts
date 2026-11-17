@@ -19,6 +19,7 @@ import { readShape, type Shape } from '../files/shape.ts';
 import { GameMap, wrap } from './map.ts';
 import { Obj, Objects, STATUS_OK_TO_TAKE, STATUS_TEMPORARY, type Loc } from './objects.ts';
 import { Tiles } from './tiles.ts';
+import { READY_BY_TILE } from './mdse.ts';
 import { OBJ, READY_SLOT } from './u6tables.ts';
 
 export type LogKind = 'sys' | 'npc' | 'you' | 'read';
@@ -436,7 +437,7 @@ export class Game implements ConvWorld {
     return `${h}:${String(c.minute).padStart(2, '0')} ${c.hour < 12 ? 'am' : 'pm'}`;
   }
 
-  private advance(minutes: number): void {
+  advance(minutes: number): void {
     const c = this.clock;
     c.minute += minutes;
     // The wind changes every so often, to any way or none (Weather::change_wind_dir).
@@ -1606,9 +1607,14 @@ export class Game implements ConvWorld {
     }
   }
 
-  /** Whether a thing can be worn or held (Ultima VI). */
+  /** Where a thing is worn or held, or undefined: by object in Ultima VI, by tile in the others. */
+  readySlot(o: Obj): number | undefined {
+    return this.kind === 'u6' ? READY_SLOT.get(o.objN) : READY_BY_TILE[this.kind].get(this.objects.tileNum(o));
+  }
+
+  /** Whether a thing can be worn or held. */
   readiable(o: Obj): boolean {
-    return this.kind === 'u6' && READY_SLOT.has(o.objN);
+    return this.readySlot(o) !== undefined;
   }
 
   /**
@@ -1616,17 +1622,18 @@ export class Game implements ConvWorld {
    * held in both taking both; two hands for rings.
    */
   ready(o: Obj, a: Actor): boolean {
-    const slot = READY_SLOT.get(o.objN);
+    const slot = this.readySlot(o);
     const what = this.objects.look(o);
-    if (slot === undefined || this.kind !== 'u6') {
+    if (slot === undefined) {
       this.say('sys', `${what} cannot be readied.`);
       this.onChange();
       return false;
     }
-    const worn = this.objects.inventories[a.id].filter((r) => r.loc === 'readied' && r !== o).map((r) => READY_SLOT.get(r.objN) ?? -1);
+    const worn = this.objects.inventories[a.id].filter((r) => r.loc === 'readied' && r !== o).map((r) => this.readySlot(r) ?? -1);
     const arms = worn.filter((w) => w === 3).length + worn.filter((w) => w === 4).length * 2;
+    // Two rings in Ultima VI; one pair of gloves in Martian Dreams.
     const ok =
-      slot === 3 ? arms < 2 : slot === 4 ? arms === 0 : slot === 5 ? worn.filter((w) => w === 5).length < 2 : !worn.includes(slot);
+      slot === 3 ? arms < 2 : slot === 4 ? arms === 0 : slot === 5 && this.kind === 'u6' ? worn.filter((w) => w === 5).length < 2 : !worn.includes(slot);
     if (!ok) {
       this.say('sys', `${this.partyMemberName(a.id) || 'They'} cannot ready ${what}: take something off first.`);
       this.onChange();

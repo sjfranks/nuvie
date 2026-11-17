@@ -265,6 +265,28 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     expect(back.portrait(back.player)).toEqual(g.avatarFace(2));
   });
 
+  it.runIf(folder === 'martian')('fights by Martian Dreams\' rules: guns, rounds, wounds', () => {
+    const g = new Game(load());
+    const p = g.player;
+    const nellie = g.party.find((m) => m.name === 'Nellie Bly')!.actor;
+    const gun = g.objects.inventories[nellie.id].find((o) => o.objN === 41)!;
+    expect(g.readiable(gun)).toBe(true);
+    expect(g.ready(gun, nellie)).toBe(true);
+    expect(g.combat.reach(nellie)).toBe(4);
+    const rounds = (): number => g.objects.inventories[nellie.id].filter((o) => o.objN === 57).reduce((n, o) => n + o.qty, 0);
+    const before = rounds();
+    const spot = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]].find(([dx, dy]) => g.canStand(p.x + dx, p.y + dy, p.z))!;
+    const rat = g.combat.spawn(387, p.x + spot[0], p.y + spot[1], p.z, 0, 8)!;
+    expect(g.combat.hostile(rat)).toBe(true);
+    const said: string[] = [];
+    const say = g.say.bind(g);
+    g.say = ((w: never, t: string) => (said.push(t), say(w, t))) as typeof g.say;
+    for (let i = 0; i < 40 && rat.objN; i++) g.attackAt(rat.x, rat.y) || g.pass();
+    console.log('md fight:', said.filter((t) => t !== 'Pass.').slice(0, 12));
+    expect(said.some((t) => /Bushrat (killed|.*wounded|critical)/.test(t))).toBe(true);
+    expect(rounds()).toBeLessThanOrEqual(before);
+  });
+
   it.runIf(folder === 'ultima6')('boards a skiff, sails it, goes ashore; rides a horse', () => {
     const g = new Game(load());
     for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
