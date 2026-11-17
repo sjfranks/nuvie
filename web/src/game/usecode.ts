@@ -31,8 +31,22 @@ const INSTRUMENTS: Record<number, string> = {
 /** Things used where they stand in the world (a tap on one uses it, rather than walking onto it). */
 export const USED_IN_PLACE: ReadonlySet<number> = new Set([
   U.LEVER, U.SWITCH, U.CRANK, U.CANDLE, U.CANDELABRA, U.FIREPLACE, U.BRAZIER, U.CAMPFIRE, U.BELL, U.PULL_CHAIN, U.WELL,
-  U.FOUNTAIN, U.CHURN, U.BEEHIVE, U.CLOCK, U.SUNDIAL, U.MIRROR, U.HARPSICHORD,
+  U.FOUNTAIN, U.CHURN, U.BEEHIVE, U.CLOCK, U.SUNDIAL, U.MIRROR, U.HARPSICHORD, 221, 223,
 ]);
+
+const MOONSTONE = 73;
+const RUNE_FIRST = 242;
+const RUNE_LAST = 249;
+/** The mantras, rune by rune (use_rune). */
+const MANTRAS = ['AHM', 'MU', 'RA', 'BEH', 'CAH', 'SUMM', 'OM', 'LUM'];
+const FORCE_FIELD = 51;
+const GARGISH_VOCABULARY = 97;
+const VORTEX_CUBE = 62;
+const CODEX = 59;
+const CRYSTAL_BALL = 155;
+const SPELLBOOK = 57;
+const CANNON = 221;
+const POWDER_KEG = 223;
 
 const POTIONS = ['awaken', 'cure', 'heal', 'poison', 'sleep', 'protection', 'invisibility', 'x-ray vision'];
 
@@ -44,7 +58,9 @@ export class UseCode {
     return (
       this.g.kind === 'u6' &&
       (USED_IN_PLACE.has(o.objN) || FOODS.has(o.objN) || o.objN in INSTRUMENTS ||
-        [OBJ.KEY, OBJ.LOCK_PICK, U.FISHING_POLE, U.SHOVEL, U.PICK, U.POTION, U.SEXTANT, U.FAN, U.RUBBER_DUCKY, U.GEM].includes(o.objN as never))
+        (o.objN >= RUNE_FIRST && o.objN <= RUNE_LAST) ||
+        [OBJ.KEY, OBJ.LOCK_PICK, U.FISHING_POLE, U.SHOVEL, U.PICK, U.POTION, U.SEXTANT, U.FAN, U.RUBBER_DUCKY, U.GEM,
+          MOONSTONE, GARGISH_VOCABULARY, VORTEX_CUBE, CRYSTAL_BALL, SPELLBOOK, CANNON, POWDER_KEG].includes(o.objN as never))
     );
   }
 
@@ -110,6 +126,33 @@ export class UseCode {
         // A peer gem shows the land from above.
         if (o.frameN === 0) g.peer = true;
         else g.say('sys', 'A fine gem.');
+        return this.done();
+    }
+    if (o.objN >= RUNE_FIRST && o.objN <= RUNE_LAST) return this.rune(o);
+    switch (o.objN) {
+      case MOONSTONE:
+        return this.bury(o);
+      case GARGISH_VOCABULARY:
+        g.gargFlag = 1;
+        g.say('sys', 'You study the scroll!');
+        return this.done();
+      case VORTEX_CUBE:
+        return this.vortex(o);
+      case CRYSTAL_BALL:
+        return this.crystal();
+      case SPELLBOOK:
+        g.openBook = true;
+        return g.onChange();
+      case CANNON:
+        return this.cannon(o);
+      case POWDER_KEG:
+        if (o.frameN !== 0) g.say('sys', 'No effect.');
+        else if (g.kegTurns > 0) g.say('sys', 'Not now.');
+        else {
+          o.frameN = 1;
+          g.kegTurns = 3;
+          g.say('sys', 'Powder lit!');
+        }
         return this.done();
     }
     if (o.objN in INSTRUMENTS) {
@@ -445,6 +488,189 @@ export class UseCode {
     if (o.qty > 1) o.qty--;
     else g.objects.unlink(o);
     this.done();
+  }
+
+  // ---- the quest (use_rune, use_moonstone, use_vortex_cube) ----
+
+  /** A rune and its mantra, beside the force field of its shrine, lifts the field and the gargoyles' watch. */
+  private rune(o: Obj): void {
+    const g = this.g;
+    const which = o.objN - RUNE_FIRST;
+    g.askText = {
+      label: 'Mantra:',
+      then: (said) => {
+        g.askText = null;
+        const p = g.player;
+        if (said.trim().toUpperCase() !== MANTRAS[which]) {
+          g.say('sys', 'Wrong mantra!');
+          g.sfx('failure');
+          return this.done();
+        }
+        const field = g.objects.all().find((f) => f.objN === FORCE_FIELD && f.z === p.z && f.quality === which);
+        if (!field || Math.abs(p.x - field.x) >= 2 || Math.abs(p.y - field.y) >= 2) {
+          g.say('sys', 'No effect!');
+          return this.done();
+        }
+        g.sfx('cast2', 4);
+        // The gargoyles that watched the shrine are gone with the field (remove_gargoyle_egg).
+        for (const egg of g.objects.all()) {
+          if (egg.objN !== OBJ.EGG || egg.z !== field.z || Math.abs(egg.x - field.x) >= 20 || Math.abs(egg.y - field.y) >= 20) continue;
+          if (egg.container?.some((e) => e.objN === OBJ.GARGOYLE || e.objN === OBJ.WINGED_GARGOYLE)) g.objects.unlink(egg);
+        }
+        g.objects.unlink(field);
+        g.say('sys', 'Done!');
+        this.done();
+      },
+    };
+    g.onChange();
+  }
+
+  /** Bury a moonstone where the party stands: a moongate will rise there. */
+  private bury(o: Obj): void {
+    const g = this.g;
+    const p = g.player;
+    const t = g.map.tileNum(p.x, p.y, p.z);
+    if ((t < 1 || t > 7) && (t < 0x10 || t > 0x6f)) {
+      g.say('sys', 'Cannot be buried here!');
+      return this.done();
+    }
+    g.moonstones[o.frameN & 7] = [p.x, p.y, p.z];
+    g.objects.unlink(o);
+    [o.x, o.y, o.z] = [p.x, p.y, p.z];
+    o.status |= STATUS_OK_TO_TAKE;
+    g.objects.add(o);
+    g.say('sys', 'Buried.');
+    g.updateMoongates();
+    this.done();
+  }
+
+  /** The vortex cube, all eight moonstones within, beside the Codex with both lenses set: the end. */
+  private vortex(cube: Obj): void {
+    const g = this.g;
+    const p = g.player;
+    const codex = g.objects.all().find((c) => c.objN === CODEX && c.z === p.z && c.quality === 128);
+    const brit = g.objects.all().find((l) => l.objN === 394 && l.loc === 'map');
+    const garg = g.objects.all().find((l) => l.objN === 396 && l.loc === 'map');
+    let stones = 0;
+    for (const s of cube.container ?? []) if (s.objN === MOONSTONE) stones |= 1 << (s.frameN & 7);
+    const near = codex && Math.abs(p.x - codex.x) < 11 && Math.abs(p.y - codex.y) < 11;
+    const lenses = brit && garg && brit.x === 0x399 && brit.y === 0x353 && brit.z === 0 && garg.x === 0x39d && garg.y === 0x353 && garg.z === 0;
+    if (!near || !lenses || stones !== 0xff) {
+      if (cube.container) g.openContainer = cube;
+      g.say('sys', 'No effect!');
+      return this.done();
+    }
+    g.objects.unlink(codex!);
+    g.say('sys', 'The Codex has vanished!');
+    g.won = true;
+    g.onChange();
+  }
+
+  /** The crystal ball shows a place far off, given its bearings - but it may hurt the unwise (use_crystal_ball). */
+  private crystal(): void {
+    const g = this.g;
+    const p = g.player;
+    if (g.random(30) < Math.floor((45 - p.intelligence) / 2)) {
+      g.combat.hurt(p, p, g.random(10) + 1);
+      return this.done();
+    }
+    const read = (s: string, pos: string, neg: string): number | null => {
+      const m = /^\s*(\d+)\s*([a-z])\s*$/i.exec(s);
+      if (!m) return null;
+      const n = +m[1];
+      const d = m[2].toUpperCase();
+      return d === pos ? n : d === neg ? -n : null;
+    };
+    g.askText = {
+      label: 'Latitude (e.g. 12N):',
+      then: (latS) => {
+        const lat = read(latS, 'S', 'N');
+        if (lat === null || lat > 80 || lat < -44) {
+          g.askText = null;
+          g.say('sys', 'No effect.');
+          return this.done();
+        }
+        g.askText = {
+          label: 'Longitude (e.g. 5E):',
+          then: (lonS) => {
+            g.askText = null;
+            const lon = read(lonS, 'E', 'W');
+            if (lon === null || lon > 88 || lon < -37) {
+              g.say('sys', 'No effect.');
+              return this.done();
+            }
+            let x = lon * 8 + 304;
+            let y = lat * 8 + 360;
+            if (p.z !== 0) {
+              x >>= 2;
+              y >>= 2;
+            }
+            g.scry = { x, y, z: p.z };
+            g.say('sys', 'Done.');
+            this.done();
+          },
+        };
+        g.onChange();
+      },
+    };
+    g.onChange();
+  }
+
+  /** A cannon fires five squares the way it faces, at the first thing in the way (CannonballEffect). */
+  private cannon(o: Obj): void {
+    const g = this.g;
+    g.say('sys', 'Fire!');
+    g.sfx('quake');
+    const [dx, dy] = [[0, -1], [1, 0], [0, 1], [-1, 0]][o.frameN & 3];
+    for (let i = 1; i <= 5; i++) {
+      const x = o.x + dx * i;
+      const y = o.y + dy * i;
+      const a = g.actors.at(x, y, o.z);
+      if (a) {
+        g.combat.flash(x, y, o.z, 'hit', { tile: 399, fromX: o.x, fromY: o.y });
+        g.combat.hurt(g.player, a, g.random(30) + 1);
+        break;
+      }
+      if (!g.map.isPassable(x, y, o.z)) {
+        g.combat.flash(x, y, o.z, 'hit', { tile: 399, fromX: o.x, fromY: o.y });
+        break;
+      }
+    }
+    this.done();
+  }
+
+  /** A lit keg goes off (explode_obj): all near are hurt, doors near are blown in, other kegs go too. */
+  explodeKegs(): void {
+    const g = this.g;
+    const lit: { x: number; y: number; z: number; o: Obj }[] = [];
+    for (const k of g.objects.all()) if (k.objN === POWDER_KEG && k.frameN === 1) lit.push({ x: k.x, y: k.y, z: k.z, o: k });
+    for (const m of g.party) {
+      for (const k of g.objects.inventories[m.actor.id]) if (k.objN === POWDER_KEG && k.frameN === 1) lit.push({ x: m.actor.x, y: m.actor.y, z: m.actor.z, o: k });
+    }
+    const seen = new Set<Obj>();
+    while (lit.length) {
+      const { x, y, z, o } = lit.shift()!;
+      if (seen.has(o)) continue;
+      seen.add(o);
+      g.objects.unlink(o);
+      g.say('sys', 'Boom!');
+      g.sfx('quake');
+      for (const a of [...g.actors.list]) {
+        if (a.alive && a.visible && a.objN && a.z === z && Math.abs(a.x - x) <= 2 && Math.abs(a.y - y) <= 2) g.combat.hurt(g.player, a, g.random(60) + 1);
+      }
+      for (let yy = y - 2; yy <= y + 2; yy++) {
+        for (let xx = x - 2; xx <= x + 2; xx++) {
+          for (const n of [...(g.objects.list(xx, yy, z) ?? [])]) {
+            if (n.objN === POWDER_KEG && !seen.has(n)) lit.push({ x: n.x, y: n.y, z, o: n });
+            else if (n.objN >= 297 && n.objN <= 300 && n.frameN <= 12) {
+              g.objects.unlink(n);
+              g.say('sys', 'The door is blown up!');
+            }
+          }
+        }
+      }
+    }
+    g.onChange();
   }
 
   private eat(o: Obj): void {

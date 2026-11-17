@@ -113,6 +113,15 @@ drop the portcullises and fields of their doorways; cranks that lower and raise 
 chains; wells and cows filling buckets, churns making butter, hives filling honey jars; fishing poles, shovels and
 picks; potions (tap who drinks); all the food and drink; the sextant, clocks and sundials, mirrors, the peer gem,
 instruments, fans and the rubber ducky. A tap on a lever, crank, fire, bell or well uses it where it stands.
+The quest items work too: a rune with its shrine's mantra (typed) lifts the force field before the shrine; a
+moonstone buried in grass or earth raises its moongate there; the quest barrier stops the party until the Avatar
+has the quest; the gargish vocabulary teaches gargish; the vortex cube, at the Codex with both lenses and all eight
+moonstones, ends the game. The crystal ball shows a far place, a spellbook opens the spell list, cannons fire down
+the way they face, and a lit powder keg blows up after a few turns (doors, kegs and anyone near).
+
+**Rest** (the moon button): pass a turn, or camp 1-8 hours - not in towns, near foes or others, or on horseback.
+Each member eats a meal if the party has food, and those fed heal, once in twelve hours. On a ship the crew mends
+the hull instead.
 
 **The Orb of the Moons** works as in Ultima VI once Lord British has told of it: use it from the Avatar's sheet,
 tap a square near the party, and a red moongate opens there that leads where that square says; step in. Blue
@@ -122,7 +131,7 @@ moongates stand at the eight moonstones while either moon is in the sky, and lea
 tap water to sail, and land beside the boat to go ashore. Ships keep to open water and must have room to turn.
 Tap a roaming horse to ride it, and the rider to get down.
 
-Not ported yet: the remaining spells, most of Nuvie's other Lua scripts, balloons, music for Martian Dreams and Savage Empire, the intro and ending, the remaining usecode (balloons, cannons, the vortex cube, runes and the like), and the silver serpent's long body (it draws as
+Not ported yet: the remaining spells, most of Nuvie's other Lua scripts, balloons, music for Martian Dreams and Savage Empire, the intro and ending, the remaining usecode (balloons and a few rare items), the ending sequence, and the silver serpent's long body (it draws as
 one tile).
 
 `tests/real.test.ts` runs on your copies put in `web/gamedata/ultima6/`, `savage/` and `martian/` (git-ignored).

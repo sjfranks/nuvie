@@ -9,7 +9,7 @@ import { lzwDecompress, lzwFile } from '../files/lzw.ts';
 import { Actor, Actors, HYDRA, HYDRA_BODY, MANY_SQUARES, SHIP, STATUS_IN_PARTY, WT } from './actors.ts';
 import { Converse, ConverseLib, checkKeywords, type ConvAsk, type ConvWorld } from './converse.ts';
 import { Combat } from './combat.ts';
-import { UseCode, USED_IN_PLACE } from './usecode.ts';
+import { FOODS, UseCode, USED_IN_PLACE } from './usecode.ts';
 import { Magic, type Spell } from './magic.ts';
 import type { SfxId } from '../audio/sfx.ts';
 import { invCount, invDelete, invFind, invNew, invWeight } from './inventory.ts';
@@ -53,6 +53,8 @@ export interface SaveState {
   clock: Clock;
   turns: number;
   light?: number;
+  rest?: number;
+  keg?: number;
   moonstones?: [number, number, number][];
   party: { id: number; name: string }[];
   flags: { karma: number; quest: number; garg: number; gender: number };
@@ -122,6 +124,18 @@ export class Game implements ConvWorld {
   moonstones: [number, number, number][] = [];
   /** Where the game's sounds go (the interface plays them): a sound's name, and for casting its circle. */
   sfx: (id: SfxId, circle?: number) => void = () => {};
+  /** Something wants words typed (a rune's mantra, the crystal ball's bearings): what to ask, and what to do with them. */
+  askText: { label: string; then: (text: string) => void } | null = null;
+  /** Hours before resting heals again (the clock's rest counter). */
+  restCounter = 0;
+  /** Turns until a lit powder keg goes off. */
+  kegTurns = 0;
+  /** The Codex has gone into the void, and the game is won. */
+  won = false;
+  /** Where the crystal ball looks: the land seen from above, about this place. */
+  scry: { x: number; y: number; z: number } | null = null;
+  /** The spellbook asks to be opened. */
+  openBook = false;
   /** The Peer spell asks for the map seen from above. */
   peer = false;
   readonly clock: Clock;
@@ -414,6 +428,7 @@ export class Game implements ConvWorld {
         }
       }
       this.updateSchedules();
+      if (this.restCounter > 0) this.restCounter--;
       if (this.kind === 'u6') {
         this.magic.hourly();
         this.updateMoongates();
@@ -451,6 +466,14 @@ export class Game implements ConvWorld {
     const nx = wrap(p.x + dx, p.z);
     const ny = wrap(p.y + dy, p.z);
     this.openContainer = null;
+    // A quest barrier stops those not on a Sacred Quest (U6UseCode::pass_quest_barrier), and passes those who are.
+    const barrier = this.kind === 'u6' && this.objects.list(nx, ny, p.z)?.some((o) => o.objN === 416);
+    if (barrier && this.questFlag === 0) {
+      this.say('npc', '"Thou art not upon a Sacred Quest! Passage denied!"');
+      this.sfx('blocked');
+      this.onChange();
+      return false;
+    }
     const other = this.actors.at(nx, ny, p.z);
     if (other && this.combat.hostile(other)) {
       this.combat.attack(p, other);
@@ -462,7 +485,7 @@ export class Game implements ConvWorld {
       other.x = p.x;
       other.y = p.y;
       other.setDirection(facing(-dx, -dy));
-    } else if (other || !this.map.isPassable(nx, ny, p.z)) {
+    } else if (other || (!this.map.isPassable(nx, ny, p.z) && !barrier)) {
       const door = this.closedDoorAt(nx, ny, p.z);
       if (door && !other) {
         this.useDoor(door);
@@ -502,6 +525,84 @@ export class Game implements ConvWorld {
     this.endTurn();
   }
 
+  /**
+   * Rest (Event::rest, Party::can_rest, TimedRest): not in a fight, a town, near others, on a horse or in a cramped
+   * place; on a ship, mend her. Otherwise a campfire and a meal - the bard plays - then sleep for the hours asked; those
+   * who ate heal, once each twelve hours.
+   */
+  rest(hours: number): void {
+    if (this.converse) return;
+    const p = this.player;
+    const v = this.vehicle;
+    const no = (why: string): void => {
+      this.say('sys', `Rest - ${why}`);
+      this.sfx('failure');
+      this.onChange();
+    };
+    if (this.combat.fighting) return no('Not while in combat!');
+    if (v) {
+      if (v.objN !== SHIP) return no('Can not be repaired!');
+      v.hp = Math.min(100, v.hp + hours * 10);
+      this.say('sys', `The crew mends the ship. Hull ${v.hp}%.`);
+      for (let i = 0; i < hours; i++) this.advance(60);
+      return this.endTurn();
+    }
+    if (this.inTown()) return no('Only in the wilderness!');
+    if (this.combat.foes(5).length) return no('Not while foes are near!');
+    if (this.actors.list.some((a) => a.visible && a.alive && a.objN && !a.inParty && a.z === p.z && Math.max(Math.abs(a.x - p.x), Math.abs(a.y - p.y)) <= 5)) {
+      return no('Not while others are near!');
+    }
+    if (p.objN === HORSE_WITH_RIDER) return no('Dismount first!');
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (!this.map.isPassable(p.x + dx, p.y + dy, p.z)) return no('Not enough room!');
+    const fire = this.objects.create(253, 1, 0);
+    fire.frameN = 1;
+    fire.status |= STATUS_TEMPORARY;
+    [fire.x, fire.y, fire.z] = [p.x, p.y, p.z];
+    this.objects.add(fire);
+    this.say('sys', 'Mealtime!');
+    const bard = this.party.find((m) => m.actor.objN === OBJ.MUSICIAN);
+    if (bard) this.say('sys', `${bard.name} plays a tune.`);
+    const fed: Actor[] = [];
+    for (const m of this.party) {
+      const own = [...this.objects.inventories[m.actor.id]].find((o) => FOODS.has(o.objN));
+      let food: Obj | undefined = own;
+      if (!food) for (const q of this.party) food ??= this.objects.inventories[q.actor.id].find((o) => FOODS.has(o.objN));
+      if (food) {
+        if (this.objects.isStackable(food) && food.qty > 1) food.qty--;
+        else this.objects.unlink(food);
+        fed.push(m.actor);
+        this.say('sys', `${m.name} has food.`);
+      } else this.say('sys', `${m.name} has no food.`);
+    }
+    this.say('sys', `The party sleeps for ${hours} hour${hours === 1 ? '' : 's'}.`);
+    for (let i = 0; i < hours; i++) this.advance(60);
+    const heal = this.restCounter === 0;
+    if (heal) {
+      for (const a of fed) {
+        let diff = a.maxHp - a.hp;
+        if (diff <= 0) continue;
+        if (diff === 1) diff = 2;
+        a.hp = Math.min(a.maxHp, a.hp + this.random(Math.max(1, diff >> 1)) + (diff >> 1));
+        this.say('sys', `${this.partyMemberName(a.id)} has healed.`);
+      }
+      this.restCounter = 12;
+    }
+    fire.frameN = 0;
+    this.endTurn();
+  }
+
+  /** Walls with their sides marked within five squares: a town, where no one camps (MapWindow::in_town). */
+  private inTown(): boolean {
+    const p = this.player;
+    for (let dy = -5; dy <= 5; dy++) {
+      for (let dx = -5; dx <= 5; dx++) {
+        const t = this.map.tile(p.x + dx, p.y + dy, p.z);
+        if (t.flags1 & 0x04 && t.flags1 & 0xf0) return true;
+      }
+    }
+    return false;
+  }
+
   /** Let a turn go by. */
   pass(): void {
     if (this.converse) return;
@@ -513,6 +614,7 @@ export class Game implements ConvWorld {
     this.turns++;
     if (this.turns % 2 === 0) this.advance(1);
     if (this.lightTurns > 0) this.lightTurns--;
+    if (this.kegTurns > 0 && --this.kegTurns === 0) this.usecode.explodeKegs();
     if (this.infraTurns > 0) this.infraTurns--;
     this.combat.update();
     this.combat.round();
@@ -1081,7 +1183,12 @@ export class Game implements ConvWorld {
       o.status |= STATUS_OK_TO_TAKE;
       this.say('sys', `Get ${what}. Stealing!`);
     } else this.say('sys', `Get ${what}.`);
-    this.objects.toInventory(o, taker.actor.id);
+    // A moonstone taken from the ground no longer holds a moongate (U6UseCode::use_moonstone).
+    if (o.objN === 73 && o.loc === 'map' && this.kind === 'u6') {
+      this.moonstones[o.frameN & 7] = [0, 0, 0];
+      this.objects.toInventory(o, taker.actor.id);
+      this.updateMoongates();
+    } else this.objects.toInventory(o, taker.actor.id);
     this.endTurn();
   }
 
@@ -1501,6 +1608,8 @@ export class Game implements ConvWorld {
       clock: { ...this.clock },
       turns: this.turns,
       light: this.lightTurns,
+      rest: this.restCounter,
+      keg: this.kegTurns,
       moonstones: this.moonstones,
       party: this.party.map((m) => ({ id: m.actor.id, name: m.name })),
       flags: { karma: this.karma, quest: this.questFlag, garg: this.gargFlag, gender: this.gender },
@@ -1518,6 +1627,8 @@ export class Game implements ConvWorld {
     Object.assign(this.clock, s.clock);
     this.turns = s.turns;
     this.lightTurns = s.light ?? 0;
+    this.restCounter = s.rest ?? 0;
+    this.kegTurns = s.keg ?? 0;
     if (s.moonstones) this.moonstones = s.moonstones;
     this.karma = s.flags.karma;
     this.questFlag = s.flags.quest;

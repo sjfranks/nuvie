@@ -209,7 +209,7 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     const g = new Game(load());
     for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
     const p = g.player;
-    const kinds = [268, 174, 288, 64, 63, 122, 145, 164, 206, 253, 236, 419, 233, 234, 181, 182, 264, 104, 103, 275, 93, 159, 235, 123, 153, 156, 157, 158, 296, 212, 169, 77, 96, 115, 128, 129, 131, 184];
+    const kinds = [268, 174, 288, 64, 63, 122, 145, 164, 206, 253, 236, 419, 233, 234, 181, 182, 264, 104, 103, 275, 93, 159, 235, 123, 153, 156, 157, 158, 296, 212, 169, 77, 96, 115, 128, 129, 131, 184, 242, 243, 244, 245, 246, 247, 248, 249, 73, 97, 62, 155, 57, 221, 223];
     for (const objN of kinds) {
       const o = g.objects.create(objN, 1, 0);
       [o.x, o.y, o.z] = [p.x + 1, p.y, p.z];
@@ -218,11 +218,75 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
       expect(() => {
         g.useObj(o);
         if (g.askWhere) g.askWhere.then(p.x + 1, p.y);
+        if (g.askText) g.askText.then('xyzzy');
       }).not.toThrow();
       expect(g.log.some((l) => l.text === 'Not usable.') ? objN : 0).toBe(0);
       if (o.loc === 'map') g.objects.unlink(o);
       g.peer = false;
+      g.won = false;
+      g.scry = null;
+      g.openBook = false;
     }
+  });
+
+  it.runIf(folder === 'ultima6')('rests only in the wilderness, and heals those who eat', () => {
+    const g = new Game(load());
+    for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
+    g.rest(2);
+    expect(g.log.at(-1)!.text).toMatch(/^Rest - /);
+    // Out to open grass, away from everyone.
+    const p = g.player;
+    let spot: [number, number] | null = null;
+    for (let r = 20; r < 200 && !spot; r += 3) {
+      for (const [x, y] of [[p.x + r, p.y], [p.x - r, p.y], [p.x, p.y + r], [p.x, p.y - r]]) {
+        if (spot) break;
+        let ok = true;
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) ok &&= g.map.isPassable(x + dx, y + dy, 0);
+        if (ok && !g.actors.list.some((a) => a.visible && a.objN && !a.inParty && a.z === 0 && Math.max(Math.abs(a.x - x), Math.abs(a.y - y)) <= 8)) spot = [x, y];
+      }
+    }
+    g.relocate(spot![0], spot![1], 0);
+    for (const m of g.party) m.actor.x = p.x, m.actor.y = p.y;
+    (g as unknown as { inTown: () => boolean }).inTown = () => false;
+    const hurt = g.party[0].actor;
+    hurt.hp = 3;
+    g.objects.toInventory(g.objects.create(129, 0, 5), hurt.id); // meat
+    const mins = (): number => ((g.clock.day * 24 + g.clock.hour) * 60) + g.clock.minute;
+    const t = mins();
+    g.rest(4);
+    console.log('rest:', g.log.slice(-6).map((l) => l.text));
+    expect(g.log.some((l) => l.text === 'Mealtime!')).toBe(true);
+    expect(mins() - t).toBeGreaterThanOrEqual(240);
+    expect(hurt.hp).toBeGreaterThan(3);
+  });
+
+  it.runIf(folder === 'ultima6')('lifts a shrine force field with its rune and mantra', () => {
+    const g = new Game(load());
+    const field = g.objects.all().find((o) => o.objN === 51 && o.quality === 0)!;
+    expect(field).toBeTruthy();
+    g.relocate(field.x, field.y + 1, field.z);
+    const rune = g.objects.create(242, 0, 0);
+    g.objects.toInventory(rune, 1);
+    g.useObj(rune);
+    g.askText!.then('mu');
+    expect(g.log.at(-1)!.text).toBe('Wrong mantra!');
+    g.useObj(rune);
+    g.askText!.then('ahm');
+    expect(g.log.at(-1)!.text).toBe('Done!');
+    expect(field.loc).not.toBe('map');
+  });
+
+  it.runIf(folder === 'ultima6')('blows a door open with a lit powder keg', () => {
+    const g = new Game(load());
+    const door = g.objects.all().find((o) => o.objN >= 297 && o.objN <= 300 && o.z === 0 && o.frameN <= 12)!;
+    const keg = g.objects.create(223, 0, 0);
+    [keg.x, keg.y, keg.z] = [door.x + 1, door.y, 0];
+    g.objects.add(keg);
+    g.useObj(keg);
+    expect(keg.frameN).toBe(1);
+    for (let i = 0; i < 4; i++) g.pass();
+    expect(g.log.some((l) => l.text === 'Boom!')).toBe(true);
+    expect(g.log.some((l) => l.text === 'The door is blown up!')).toBe(true);
   });
 
   it.runIf(folder === 'ultima6')('opens a red moongate with the orb, and goes through it', () => {

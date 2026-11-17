@@ -535,9 +535,9 @@ export class MapView {
   }
 
   /** The land round the party seen from above, a pixel a square (Peer): its ground, the party a white mark. */
-  overhead(size = 128): HTMLCanvasElement {
+  overhead(size = 128, at?: { x: number; y: number; z: number }): HTMLCanvasElement {
     const g = this.game;
-    const p = g.player;
+    const p = at ?? g.player;
     const avg = this.averages();
     const c = document.createElement('canvas');
     c.width = c.height = size;

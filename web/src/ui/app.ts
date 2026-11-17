@@ -384,6 +384,21 @@ export class App {
     const g = this.game;
     this.music?.update();
     if (g.openContainer && g.openContainer !== this.shownContainer && !g.converse) this.containerSheet(g.openContainer);
+    if (g.askText && !this.sheet) this.textSheet();
+    if (g.openBook) {
+      g.openBook = false;
+      this.spellbook();
+    }
+    if (g.scry) {
+      const at = g.scry;
+      g.scry = null;
+      this.open('Crystal ball', (body) => {
+        const map = this.view.overhead(128, at);
+        map.className = 'overhead';
+        body.append(map, el('p', 'small', 'A place far off, as the crystal ball shows it.'));
+      });
+    }
+    if (g.won && !this.sheet) this.ending();
     if (g.peer) {
       g.peer = false;
       this.open('Peer', (body) => {
@@ -532,7 +547,7 @@ export class App {
         m('Attack', 'attack', 400),
         icon(btn('Cast', () => this.spellbook()), 401),
         m('Look', 'look', 403), m('Talk', 'talk', 402), m('Use', 'use', 407), m('Get', 'get', 404),
-        icon(btn('Pass', () => g.pass()), 408), icon(btn('Notes', () => this.journal()), 409),
+        icon(btn('Rest', () => this.restSheet()), 408), icon(btn('Notes', () => this.journal()), 409),
       );
       this.foot.replaceChildren(bar);
       return;
@@ -742,6 +757,75 @@ export class App {
       };
       draw(null);
     });
+  }
+
+  /** Pass a turn, or rest some hours (the original asks how many). */
+  private restSheet(): void {
+    const g = this.game;
+    this.open('Rest', (body) => {
+      const row = el('div', 'row');
+      row.append(btn('Pass a turn', () => {
+        this.close();
+        g.pass();
+      }));
+      body.append(row);
+      body.append(el('p', 'small', 'Camp and sleep - away from towns, foes and others. Those with food heal, once in twelve hours.'));
+      const hours = el('div', 'row');
+      for (const h of [1, 2, 4, 8]) {
+        hours.append(btn(`${h} hour${h > 1 ? 's' : ''}`, () => {
+          this.close();
+          g.rest(h);
+        }));
+      }
+      body.append(hours);
+    });
+  }
+
+  /** The game asks for words: a mantra, a bearing. */
+  private textSheet(): void {
+    const g = this.game;
+    const ask = g.askText;
+    if (!ask) return;
+    this.open(ask.label.replace(/:$/, ''), (body) => {
+      const form = el('form');
+      form.className = 'row';
+      const input = el('input');
+      input.autocapitalize = 'characters';
+      input.autocomplete = 'off';
+      input.placeholder = ask.label;
+      const ok = btn('Say', () => {}, 'primary');
+      ok.type = 'submit';
+      form.append(input, ok);
+      form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        this.onClose = null;
+        this.sheet?.remove();
+        this.sheet = null;
+        g.say('you', input.value);
+        ask.then(input.value);
+        this.changed();
+      });
+      body.append(form);
+      setTimeout(() => input.focus(), 50);
+    });
+    this.onClose = () => {
+      if (g.askText === ask) g.askText = null;
+    };
+  }
+
+  /** The game is won. */
+  private ending(): void {
+    const g = this.game;
+    this.open('The Codex', (body) => {
+      body.append(
+        el('p', '', 'The Codex of Ultimate Wisdom has passed into the Ethereal Void, where both Britannians and gargoyles may look upon it, and neither may possess it.'),
+        el('p', '', 'The lenses, and the moonstones in the vortex cube, have done their work. The war between the peoples is over.'),
+        el('p', 'small', 'The ending sequence itself is not ported yet. Thou mayest go on exploring.'),
+      );
+    });
+    this.onClose = () => {
+      g.won = false;
+    };
   }
 
   /** The spellbook: who casts, their magic and reagents, and the spells in their book by circle. */
