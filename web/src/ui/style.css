@@ -148,3 +148,12 @@ button:disabled { opacity: .45; }
 form.row input { flex: 1; min-width: 0; min-height: 44px; border: 2px solid #000; border-radius: 3px; background: var(--parch); color: var(--ink); padding: 0 8px; user-select: text; -webkit-user-select: text; }
 .choices { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .choices button { min-height: 40px; }
+
+.faces { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 10px; }
+.faces .pickface { padding: 3px; min-height: 0; }
+.faces .pickface canvas { width: 100%; image-rendering: pixelated; display: block; }
+.faces .pickface.on, .row button.on { outline: 3px solid var(--key); outline-offset: -3px; }
+label.field { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
+label.field input { min-height: 40px; border: 2px solid #000; border-radius: 3px; background: var(--parch); color: var(--ink); padding: 0 8px; font: inherit; }
+.answers { display: flex; flex-direction: column; gap: 6px; }
+.answers button { text-align: left; padding: 8px; min-height: 44px; white-space: normal; }

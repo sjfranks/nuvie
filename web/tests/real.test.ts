@@ -251,6 +251,20 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     expect(g.actors.at(s.parts()[2].x, s.parts()[2].y, 0)).toBe(s);
   });
 
+  it.runIf(folder === 'ultima6')('makes the Avatar anew, as the gypsy would', () => {
+    const g = new Game(load());
+    expect(g.fresh).toBe(true);
+    expect(g.avatarFace(0)).not.toBeNull();
+    expect(g.avatarFace(11)).not.toBeNull();
+    g.createHero({ name: 'Iolanthe', female: true, face: 2, str: 19, dex: 18, int: 22 });
+    const a = g.player;
+    expect([g.playerName(), g.gender, a.strength, a.dex, a.intelligence, a.magic, a.level]).toEqual(['Iolanthe', 1, 19, 18, 22, 44, 3]);
+    expect(g.portrait(a)).toEqual(g.avatarFace(2));
+    const back = new Game(load(), g.save());
+    expect([back.playerName(), back.gender, back.player.intelligence, back.fresh]).toEqual(['Iolanthe', 1, 22, false]);
+    expect(back.portrait(back.player)).toEqual(g.avatarFace(2));
+  });
+
   it.runIf(folder === 'ultima6')('boards a skiff, sails it, goes ashore; rides a horse', () => {
     const g = new Game(load());
     for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });

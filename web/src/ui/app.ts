@@ -10,6 +10,7 @@ import type { Obj } from '../game/objects.ts';
 import { OBJ, READY_SLOT } from '../game/u6tables.ts';
 import { USED_IN_PLACE } from '../game/usecode.ts';
 import { REAGENTS, reagentCounts, reagentNames, words, type Spell } from '../game/magic.ts';
+import { Gypsy } from './gypsy.ts';
 import { MapView } from './mapview.ts';
 import { haveIcons } from './theme.ts';
 import { Music } from '../audio/music.ts';
@@ -177,6 +178,112 @@ export class App {
     }, 150));
     this.layout();
     this.changed();
+    if (game.fresh && game.kind === 'u6') this.creation();
+  }
+
+  // ---- a new Avatar (intro.lua's create_character) ----
+
+  private creation(): void {
+    const g = this.game;
+    let name = '';
+    let female = false;
+    let face = 0;
+    this.open('A new Avatar', (body) => {
+      body.append(el('p', '', 'In a gypsy\'s wagon at a country fair, a woman with a crystal looks up as thou enterest.'));
+      const input = el('input');
+      input.maxLength = 13;
+      input.placeholder = 'Avatar';
+      input.autocomplete = 'off';
+      input.addEventListener('input', () => (name = input.value));
+      const named = el('label', 'field');
+      named.append(el('span', '', 'By what name shalt thou be called?'), input);
+      const sex = el('div', 'row');
+      const faces = el('div', 'faces');
+      const drawFaces = (): void => {
+        faces.replaceChildren();
+        for (let i = 0; i < 6; i++) {
+          const shape = g.avatarFace((female ? 0 : 6) + i);
+          if (!shape) continue;
+          const b = btn('', () => {
+            face = i;
+            drawFaces();
+          }, i === face ? 'pickface on' : 'pickface');
+          b.setAttribute('aria-label', `Face ${i + 1}`);
+          b.append(this.view.portraitImage(shape));
+          faces.append(b);
+        }
+      };
+      const male = btn('Male', () => {
+        female = false;
+        male.classList.add('on');
+        fem.classList.remove('on');
+        drawFaces();
+      }, 'on');
+      const fem = btn('Female', () => {
+        female = true;
+        fem.classList.add('on');
+        male.classList.remove('on');
+        drawFaces();
+      });
+      sex.append(male, fem);
+      drawFaces();
+      body.append(named, el('p', 'small', 'Art thou a man or a woman?'), sex, el('p', 'small', 'Which face is thine?'), faces);
+      const go = el('div', 'row');
+      go.append(btn('Sit before the gypsy', () => this.gypsy(name, female, face), 'primary'));
+      body.append(go);
+    });
+  }
+
+  private gypsy(name: string, female: boolean, face: number): void {
+    const who = name.trim() || 'Avatar';
+    const contest = new Gypsy();
+    const ask = (): void => {
+      if (contest.done) return finish();
+      const q = contest.question();
+      this.open(`The gypsy asks (${contest.asked + 1} of 7)`, (body) => {
+        body.append(el('p', '', `"${q.text}`));
+        const pick = (w: 'a' | 'b'): void => {
+          contest.answer(w);
+          this.sfx.play('success');
+          ask();
+        };
+        const list = el('div', 'answers');
+        list.append(btn(`A) ${q.a}`, () => pick('a')), btn(`B) ${q.b}`, () => pick('b')));
+        body.append(list);
+      });
+    };
+    const finish = (): void => {
+      this.open('The gypsy', (body) => {
+        body.append(
+          el('p', '', `"The path of the Avatar lies beneath thy feet, worthy ${who}," the gypsy intones. With a mysterious smile, she passes you the flask of shimmering liquids. "Drink of these waters and go forth among our people, who shall receive thee in joy!"`),
+          el('p', 'small', `Strength ${contest.str}, dexterity ${contest.dex}, intelligence ${contest.int}.`),
+        );
+        const row = el('div', 'row');
+        row.append(btn('Drink', () => {
+          this.game.createHero({ name: who, female, face, str: contest.str, dex: contest.dex, int: contest.int });
+          this.open('Britannia', (b) => {
+            b.append(
+              el('p', '', 'As you drink from the flask, vertigo overwhelms you. A soothing mist obscures the gypsy\'s face, and you sink without fear into an untroubled sleep.'),
+              el('p', '', 'You wake in a different time, upon another world\'s shore. Though the Avatar\'s quests bring you both triumph and tragedy, never do you stray from the path of the Eight Virtues.'),
+              el('p', '', 'Finally, tempered by your struggles against the enemies of Virtue, you are proven ready to answer the epic challenge of Ultima VI!'),
+            );
+            const r = el('div', 'row');
+            r.append(btn('Begin', () => this.close(), 'primary'));
+            b.append(r);
+          });
+        }, 'primary'));
+        body.append(row);
+      });
+    };
+    this.open('The gypsy', (body) => {
+      body.append(
+        el('p', '', '"At last thou hast come to fulfill thy destiny," the gypsy says. She smiles, as if in great relief. "Sit before me now, and I shall pour the light of Virtue into the shadows of thy future."'),
+        el('p', '', 'On a wooden table eight bottles stand, a rainbow of bubbling liquids. "Behold the Virtues of the Avatar," the woman says. "Let us begin the casting!"'),
+      );
+      const row = el('div', 'row');
+      row.append(btn('Begin', ask, 'primary'));
+      body.append(row);
+    });
   }
 
   dispose: () => void;

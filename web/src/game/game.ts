@@ -58,7 +58,7 @@ export interface SaveState {
   wind?: [number, number];
   moonstones?: [number, number, number][];
   party: { id: number; name: string }[];
-  flags: { karma: number; quest: number; garg: number; gender: number };
+  flags: { karma: number; quest: number; garg: number; gender: number; face?: number };
   actors: number[][];
   /** [objN, frameN, status, x, y, z, qty, quality, loc (0 map, 1 container, 2 carried, 3 readied), parent index or holder] */
   objs: number[][];
@@ -184,11 +184,15 @@ export class Game implements ConvWorld {
   private said = '';
   private pending: Converse['events'] = [];
 
+  /** A new game, not a saved one: the Avatar may be made anew (the intro's character creation). */
+  readonly fresh: boolean;
+
   constructor(
     readonly files: GameFiles,
     saved?: SaveState,
   ) {
     this.kind = detectKind(files);
+    this.fresh = !saved && files.has('lzobjblk');
     this.tiles = new Tiles(files, this.kind);
     this.objects = new Objects(files, this.tiles, this.kind);
     this.map = new GameMap(files, this.tiles, this.objects);
@@ -1705,6 +1709,39 @@ export class Game implements ConvWorld {
     }
   }
 
+  /** One of the twelve faces the Avatar may wear (portrait.z): women's 0 to 5, men's 6 to 11. */
+  avatarFace(n: number): Shape | null {
+    const raw = this.portraits[2]?.raw(n);
+    if (!raw) return null;
+    try {
+      const d = lzwDecompress(raw);
+      return d.length >= 56 * 64 ? { w: 56, h: 64, data: d } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * The Avatar as the player made them (SaveGame::update_objlist_for_new_game_u6): name, sex and face, and the
+   * strength, dexterity and intelligence the gypsy's questions gave; magic twice the wits, level 3.
+   */
+  createHero(h: { name: string; female: boolean; face: number; str: number; dex: number; int: number }): void {
+    const a = this.actors.get(1)!;
+    this.party[0].name = h.name.trim().slice(0, 13) || 'Avatar';
+    this.gender = h.female ? 1 : 0;
+    if (this.kind === 'u6') this.avatarPortrait = (h.female ? 0 : 6) + h.face;
+    a.strength = h.str;
+    a.dex = h.dex;
+    a.intelligence = h.int;
+    if (this.kind === 'u6') {
+      a.magic = h.int * 2;
+      a.level = 3;
+      a.exp = 0x172;
+    }
+    a.hp = Math.min(a.hp, a.maxHp) || a.maxHp;
+    this.onChange();
+  }
+
   /** The palette's file. */
   get paletteFile(): string {
     return PALETTE[this.kind];
@@ -1730,7 +1767,7 @@ export class Game implements ConvWorld {
       wind: this.wind,
       moonstones: this.moonstones,
       party: this.party.map((m) => ({ id: m.actor.id, name: m.name })),
-      flags: { karma: this.karma, quest: this.questFlag, garg: this.gargFlag, gender: this.gender },
+      flags: { karma: this.karma, quest: this.questFlag, garg: this.gargFlag, gender: this.gender, face: this.avatarPortrait },
       actors: this.actors.list.map((a) => [
         a.x, a.y, a.z, a.objN, a.frameN, a.direction, a.objFlags, a.statusFlags, a.talkFlags, a.movementFlags,
         a.strength, a.dex, a.intelligence, a.exp, a.hp, a.level, a.magic, a.combatMode, a.worktype, a.visible ? 1 : 0,
@@ -1753,6 +1790,7 @@ export class Game implements ConvWorld {
     this.questFlag = s.flags.quest;
     this.gargFlag = s.flags.garg;
     this.gender = s.flags.gender;
+    if (s.flags.face !== undefined) this.avatarPortrait = s.flags.face;
     s.actors.forEach((v, i) => {
       const a = this.actors.list[i];
       if (!a) return;

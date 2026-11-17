@@ -34,6 +34,14 @@ Kal Lor, the death dirge, the tremor and the hail; Menu turns them off and on.
 deeper underground, with smooth pools of light round the party, and warm firelight from lamps, braziers and torches.
 Sunset and sunrise glow orange.
 
+## A new Avatar
+
+A new game of Ultima VI begins as the original's does, in the gypsy's wagon (intro.lua's create_character): a name,
+man or woman, one of six faces, and then the gypsy's questions of the eight virtues - four pairs, the winners in two
+pairs, then the last two - each answer adding to strength, dexterity or intelligence. The Avatar starts at level 3
+with magic twice their intelligence (SaveGame::update_objlist_for_new_game_u6). Close the sheet to keep the
+default Avatar. The animated intro itself (the lounge, the stones, the moongate) is not ported.
+
 ## The screen
 
 - **Upright**: the map fills the width at the top and takes the taps; under it one pane, the **Log** or the
