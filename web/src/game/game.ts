@@ -6,7 +6,7 @@
 import type { GameFiles } from '../files/gamefiles.ts';
 import { Lib } from '../files/lib.ts';
 import { lzwDecompress, lzwFile } from '../files/lzw.ts';
-import { Actor, Actors, STATUS_IN_PARTY, WT } from './actors.ts';
+import { Actor, Actors, SPLIT, STATUS_IN_PARTY, WT } from './actors.ts';
 import { Converse, ConverseLib, checkKeywords, type ConvAsk, type ConvWorld } from './converse.ts';
 import { Combat } from './combat.ts';
 import { Magic, type Spell } from './magic.ts';
@@ -163,6 +163,7 @@ export class Game implements ConvWorld {
       this.party.push({ actor: a, name: 'Avatar' });
     }
     for (const a of this.actors.list) a.schedPos = a.schedulePos(this.clock.hour);
+    if (this.kind === 'u6' && !saved) this.gatherBackHalves();
     this.combat = new Combat(this);
     this.magic = new Magic(this);
     if (saved) this.restore(saved);
@@ -228,6 +229,20 @@ export class Game implements ConvWorld {
     const objlist = f.get('objlist');
     if (!objlist) throw new Error('missing game file: objlist');
     return objlist;
+  }
+
+  /** The back halves of two-square creatures are drawn with them (Actor.back), so their objects leave the map. */
+  private gatherBackHalves(): void {
+    for (const a of this.actors.list) {
+      if (!SPLIT.has(a.objN) || !a.visible) continue;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          for (const o of [...(this.objects.list(a.x + dx, a.y + dy, a.z) ?? [])]) {
+            if (o.objN === a.objN && (o.quality === a.id || o.quality === 0)) this.objects.unlink(o);
+          }
+        }
+      }
+    }
   }
 
   // ---- the party ----
