@@ -100,6 +100,31 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     expect(g.log.some((l) => /Create \d+ food/.test(l.text))).toBe(true);
   });
 
+  it.runIf(folder === 'ultima6')('opens a red moongate with the orb, and goes through it', () => {
+    const g = new Game(load());
+    for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
+    const orb = g.objects.inventories[1].find((o) => o.objN === 87)!;
+    g.useObj(orb);
+    expect(g.log.at(-1)!.text).toContain("can't figure out");
+    g.actors.get(5)!.talkFlags |= 0x20; // Lord British has told of it
+    // Walk to open floor first.
+    const p = g.player;
+    let spot: [number, number] | null = null;
+    for (let dy = -6; dy <= 6 && !spot; dy++) for (let dx = -6; dx <= 6 && !spot; dx++) {
+      const x = p.x + dx;
+      const y = p.y + dy;
+      if (g.canStand(x, y, 0) && g.canStand(x - 2, y - 2, 0) && g.canStand(x - 1, y - 1, 0)) spot = [x, y];
+    }
+    g.relocate(spot![0], spot![1], 0);
+    g.useObj(orb);
+    expect(g.askWhere).not.toBeNull();
+    g.askWhere!.then(p.x - 2, p.y - 2); // the place for 0x383, 0x1f3
+    expect(g.log.at(-1)!.text).toBe('A red moongate appears.');
+    const way = g.pathTo(p.x - 2, p.y - 2)!;
+    for (const [dx, dy] of way) g.move(dx, dy);
+    expect([p.x, p.y, p.z]).toEqual([0x383, 0x1f3, 0]);
+  });
+
   it.runIf(folder === 'ultima6')('readies and unreadies what the party carries', () => {
     const g = new Game(load());
     const dupre = g.party[1].actor;

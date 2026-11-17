@@ -15,7 +15,7 @@ import { Journal, type JournalData } from './journal.ts';
 import { detectKind, mdPortrait, OFFSETS, PALETTE, type Kind } from './kind.ts';
 import { readShape, type Shape } from '../files/shape.ts';
 import { GameMap, wrap } from './map.ts';
-import { Obj, Objects, STATUS_OK_TO_TAKE, type Loc } from './objects.ts';
+import { Obj, Objects, STATUS_OK_TO_TAKE, STATUS_TEMPORARY, type Loc } from './objects.ts';
 import { Tiles } from './tiles.ts';
 import { OBJ, READY_SLOT } from './u6tables.ts';
 
@@ -64,6 +64,17 @@ const DIRS = [
   [0, -1], [1, 0], [0, 1], [-1, 0],
 ] as const;
 const MAX_LOG = 300;
+/** Where a red moongate goes, by its place round the one who opened it (U6UseCode.cpp red_moongate_tbl). */
+const RED_GATES: readonly [number, number, number][] = [
+  [0, 0, 0], [0x383, 0x1f3, 0], [0x3a7, 0x106, 0], [0x1b3, 0x18b, 0], [0x1f7, 0x166, 0], [0x93, 0x373, 0],
+  [0x397, 0x3a6, 0], [0x44, 0x2d, 5], [0x133, 0x160, 0], [0xbc, 0x2d, 5], [0x9f, 0x3ae, 0], [0x2e3, 0x2bb, 0],
+  [0, 0, 0], [0, 0, 0], [0, 0, 0], [0xe3, 0x83, 0], [0x17, 0x16, 1], [0x80, 0x56, 5], [0x6c, 0xdd, 5],
+  [0x39b, 0x36c, 0], [0x127, 0x26, 0], [0x4b, 0x1fb, 0], [0x147, 0x336, 0], [0x183, 0x313, 0], [0x33f, 0xa6, 0],
+  [0x29b, 0x43, 0],
+];
+const LORD_BRITISH = 5;
+const ORB_FLAG = 0x20;
+
 const READABLE: ReadonlySet<number> = new Set([
   OBJ.SIGN, OBJ.SIGN_ARROW, OBJ.BOOK, OBJ.SCROLL, OBJ.GRAVE, OBJ.CROSS, OBJ.PICTURE,
 ]);
@@ -103,6 +114,8 @@ export class Game implements ConvWorld {
   questFlag = 0;
   gargFlag = 0;
   turns = 0;
+  /** Something wants a square chosen on the map (the orb's gate): what to say, and what to do with it. */
+  askWhere: { label: string; then: (x: number, y: number) => void } | null = null;
   /** A container opened to look in. */
   openContainer: Obj | null = null;
   private readonly books: Lib | null;
@@ -419,6 +432,7 @@ export class Game implements ConvWorld {
         a.y = t.y;
       }
     }
+    if (this.kind === 'u6') this.enterGate(nx, ny, p.z);
     this.endTurn();
     return true;
   }
@@ -925,6 +939,10 @@ export class Game implements ConvWorld {
         this.say('sys', o.container.length ? `Searching the ${name}: ${o.container.map((c) => this.objects.look(c)).join(', ')}.` : `The ${name} is empty.`);
       }
     } else if (o.objN === OBJ.TORCH && this.kind === 'u6') this.useTorch(o);
+    else if (o.objN === OBJ.ORB_OF_THE_MOONS && this.kind === 'u6') {
+      this.useOrb();
+      return;
+    }
     else if (FOOD.has(o.objN)) {
       if (o.qty > 1) o.qty--;
       else this.objects.unlink(o);
@@ -981,6 +999,62 @@ export class Game implements ConvWorld {
     this.objects.add(o);
     this.say('sys', `Drop ${what}.`);
     this.endTurn();
+  }
+
+  /**
+   * The Orb of the Moons (U6UseCode::use_orb): once Lord British has told of it, it opens a red moongate on a square
+   * near the party, and where the gate leads is told by which square.
+   */
+  private useOrb(): void {
+    const lb = this.actors.get(LORD_BRITISH);
+    if (!lb || !(lb.talkFlags & ORB_FLAG)) {
+      this.say('sys', "You can't figure out how to use it.");
+      this.onChange();
+      return;
+    }
+    this.say('sys', 'Where?');
+    this.askWhere = {
+      label: 'Orb: tap where',
+      then: (ox, oy) => {
+        this.askWhere = null;
+        const p = this.player;
+        const px = 3 + ox - p.x;
+        const py = 2 + oy - p.y;
+        if (px < 0 || py < 0 || px > 5 || py > 4 || this.actors.at(ox, oy, p.z) || !this.map.isPassable(ox, oy, p.z)) {
+          this.say('sys', 'Failed.');
+          this.onChange();
+          return;
+        }
+        let place = px + py * 5;
+        if (place >= 12 && place <= 14) place = 0;
+        const gate = this.objects.create(OBJ.RED_GATE, 1, place);
+        gate.status |= STATUS_TEMPORARY;
+        [gate.x, gate.y, gate.z] = [ox, oy, p.z];
+        this.objects.add(gate);
+        this.say('sys', 'A red moongate appears.');
+        this.endTurn();
+      },
+    };
+    this.onChange();
+  }
+
+  /** Stepping into a red moongate (U6UseCode::enter_moongate): away, if it goes anywhere. */
+  private enterGate(x: number, y: number, z: number): boolean {
+    const gate = this.objects.list(x, y, z)?.find((o) => o.objN === OBJ.RED_GATE && o.x === x);
+    if (!gate) return false;
+    const to = RED_GATES[gate.quality] ?? RED_GATES[0];
+    if (!this.party.some((m) => invFind(this.objects, m.actor.id, OBJ.ORB_OF_THE_MOONS))) {
+      this.say('sys', 'You forgot the Orb of the Moons!');
+      return false;
+    }
+    this.objects.unlink(gate);
+    if (to[0] === 0 && to[1] === 0) {
+      this.say('sys', 'The gate leads nowhere, and fades.');
+      return true;
+    }
+    this.relocate(to[0], to[1], to[2]);
+    this.say('sys', 'The world shimmers...');
+    return true;
   }
 
   /** Light a torch and hold it, or put one out (U6UseCode::use_torch, simplified). */

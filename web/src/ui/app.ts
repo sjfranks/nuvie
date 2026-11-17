@@ -12,7 +12,7 @@ import { REAGENTS, reagentCounts, reagentNames, words, type Spell } from '../gam
 import { MapView } from './mapview.ts';
 import { haveIcons } from './theme.ts';
 
-type Mode = 'look' | 'talk' | 'use' | 'get' | 'attack' | 'cast' | null;
+type Mode = 'look' | 'talk' | 'use' | 'get' | 'attack' | 'cast' | 'where' | null;
 type Pane = 'log' | 'party';
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', text = ''): HTMLElementTagNameMap[K] => {
@@ -141,6 +141,11 @@ export class App {
     const p = g.player;
     const mode = this.mode;
     this.setMode(null);
+    if (mode === 'where' && g.askWhere) {
+      this.walk = null;
+      g.askWhere.then(sq.x, sq.y);
+      return;
+    }
     if (mode === 'cast' && this.pending) {
       const { caster, spell } = this.pending;
       this.pending = null;
@@ -268,7 +273,7 @@ export class App {
   private setMode(m: Mode): void {
     this.mode = m;
     this.modeTag.hidden = !m;
-    if (m) this.modeTag.textContent = m === 'cast' && this.pending ? `${this.pending.spell.name}: tap where` : `${m[0].toUpperCase() + m.slice(1)}: tap where`;
+    if (m) this.modeTag.textContent = m === 'where' && this.game.askWhere ? this.game.askWhere.label : m === 'cast' && this.pending ? `${this.pending.spell.name}: tap where` : `${m[0].toUpperCase() + m.slice(1)}: tap where`;
     this.footKey = '';
     this.drawFoot();
   }
@@ -282,6 +287,11 @@ export class App {
 
   private changed(): void {
     const g = this.game;
+    if (g.askWhere && this.mode !== 'where') {
+      this.sheet?.remove();
+      this.sheet = null;
+      this.setMode('where');
+    }
     this.view.render();
     this.status.textContent = `${String(g.clock.hour).padStart(2, '0')}:${String(g.clock.minute).padStart(2, '0')}`;
     // While someone talks, or a container stands open, the pane shows the log whatever was chosen.

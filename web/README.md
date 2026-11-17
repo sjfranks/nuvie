@@ -90,7 +90,10 @@ Great Heal, Locate, Explosion, Lightning, Chain Bolt, Kill and Resurrect; the ot
 reagents, but say they are not yet ported. Torches can be lit and held, and Light and torches widen the party's
 light at night.
 
-Not ported yet: most spells, most of Nuvie's other Lua scripts, vehicles and horses, moongates, sound and music, the intro and ending, most other usecode, and creatures made of several
+**The Orb of the Moons** works as in Ultima VI once Lord British has told of it: use it from the Avatar's sheet,
+tap a square near the party, and a red moongate opens there that leads where that square says; step in.
+
+Not ported yet: most spells, most of Nuvie's other Lua scripts, vehicles and horses, the blue moongates of the moons, sound and music, the intro and ending, most other usecode, and creatures made of several
 parts (they draw as one tile). `tests/real.test.ts` runs on your copies put in
 `web/gamedata/ultima6/`, `savage/` and `martian/` (git-ignored): for each it loads a new game, saves and restores
 it, talks with everyone who has a conversation, and (Ultima VI) hatches the opening gargoyles and fights a troll to
