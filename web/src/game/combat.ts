@@ -337,6 +337,11 @@ export class Combat {
 
   /** actor_hit: the damage itself. Returns the experience it earns. */
   private hit(def: Actor, dmg: number): number {
+    // The party's boat takes blows to its hull, but is not sunk here.
+    if (def.id === 0) {
+      def.hp = Math.max(1, def.hp - dmg);
+      return 0;
+    }
     if (def.objN === OBJ.LORD_BRITISH) {
       def.hp = 255;
       return 0;

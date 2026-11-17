@@ -32,7 +32,7 @@ const esc = (s: string): string => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '
 /** Things a tap uses rather than walks onto. */
 const USABLE: ReadonlySet<number> = new Set([
   OBJ.OAKEN_DOOR, OBJ.WINDOWED_DOOR, OBJ.CEDAR_DOOR, OBJ.STEEL_DOOR, OBJ.LADDER, OBJ.CAVE, OBJ.HOLE, OBJ.SIGN,
-  OBJ.SIGN_ARROW, OBJ.GRAVE, OBJ.CHEST, OBJ.BARREL, OBJ.CRATE, OBJ.DRAWER, OBJ.BOOK, OBJ.SCROLL,
+  OBJ.SIGN_ARROW, OBJ.GRAVE, OBJ.CHEST, OBJ.BARREL, OBJ.CRATE, OBJ.DRAWER, OBJ.BOOK, OBJ.SCROLL, 412, 414, 415,
 ]);
 
 export interface AppHooks {
@@ -159,6 +159,17 @@ export class App {
       return;
     }
     if (!this.view.visible(sq.x, sq.y)) return;
+    // Afloat or astride: the party itself is tapped to get off; land is tapped to go ashore there.
+    if (!mode && (g.vehicle || p.objN === 431) && sq.x === p.x && sq.y === p.y) {
+      g.use(p.x, p.y);
+      return;
+    }
+    if (!mode && g.vehicle) {
+      const water = g.afloat(g.vehicle, sq.x, sq.y);
+      this.walk = { ...sq, then: water ? 'walk' : 'use' };
+      this.step();
+      return;
+    }
     if (sq.x === p.x && sq.y === p.y && !mode) {
       // The party itself: what is underfoot, or a turn passed.
       const o = g.objects.get(p.x, p.y, p.z);
@@ -172,7 +183,7 @@ export class App {
       const a = g.actors.at(sq.x, sq.y, p.z);
       const o = g.objects.get(sq.x, sq.y, p.z);
       const door = g.objects.list(sq.x, sq.y, p.z)?.some((d) => g.objects.isDoor(d) && g.objects.isShut(d));
-      if (a && !a.inParty) then = g.combat.hostile(a) ? 'attack' : 'talk';
+      if (a && !a.inParty) then = g.combat.hostile(a) ? 'attack' : a.objN === 430 && a.id >= 203 ? 'use' : 'talk';
       else if (door || (o && USABLE.has(o.objN) && !g.map.isPassable(sq.x, sq.y, p.z)) || (o && (o.objN === OBJ.LADDER || o.objN === OBJ.CAVE || o.objN === OBJ.HOLE))) then = 'use';
     }
     const foe = then === 'attack' ? g.actors.at(sq.x, sq.y, p.z) ?? undefined : undefined;

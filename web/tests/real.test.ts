@@ -128,6 +128,41 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     expect(ported.length).toBeGreaterThan(50);
   });
 
+  it.runIf(folder === 'ultima6')('boards a skiff, sails it, goes ashore; rides a horse', () => {
+    const g = new Game(load());
+    for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
+    // A skiff afloat with land beside it.
+    const skiff = g.objects.all().find((o) => o.objN === 414 && o.quality === 0 && g.map.tile(o.x, o.y, o.z).water &&
+      [[-1, 0], [1, 0], [0, -1], [0, 1]].some(([dx, dy]) => g.canStand(o.x + dx, o.y + dy, o.z) && !g.map.tile(o.x + dx, o.y + dy, o.z).water))!;
+    expect(skiff).toBeDefined();
+    const [sx, sy, sz] = [skiff.x, skiff.y, skiff.z];
+    const shore = [[-1, 0], [1, 0], [0, -1], [0, 1]].find(([dx, dy]) => g.canStand(sx + dx, sy + dy, sz) && !g.map.tile(sx + dx, sy + dy, sz).water)!;
+    g.relocate(sx + shore[0], sy + shore[1], sz);
+    g.useObj(skiff);
+    expect(g.vehicle?.objN).toBe(414);
+    expect(g.player.visible).toBe(false);
+    // Sail somewhere and back (any square of water).
+    const water = [[-1, 0], [1, 0], [0, -1], [0, 1]].find(([dx, dy]) => g.afloat(g.vehicle!, sx + dx, sy + dy));
+    if (water) {
+      expect(g.move(water[0], water[1])).toBe(true);
+      expect(g.player.x).toBe(sx + water[0]);
+      g.move(-water[0], -water[1]);
+    }
+    g.use(sx + shore[0], sy + shore[1]);
+    expect(g.vehicle).toBeNull();
+    expect(g.player.visible).toBe(true);
+    expect(g.objects.list(sx, sy, sz)?.some((o) => o.objN === 414)).toBe(true);
+    // A roaming horse beside the Avatar.
+    const p = g.player;
+    const spot = [[1, 0], [-1, 0], [0, 1], [0, -1]].find(([dx, dy]) => g.canStand(p.x + dx, p.y + dy, p.z))!;
+    const horse = g.combat.spawn(430, p.x + spot[0], p.y + spot[1], p.z, 1, 0xc)!;
+    g.use(horse.x, horse.y);
+    expect(p.objN).toBe(431);
+    g.use(p.x, p.y);
+    expect(p.objN).toBe(410);
+    expect(g.actors.list.some((a) => a.objN === 430 && a.id >= 203)).toBe(true);
+  });
+
   it.runIf(folder === 'ultima6')('opens a red moongate with the orb, and goes through it', () => {
     const g = new Game(load());
     for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });

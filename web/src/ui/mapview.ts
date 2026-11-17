@@ -309,12 +309,11 @@ export class MapView {
       if (vx > this.cols || vy > this.rows || (!infra && !this.seen(Math.min(vx, this.cols - 1), Math.min(vy, this.rows - 1)))) continue;
       if (!infra && vx < this.cols && vy < this.rows && !this.seen(vx, vy)) continue;
       const t = g.tiles.get(g.objects.objToTile[a.objN] + a.frameN);
-      const back = a.back();
-      if (back) {
-        const bx = wrap(back.x - this.curX, z);
-        const by = wrap(back.y - this.curY, z);
+      for (const part of a.parts()) {
+        const bx = wrap(part.x - this.curX, z);
+        const by = wrap(part.y - this.curY, z);
         if (bx <= this.cols && by <= this.rows) {
-          const bt = g.tiles.get(g.objects.objToTile[a.objN] + back.frame);
+          const bt = g.tiles.get(g.objects.objToTile[a.objN] + part.frame);
           this.drawTile(bt, bx, by, false);
           this.drawTile(bt, bx, by, true);
         }
