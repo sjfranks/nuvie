@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nuvie</title>
+<style>
+  :root {
+    --bg: #0d0b09;
+    --panel: #1b1713;
+    --line: #3a3128;
+    --text: #eadfcc;
+    --muted: #a89a85;
+    --accent: #d9a441;
+    --accent-ink: #1b1309;
+    --ok: #7fbf6a;
+    --bad: #e07a5f;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  body { display: flex; flex-direction: column; }
+  #stage { flex: 1; display: none; align-items: center; justify-content: center; min-height: 0; }
+  body.playing #stage { display: flex; }
+  body.playing #menu { display: none; }
+  canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edges;
+    background: #000; outline: none; width: min(100vw, calc(100vh * 1.6)); height: auto;
+    aspect-ratio: 16 / 10; }
+  #menu { max-width: 720px; width: 100%; margin: 0 auto; padding: 32px 16px 48px; }
+  h1 { margin: 0 0 4px; font-size: 30px; letter-spacing: .02em; }
+  .lede { margin: 0 0 24px; color: var(--muted); }
+  .game { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 16px; margin-bottom: 12px; }
+  .game-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .game h2 { margin: 0; font-size: 18px; }
+  .status { font-size: 13px; color: var(--muted); }
+  .status.ok { color: var(--ok); }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  button, label.btn { font: inherit; font-size: 14px; border-radius: 7px; padding: 7px 14px;
+    border: 1px solid var(--line); background: transparent; color: var(--text); cursor: pointer; }
+  button:hover, label.btn:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  button:disabled { opacity: .45; cursor: default; border-color: var(--line); }
+  label.btn input { display: none; }
+  .note { color: var(--muted); font-size: 13px; margin-top: 20px; }
+  .note code { color: var(--text); }
+  #log { margin-top: 16px; font: 12px/1.4 ui-monospace, Menlo, monospace; color: var(--muted);
+    white-space: pre-wrap; max-height: 160px; overflow: auto; }
+  #msg { min-height: 1.5em; margin: 0 0 16px; }
+  #msg.err { color: var(--bad); }
+  #loading { color: var(--muted); }
+</style>
+</head>
+<body>
+<main id="menu">
+  <h1>Nuvie</h1>
+  <p class="lede">The open source engine for Ultima VI, Martian Dreams and The Savage Empire, running in your browser.</p>
+  <p id="msg"><span id="loading">Loading the engine…</span></p>
+  <div id="games"></div>
+  <p class="note">Nuvie needs the original game's files, which you must own (Ultima VI is sold by GOG, for example).
+    Import the folder that holds them, or a <code>.zip</code> of it. The files and your saved games stay in this
+    browser's storage; nothing is uploaded anywhere.</p>
+  <p class="note">In the game: the mouse or the arrow keys move, and the original keyboard commands work
+    (<code>Alt+X</code> or <code>Ctrl+Q</code> quits, <code>Alt+S</code> saves).</p>
+  <div id="log"></div>
+</main>
+<div id="stage"><canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script>
+const USER = '/nuvie/user';
+const GAMES = [
+  { id: 'ultima6', name: 'Ultima VI: The False Prophet' },
+  { id: 'martian', name: 'Martian Dreams' },
+  { id: 'savage',  name: 'The Savage Empire' },
+];
+// Files every one of the three games has in its main folder; the folder holding
+// one of them is taken as the game's folder, wherever it sits in the import.
+const MARKERS = ['maptiles.vga', 'chunks', 'basetile', 'converse.a'];
+
+const $ = (s) => document.querySelector(s);
+let ready = false;
+
+function log(text) {
+  const el = $('#log');
+  el.textContent += text + '\n';
+  el.scrollTop = el.scrollHeight;
+  console.log(text);
+}
+function say(text, err) {
+  const el = $('#msg');
+  el.textContent = text;
+  el.className = err ? 'err' : '';
+}
+
+function exists(path) {
+  try { FS.stat(path); return true; } catch (e) { return false; }
+}
+function installed(id) {
+  if (!exists(USER + '/' + id)) return false;
+  const names = FS.readdir(USER + '/' + id).map((n) => n.toLowerCase());
+  return MARKERS.some((m) => names.includes(m));
+}
+function persist() {
+  return new Promise((resolve) => FS.syncfs(false, (err) => { if (err) log('Saving to browser storage failed: ' + err); resolve(); }));
+}
+function removeTree(path) {
+  for (const name of FS.readdir(path)) {
+    if (name === '.' || name === '..') continue;
+    const p = path + '/' + name;
+    if (FS.isDir(FS.stat(p).mode)) removeTree(p); else FS.unlink(p);
+  }
+  FS.rmdir(path);
+}
+
+function render() {
+  const box = $('#games');
+  box.innerHTML = '';
+  for (const g of GAMES) {
+    const have = ready && installed(g.id);
+    const card = document.createElement('section');
+    card.className = 'game';
+    card.innerHTML = `
+      <div class="game-head"><h2></h2><span class="status ${have ? 'ok' : ''}">${have ? 'Game files installed' : 'No game files yet'}</span></div>
+      <div class="actions">
+        <button class="primary play" ${have && ready ? '' : 'disabled'}>Play</button>
+        <label class="btn">Import folder<input type="file" webkitdirectory multiple></label>
+        <label class="btn">Import .zip<input type="file" accept=".zip,application/zip"></label>
+        ${have ? '<button class="remove">Remove files</button>' : ''}
+      </div>`;
+    card.querySelector('h2').textContent = g.name;
+    card.querySelector('.play').onclick = () => play(g.id);
+    const [dirInput, zipInput] = card.querySelectorAll('input');
+    dirInput.onchange = () => importFiles(g, [...dirInput.files].map((f) => ({ path: f.webkitRelativePath || f.name, read: () => f.arrayBuffer() })));
+    zipInput.onchange = async () => {
+      const file = zipInput.files[0];
+      if (!file) return;
+      try {
+        const zip = await JSZip.loadAsync(file);
+        const entries = [];
+        zip.forEach((path, entry) => { if (!entry.dir) entries.push({ path, read: () => entry.async('arraybuffer') }); });
+        importFiles(g, entries);
+      } catch (e) { say('That zip could not be read: ' + e.message, true); }
+    };
+    const rm = card.querySelector('.remove');
+    if (rm) rm.onclick = async () => {
+      if (!confirm('Remove the ' + g.name + ' files from this browser? Saved games are kept.')) return;
+      removeTree(USER + '/' + g.id);
+      await persist();
+      say(g.name + ' files removed.');
+      render();
+    };
+    box.appendChild(card);
+  }
+}
+
+async function importFiles(game, entries) {
+  if (!ready || !entries.length) return;
+  // Find the shallowest folder that holds one of the marker files.
+  let root = null;
+  for (const e of entries) {
+    const parts = e.path.replace(/\\/g, '/').split('/');
+    const base = parts.pop().toLowerCase();
+    if (MARKERS.includes(base) && (root === null || parts.length < root.length)) root = parts;
+  }
+  if (root === null) {
+    say('No ' + game.name + ' game files were found there (looked for MAPTILES.VGA, CHUNKS, BASETILE).', true);
+    return;
+  }
+  const prefix = root.length ? root.join('/') + '/' : '';
+  const dest = USER + '/' + game.id;
+  if (exists(dest)) removeTree(dest);
+  FS.mkdirTree(dest);
+  let count = 0;
+  for (const e of entries) {
+    const path = e.path.replace(/\\/g, '/');
+    if (!path.startsWith(prefix)) continue;
+    const rel = path.slice(prefix.length);
+    if (!rel || rel.split('/').some((p) => p === '..')) continue;
+    const target = dest + '/' + rel;
+    FS.mkdirTree(target.slice(0, target.lastIndexOf('/')));
+    FS.writeFile(target, new Uint8Array(await e.read()));
+    if (++count % 50 === 0) say('Importing… ' + count + ' files');
+  }
+  await persist();
+  say('Imported ' + count + ' files for ' + game.name + '.');
+  render();
+}
+
+function play(id) {
+  document.body.classList.add('playing');
+  const canvas = $('#canvas');
+  canvas.focus();
+  setInterval(persist, 5000);
+  try {
+    Module.callMain([id]);
+  } catch (e) {
+    if (e !== 'unwind' && !(e && e.name === 'ExitStatus')) log(String(e));
+  }
+}
+
+addEventListener('visibilitychange', () => { if (ready && document.visibilityState === 'hidden') persist(); });
+addEventListener('pagehide', () => { if (ready) persist(); });
+
+var Module = {
+  canvas: document.getElementById('canvas'),
+  print: (t) => log(t),
+  printErr: (t) => log(t),
+  preRun: [() => {
+    try { FS.mkdir('/nuvie'); } catch (e) {}
+    FS.mkdirTree(USER);
+    FS.mount(FS.filesystems.IDBFS, {}, USER);
+    Module.addRunDependency('nuvie-user');
+    FS.syncfs(true, (err) => {
+      if (err) log('Could not read browser storage: ' + err);
+      Module.removeRunDependency('nuvie-user');
+    });
+  }],
+  onRuntimeInitialized: () => {
+    ready = true;
+    say('Choose a game. Import its files first if you have not yet.');
+    render();
+  },
+  onExit: async (status) => {
+    await persist();
+    document.body.classList.remove('playing');
+    $('#games').innerHTML = '';
+    say('Nuvie has stopped' + (status ? ' (see the log below)' : '') + '. Reload the page to play again.', !!status);
+    const again = document.createElement('button');
+    again.className = 'primary';
+    again.textContent = 'Reload';
+    again.onclick = () => location.reload();
+    $('#games').appendChild(again);
+  },
+  setStatus: (t) => { if (t && !ready) $('#loading').textContent = t; },
+};
+render();
+</script>
+<script async src="nuvie.js"></script>
+</body>
+</html>

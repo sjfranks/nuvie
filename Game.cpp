@@ -72,6 +72,7 @@
 #include "Utils.h"
 
 #include "Game.h"
+#include "WebPort.h"
 
 Game *Game::game = NULL;
 
@@ -728,6 +729,7 @@ void Game::update_once(bool process_gui_input, bool run_converse)
 
     event->update_timers();
 
+    web_idle();
     SDL_Event event;
     while(SDL_PollEvent(&event))
     {

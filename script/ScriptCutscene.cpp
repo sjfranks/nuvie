@@ -37,6 +37,7 @@
 #include "Keys.h"
 
 #include "ScriptCutscene.h"
+#include "WebPort.h"
 
 #define DELUXE_PAINT_MAGIC 0x4d524f46 // "FORM"
 
@@ -1713,7 +1714,7 @@ void ScriptCutscene::wait()
 
     uint32 delay = next_time-now;
     next_time += loop_interval;
-    SDL_Delay(delay);
+    web_delay(delay);
 }
 
 /* Show the widget  */

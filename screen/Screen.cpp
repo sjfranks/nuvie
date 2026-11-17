@@ -41,6 +41,7 @@
 #include "Screen.h"
 #include "MapWindow.h"
 #include "Background.h"
+#include "WebPort.h"
 
 #define sqr(a) ((a)*(a))
 
@@ -146,6 +147,7 @@ config->value("config/video/scale_factor", scale_factor, 1);
     SDL_SetRenderDrawColor(sdlRenderer, 0, 0, 0, 255);
     SDL_RenderClear(sdlRenderer);
     SDL_RenderPresent(sdlRenderer);
+    web_idle();
 #endif
     return true;
 }
@@ -1377,6 +1379,7 @@ void Screen::update()
     SDL_RenderClear(sdlRenderer);
     SDL_RenderCopy(sdlRenderer, sdlTexture, NULL, NULL);
     SDL_RenderPresent(sdlRenderer);
+    web_idle();
 #else
     SDL_UpdateRect(sdl_surface,0,0,0,0);
 #endif
@@ -1445,6 +1448,7 @@ void Screen::preformUpdate()
     SDL_RenderClear(sdlRenderer);
     SDL_RenderCopy(sdlRenderer, sdlTexture, NULL, NULL);
     SDL_RenderPresent(sdlRenderer);
+    web_idle();
 #else
     SDL_UpdateRects(sdl_surface,num_update_rects,update_rects);
 #endif

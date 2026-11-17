@@ -36,6 +36,10 @@
 #include "Actor.h"
 #include "nuvieDefs.h"
 #include "Configuration.h"
+
+#ifdef __EMSCRIPTEN__
+#define WEB_USER_DIR "/nuvie/user"
+#endif
 #include "U6misc.h"
 #include "NuvieIOFile.h"
 #include "Screen.h"
@@ -268,6 +272,19 @@ bool Nuvie::initConfig()
 
 
  config = new Configuration();
+
+#ifdef __EMSCRIPTEN__
+ // The browser build keeps everything in a persistent (IndexedDB backed)
+ // filesystem mounted by the page at /nuvie/user.
+ config_path.assign(WEB_USER_DIR "/nuvie.cfg");
+ if(loadConfigFile(config_path, NUVIE_CONF_READWRITE))
+   return true;
+ if(initDefaultConfigWeb())
+   return true;
+ delete config;
+ config = NULL;
+ return false;
+#endif
 
 #ifdef WIN32
 	const char *configFilePath = getConfigPathWin32();
@@ -552,6 +569,44 @@ bool Nuvie::initDefaultConfigMacOSX(const char *home_env)
 
 	return true;
 }
+
+#ifdef __EMSCRIPTEN__
+bool Nuvie::initDefaultConfigWeb()
+{
+	const unsigned char cfg_stub[] = "<config></config>";
+	std::string config_path(WEB_USER_DIR "/nuvie.cfg");
+	std::string user(WEB_USER_DIR);
+
+	NuvieIOFileWrite cfgFile;
+
+	if(cfgFile.open(config_path) == false)
+		return false;
+
+	cfgFile.writeBuf(cfg_stub, sizeof(cfg_stub));
+	cfgFile.close();
+
+	if(loadConfigFile(config_path, NUVIE_CONF_READWRITE) == false)
+		return false;
+
+	SharedDefaultConfigValues();
+	config->set("config/datadir", "/nuvie/data");
+	config->set("config/ultima6/gamedir", user + "/ultima6");
+	config->set("config/ultima6/townsdir", user + "/townsU6");
+	config->set("config/ultima6/savedir", user + "/u6_save");
+	config->set("config/ultima6/sfxdir", user + "/custom_sfx");
+	config->set("config/ultima6/patch_keys", user + "/patchkeys.txt");
+	config->set("config/martian/gamedir", user + "/martian");
+	config->set("config/martian/savedir", user + "/martian_save");
+	config->set("config/martian/patch_keys", user + "/patchkeys.txt");
+	config->set("config/savage/gamedir", user + "/savage");
+	config->set("config/savage/savedir", user + "/savage_save");
+	config->set("config/savage/patch_keys", user + "/patchkeys.txt");
+
+	config->write();
+
+	return true;
+}
+#endif
 
 bool Nuvie::initDefaultConfigUnix(const char *home_env)
 {

@@ -28,6 +28,7 @@
 #include "U6misc.h"
 #include "GUI.h"
 #include "Console.h"
+#include "WebPort.h"
 
 static Console *g_console = NULL;
 
@@ -128,6 +129,7 @@ void ConsolePause()
 	 {
 		 while(!SDL_PollEvent(&event))
 		 {
+			 web_idle();
 			 if(event.type == SDL_KEYDOWN || event.type == SDL_QUIT)
 			 {
 				 waiting = false;

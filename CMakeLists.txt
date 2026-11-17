@@ -3,7 +3,14 @@ project(nuvie)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${nuvie_SOURCE_DIR}/builds/cmake")
 
-find_package(SDL2 REQUIRED)
+IF(EMSCRIPTEN)
+    # Browser build (see builds/web). SDL2 comes from Emscripten's ports.
+    set(NUVIE_WEB_FLAGS "-sUSE_SDL=2 -fexceptions")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${NUVIE_WEB_FLAGS} -DLUA_USE_POSIX -DUNIX")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${NUVIE_WEB_FLAGS} -DLUA_USE_POSIX")
+ELSE(EMSCRIPTEN)
+    find_package(SDL2 REQUIRED)
+ENDIF(EMSCRIPTEN)
 
 IF(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DLUA_USE_MACOSX -DUNIX -DMACOSX -DHAVE_JOYSTICK_SUPPORT")
@@ -332,6 +339,8 @@ set(SOURCE_FILES
     misc/U6LList.cpp
     misc/U6LList.h
     misc/U6misc.cpp
+    misc/WebPort.cpp
+    misc/WebPort.h
     misc/U6misc.h
     misc/SDLUtils.cpp
     misc/SDLUtils.h
@@ -622,7 +631,29 @@ include_directories(views)
 
 add_executable(nuvie ${SOURCE_FILES})
 
-TARGET_LINK_LIBRARIES(nuvie ${SDL2_LIBRARY})
+IF(EMSCRIPTEN)
+    # Nuvie runs its own blocking loops; ASYNCIFY lets them yield to the
+    # browser (see misc/WebPort.cpp). The page (builds/web/shell.html) mounts
+    # the persistent filesystem and starts the game with callMain().
+    set_target_properties(nuvie PROPERTIES SUFFIX ".js")
+    TARGET_LINK_LIBRARIES(nuvie
+        "-sUSE_SDL=2"
+        "-fexceptions"
+        "-sASYNCIFY"
+        "-sASYNCIFY_STACK_SIZE=1048576"
+        "-sSTACK_SIZE=4194304"
+        "-sALLOW_MEMORY_GROWTH=1"
+        "-sINITIAL_MEMORY=67108864"
+        "-sFORCE_FILESYSTEM=1"
+        "-sINVOKE_RUN=0"
+        "-sEXIT_RUNTIME=1"
+        "-sEXPORTED_RUNTIME_METHODS=FS,callMain,addRunDependency,removeRunDependency"
+        "-lidbfs.js"
+        "--preload-file" "${nuvie_SOURCE_DIR}/data@/nuvie/data"
+    )
+ELSE(EMSCRIPTEN)
+    TARGET_LINK_LIBRARIES(nuvie ${SDL2_LIBRARY})
+ENDIF(EMSCRIPTEN)
 
 #IF(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
 ##    TARGET_LINK_LIBRARIES(nuvie ${SDL_LIBS} -Wl,-framework,Cocoa)

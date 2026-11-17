@@ -1,0 +1,50 @@
+# Builds the browser port (Emscripten, see builds/web) and publishes it to
+# GitHub Pages at https://<owner>.github.io/<repository>/.
+# The site carries only the engine: players import their own game files,
+# which stay in their browser's storage.
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [master, "claude/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 3.1.74
+      - run: emcmake cmake -S . -B build-web -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build build-web -j"$(nproc)"
+      - run: |
+          mkdir site
+          cp build-web/nuvie.js build-web/nuvie.wasm build-web/nuvie.data site/
+          cp builds/web/index.html site/
+          touch site/.nojekyll
+          ls -la site
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

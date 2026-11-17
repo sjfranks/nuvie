@@ -48,6 +48,22 @@ Win32
 Nuvie can be compiled for win32 using MinGW
 
 
+Web (Emscripten)
+
+The browser build compiles with Emscripten and is published to GitHub Pages
+by `.github/workflows/pages.yml`. To build it yourself:
+
+```
+emcmake cmake -S . -B build-web -DCMAKE_BUILD_TYPE=Release
+cmake --build build-web
+cp builds/web/index.html build-web/
+```
+
+Serve `build-web/` over HTTP and open `index.html`. The page asks for the
+game's files (a folder or a .zip) and keeps them, with saved games, in the
+browser's storage.
+
+
 Using Nuvie
 -----------
 

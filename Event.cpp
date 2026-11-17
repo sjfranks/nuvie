@@ -46,6 +46,7 @@
 #include "ActorView.h"
 #include "CommandBar.h"
 #include "Event.h"
+#include "WebPort.h"
 #include "U6objects.h"
 #include "Effect.h"
 #include "EffectManager.h"
@@ -2361,7 +2362,7 @@ void Event::alt_code_teleport_menu(uint32 selection) {
 
 void Event::wait() {
   if (!ignore_timeleft)
-    SDL_Delay(TimeLeft());
+    web_delay(TimeLeft());
 }
 
 //Protected

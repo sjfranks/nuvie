@@ -30,6 +30,7 @@
 #include "Configuration.h"
 
 #include "GUI.h"
+#include "WebPort.h"
 #include "GUI_types.h"
 
 #ifdef HAVE_JOYSTICK_SUPPORT
@@ -424,6 +425,7 @@ void GUI::Run(GUI_IdleProc idle, int once, int multitaskfriendly)
 			}
 		}
 		//ERIC SDL_Delay(10);
+		web_idle();
 	} while ( running && ! once );
 }
 
