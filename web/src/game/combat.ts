@@ -5,7 +5,7 @@
  * spawn_egg, ActorManager.cpp create_temp_actor and the clean-up of temporary actors).
  *
  * Simplified where the original's detail would not show on a phone: every actor in a fight acts once a turn rather
- * than by movement points; monsters that cast spells fight with their hands; thrown weapons are not lost.
+ * than by movement points; thrown weapons are not lost.
  */
 import type { Actor } from './actors.ts';
 import { STATUS_DEAD, STATUS_IN_PARTY } from './actors.ts';
@@ -27,6 +27,8 @@ const FIGHTING: ReadonlySet<number> = new Set([
 ]);
 /** Actors from here on are made as they are needed (Ultima 6's temp_actor_offset). */
 const TEMP_FROM = 203;
+/** A spell held as a weapon: a monster's, or a staff's (obj 336). */
+const CHARGE = 336;
 const BLOOD = 338;
 const ARROW = 55;
 const BOLT = 56;
@@ -197,8 +199,13 @@ export class Combat {
     let best: Weapon = { objN: a.objN, obj: null };
     let max = 0;
     for (const o of carried(this.g.objects, a.id)) {
-      if (a.inParty && o.loc !== 'readied') continue;
       if (o.parentObj) continue;
+      // A spell the creature knows (a charge), now and then, the less often the higher the spell (actor_get_weapon).
+      if (o.objN === CHARGE) {
+        if (this.g.stormTurns === 0 && this.rand(0, 3) === 0 && this.rand(0, o.quality) < 16) return { objN: CHARGE, obj: o };
+        continue;
+      }
+      if (a.inParty && o.loc !== 'readied') continue;
       const dmg = WEAPON_DMG.get(o.objN);
       if (dmg !== undefined && dmg > max && (WEAPON_RANGE.get(o.objN) ?? 1) >= reach && !this.outOfAmmo(a, o.objN)) {
         max = dmg;
@@ -271,6 +278,11 @@ export class Combat {
     const w = this.weapon(att, foe.x, foe.y);
     if (this.range(att, foe.x, foe.y) > (WEAPON_RANGE.get(w.objN) ?? 1)) return false;
     att.setDirection(Math.abs(foe.x - att.x) <= Math.abs(foe.y - att.y) ? (foe.y >= att.y ? 2 : 0) : foe.x >= att.x ? 1 : 3);
+    if (w.objN === CHARGE && w.obj) {
+      if (w.obj.quality === 0x81) return this.wispTeleport(att);
+      this.g.magic.castAs(att, w.obj.quality, foe.x, foe.y);
+      return true;
+    }
     const far = Math.abs(foe.x - att.x) > 1 || Math.abs(foe.y - att.y) > 1;
     const ranged = w.objN !== 40 && w.objN !== 47 && (far || PROJECTILE.has(w.objN));
     let hit = this.hits(att, foe, w);
@@ -454,6 +466,7 @@ export class Combat {
       return;
     }
     const [deadObj, deadFrame] = DEAD.get(a.objN) ?? [0, 0];
+    for (const k of (g.objects.inventories[a.id] ?? []).filter((o) => o.objN === CHARGE)) g.objects.unlink(k);
     const inv = [...(g.objects.inventories[a.id] ?? [])];
     let into: Obj | null = null;
     if (deadObj !== 0 && deadObj !== BLOOD) {
@@ -789,9 +802,28 @@ export class Combat {
     return kept;
   }
 
-  /** actor_init's weapons, armour and treasure. */
+  /** A wisp's own magic: it vanishes and comes again beside the party (toss_actor). */
+  private wispTeleport(a: Actor): boolean {
+    const p = this.g.player;
+    for (let i = 0; i < 16; i++) {
+      const x = p.x + this.rand(-3, 3);
+      const y = p.y + this.rand(-3, 3);
+      if (!this.g.canStand(x, y, p.z)) continue;
+      [a.x, a.y, a.z] = [x, y, p.z];
+      this.g.say('sys', 'Wisp teleports!');
+      return true;
+    }
+    return true;
+  }
+
+  /** actor_init's spells, weapons, armour and treasure. */
   private equip(a: Actor, base: (typeof MONSTERS extends Map<number, infer T> ? T : never)): void {
     const g = this.g;
+    for (const v of base.spells) {
+      const k = g.objects.create(CHARGE, 1, v);
+      k.status |= 0x38;
+      g.objects.toInventory(k, a.id);
+    }
     const w = base.weapons[0];
     if (w !== undefined) {
       this.give(a, w, w >= 36 && w <= 38 ? this.rand(6, 12) : 0, true);

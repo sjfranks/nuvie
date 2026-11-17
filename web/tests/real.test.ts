@@ -177,6 +177,26 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     expect([avatar.x, avatar.y, avatar.z]).toEqual(g.moonstones[4]);
   });
 
+  it.runIf(folder === 'ultima6')('meets monsters that cast their spells', () => {
+    const g = new Game(load());
+    for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
+    const p = g.player;
+    let x = p.x + 3;
+    while (!g.canStand(x, p.y, p.z)) x++;
+    const mage = g.combat.spawn(378, x, p.y, p.z, 2, 8)!; // evil, assaulting
+    expect(g.objects.inventories[mage.id].filter((o) => o.objN === 336).length).toBe(8);
+    const said: string[] = [];
+    const say = g.say.bind(g);
+    g.say = ((w: never, t: string) => (said.push(t), say(w, t))) as typeof g.say;
+    for (let i = 0; i < 60 && mage.alive && !said.some((t) => / casts /.test(t)); i++) {
+      for (const m of g.party) m.actor.hp = m.actor.maxHp;
+      mage.hp = 50;
+      g.pass();
+    }
+    console.log('mage:', said.filter((t) => t !== 'Pass.').slice(0, 8));
+    expect(said.some((t) => /^Mage casts /.test(t))).toBe(true);
+  });
+
   it.runIf(folder === 'ultima6')('boards a skiff, sails it, goes ashore; rides a horse', () => {
     const g = new Game(load());
     for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });

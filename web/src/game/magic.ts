@@ -144,6 +144,47 @@ export class Magic {
     return true;
   }
 
+  /** Who casts now, where it is not the party: its failures go unsaid (magic_failed and the like). */
+  private quiet = false;
+
+  /**
+   * A spell cast without book, points or reagents: a monster's charge in a fight (actor_attack with a charge), or a
+   * staff's. Spell 128 is the monsters' own invisibility.
+   */
+  castAs(a: Actor, num: number, x: number, y: number): void {
+    const g = this.g;
+    const near = a.z === g.player.z && Math.max(Math.abs(a.x - g.player.x), Math.abs(a.y - g.player.y)) <= 10;
+    if (num === 128) {
+      if (!a.visible) return;
+      a.objFlags |= INVISIBLE;
+      if (near) g.say('sys', `${this.cap(this.name(a))} vanishes!`);
+      return;
+    }
+    const s = SPELLS.find((p) => p.num === num);
+    const c = CASTS.get(num);
+    if (!s || !c) return;
+    if (near) {
+      g.say('sys', `${this.cap(this.name(a))} casts ${s.name}.`);
+      g.sfx('cast2', s.circle);
+    }
+    if (c.tile && (x !== a.x || y !== a.y)) g.combat.flash(x, y, a.z, 'miss', { tile: c.tile, fromX: a.x, fromY: a.y });
+    this.quiet = !a.inParty;
+    try {
+      c.run(this, a, x, y);
+    } finally {
+      this.quiet = false;
+    }
+  }
+
+  /** A name to begin a sentence with. */
+  who(a: Actor): string {
+    return this.cap(this.name(a));
+  }
+
+  private cap(t: string): string {
+    return t.charAt(0).toUpperCase() + t.slice(1);
+  }
+
   // ---- what spells do, shared ----
 
   /** actor_int_check: the caster's wits against the target's. True where the target holds out. */
@@ -200,7 +241,7 @@ export class Magic {
     else if (Math.floor((Math.floor(adj(a, a.strength) / 2) + 30 - adj(c, c.intelligence)) / 2) <= this.rand(1, 30)) {
       a.statusFlags |= 0x08;
       this.g.combat.flash(a.x, a.y, a.z, 'hit');
-      this.g.say('sys', `${this.name(a)} poisoned!`);
+      this.g.say('sys', `${this.cap(this.name(a))} poisoned!`);
     } else this.failed();
   }
 
@@ -227,20 +268,22 @@ export class Magic {
     if (MONSTERS.get(foe.objN)?.sleepImmune === 1) return this.noEffect();
     if (this.resists(foe, caster)) return this.failed();
     foe.statusFlags |= 0x04;
-    this.g.say('sys', `${this.name(foe)} falls asleep.`);
+    this.g.say('sys', `${this.cap(this.name(foe))} falls asleep.`);
     return true;
   }
 
   success(): boolean {
-    this.g.say('sys', 'Success.');
+    if (!this.quiet) this.g.say('sys', 'Success.');
     return true;
   }
   failed(): boolean {
+    if (this.quiet) return false;
     this.g.say('sys', 'Failed.');
     this.g.sfx('failure');
     return false;
   }
   noEffect(): boolean {
+    if (this.quiet) return false;
     this.g.say('sys', 'No effect.');
     this.g.sfx('failure');
     return false;
@@ -455,7 +498,7 @@ const CASTS = new Map<number, Cast>([
   [69, { aim: 'actor', tile: 0x17f, run: (m, c, x, y) => onActor(m, x, y, c.z, (a) => {
     a.statusFlags |= PARALYZED;
     m.g.combat.flash(a.x, a.y, a.z, 'hit');
-    m.g.say('sys', `${m.g.lookActor(a)} is paralyzed.`);
+    m.g.say('sys', `${m.who(a)} is paralyzed.`);
   }) }],
   [71, { aim: 'none', run: (m, c) => {
     for (const a of m.g.actors.list) if (a.objFlags & INVISIBLE && a.z === c.z && Math.abs(a.x - c.x) <= 5 && Math.abs(a.y - c.y) <= 5) a.objFlags &= ~INVISIBLE;

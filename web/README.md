@@ -95,7 +95,8 @@ usecode (most of what using things does in them) and the scenes behind their fac
 maces, against the foe's dexterity), weapon damage less a roll against readied armour, half damage for the creatures
 that take it, poison, experience for evil foes slain, bodies that hold what was carried, ammunition, missile walls,
 and death - the Avatar wakes in Lord British's castle with the fallen raised. Simplified: each fighter acts once a
-turn (not by movement points), monsters that cast fight bare-handed, and thrown weapons are not lost.
+turn (not by movement points), and thrown weapons are not lost. Monsters that know spells (mages, liches, dragons,
+wisps, gazers and the like) carry them as charges and now and then cast one instead of striking, as actor.lua has it.
 
 **Magic** has Magic.cpp's checks - a readied spellbook holding the spell, a level and magic points as high as its
 circle, a reagent of each kind - and magic points come back each hour. All 80 spells are ported from their Lua: the
