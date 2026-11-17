@@ -152,16 +152,17 @@ export class Game implements ConvWorld {
       p = 0;
       for (let i = 0; i < 5; i++) p += this.objects.loadBlock(dng, p);
       const objlist = dng.slice(p);
-      // A new game's hero, as Nuvie sets them up.
-      const name = 'Avatar';
-      for (let i = 0; i <= name.length; i++) objlist[0xf00 + i] = name.charCodeAt(i) || 0;
-      objlist[0x1c71] = 0;
-      objlist[0x1c72] = 1;
-      objlist[0x901] = objlist[0xa01] = objlist[0xb01] = 0xf;
-      objlist[0xc02] = 0x72;
-      objlist[0xc03] = 0x01;
-      objlist[0x13f2] = 0x1e;
-      objlist[0xff2] = 3;
+      // A new game's hero, as Nuvie sets them up, where the files leave them blank.
+      if (objlist[0xf00] === 0) {
+        const name = 'Avatar';
+        for (let i = 0; i <= name.length; i++) objlist[0xf00 + i] = name.charCodeAt(i) || 0;
+        objlist[0x1c72] = 1;
+        objlist[0x901] = objlist[0xa01] = objlist[0xb01] = 0xf;
+        objlist[0xc02] = 0x72;
+        objlist[0xc03] = 0x01;
+        objlist[0x13f2] = 0x1e;
+        objlist[0xff2] = 3;
+      }
       return objlist;
     }
     const letters = 'abcdefgh';

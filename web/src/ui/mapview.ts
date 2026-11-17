@@ -1,0 +1,367 @@
+/**
+ * mapview.ts - the view of the world: the ground, then what lies on it, then everyone, then what stands over them,
+ * with what the party cannot see from where it stands left black (Nuvie's MapWindow.cpp). Drawn as palette indices at
+ * the game's own 16 pixels a square, and turned to colour through a palette that cycles (fires, water, magic).
+ */
+import type { Game } from '../game/game.ts';
+import { mapWidth, wrap } from '../game/map.ts';
+import { STATUS_INVISIBLE, type Obj } from '../game/objects.ts';
+import { F1_WALL, F1_WALL_EAST, F1_WALL_MASK, F1_WALL_NORTH, F1_WALL_SOUTH, F1_WALL_WEST, F2_BOUNDARY, F2_WINDOW, type Tile } from '../game/tiles.ts';
+import { OBJ } from '../game/u6tables.ts';
+
+const BORDER = 3;
+
+/** A mark over a square: the way a tap will take, or a square being chosen. */
+export interface Mark {
+  x: number;
+  y: number;
+  color: string;
+  kind: 'dot' | 'box';
+}
+
+export class MapView {
+  cols = 11;
+  rows = 11;
+  /** The top left square shown. */
+  curX = 0;
+  curY = 0;
+  marks: Mark[] = [];
+  private tmp = new Uint16Array(0);
+  private tw = 0;
+  private th = 0;
+  private buf = new Uint8Array(0);
+  private image: ImageData | null = null;
+  private readonly palette = new Uint8Array(768);
+  private readonly pal32 = new Uint32Array(256);
+  private rotCounter = 0;
+  private readonly ctx: CanvasRenderingContext2D;
+
+  constructor(
+    readonly game: Game,
+    readonly canvas: HTMLCanvasElement,
+  ) {
+    this.ctx = canvas.getContext('2d')!;
+    const pal = game.files.get('u6pal');
+    if (pal) for (let i = 0; i < 768; i++) this.palette[i] = Math.min(255, (pal[i] << 2) | (pal[i] >> 4));
+    this.buildPal();
+    this.resize(11, 11);
+  }
+
+  resize(cols: number, rows: number): void {
+    this.cols = cols;
+    this.rows = rows;
+    this.tw = cols + BORDER * 2;
+    this.th = rows + BORDER * 2;
+    this.tmp = new Uint16Array(this.tw * this.th);
+    this.buf = new Uint8Array(cols * 16 * rows * 16);
+    this.canvas.width = cols * 16;
+    this.canvas.height = rows * 16;
+    this.image = this.ctx.createImageData(cols * 16, rows * 16);
+  }
+
+  private buildPal(): void {
+    const p = this.palette;
+    for (let i = 0; i < 256; i++) this.pal32[i] = 0xff000000 | (p[i * 3 + 2] << 16) | (p[i * 3 + 1] << 8) | p[i * 3];
+  }
+
+  private rotate(first: number, n: number): void {
+    const p = this.palette;
+    const last = p.slice((first + n - 1) * 3, (first + n) * 3);
+    p.copyWithin((first + 1) * 3, first * 3, (first + n - 1) * 3);
+    p.set(last, first * 3);
+  }
+
+  /** One step of the animation: tiles that move, and the colours that cycle. */
+  tick(): void {
+    this.game.tiles.update(this.game.clock.hour);
+    this.rotate(0xe0, 8);
+    this.rotate(0xe8, 8);
+    if (this.rotCounter === 0) {
+      this.rotate(0xf0, 4);
+      this.rotate(0xf4, 4);
+      this.rotate(0xf8, 4);
+    }
+    this.rotCounter ^= 1;
+    this.buildPal();
+  }
+
+  /** The palette's colour for an index, as CSS. */
+  css(i: number): string {
+    return `rgb(${this.palette[i * 3]},${this.palette[i * 3 + 1]},${this.palette[i * 3 + 2]})`;
+  }
+
+  /** Whether a square of the view is in sight. */
+  visible(mx: number, my: number): boolean {
+    const z = this.game.player.z;
+    const vx = wrap(mx - this.curX, z);
+    const vy = wrap(my - this.curY, z);
+    if (vx >= this.cols || vy >= this.rows) return false;
+    return this.tmp[(vy + BORDER) * this.tw + vx + BORDER] !== 0;
+  }
+
+  // ---- what is in sight ----
+
+  private fill(sx: number, sy: number): void {
+    const g = this.game;
+    const z = g.player.z;
+    const data = g.map.data(z);
+    const pitch = mapWidth(z);
+    const px = wrap(this.curX - BORDER, z);
+    const py = wrap(this.curY - BORDER, z);
+    const stack: number[] = [sx, sy];
+    while (stack.length) {
+      const y = stack.pop()!;
+      const x = stack.pop()!;
+      const tx = wrap(x - px, z);
+      const ty = wrap(y - py, z);
+      if (tx >= this.tw || ty >= this.th) continue;
+      const i = ty * this.tw + tx;
+      if (this.tmp[i] !== 0) continue;
+      const cur = data[y * pitch + x];
+      // Tile 0 would read as unseen; it is never ground worth the distinction.
+      this.tmp[i] = cur === 0 ? 0x8000 : cur;
+      if (g.map.isBoundary(x, y, z) && !this.throughWindow(cur, x, y)) continue;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (dx || dy) stack.push(wrap(x + dx, z), wrap(y + dy, z));
+    }
+  }
+
+  /** Standing right at a window, the party sees through it. */
+  private throughWindow(tileNum: number, x: number, y: number): boolean {
+    const g = this.game;
+    const z = g.player.z;
+    if (!(g.tiles.get(tileNum).flags2 & F2_WINDOW)) {
+      const l = g.objects.list(x, y, z);
+      const o = l?.[l.length - 1];
+      if (!o || !(g.tiles.get(g.objects.tileNum(o)).flags2 & F2_WINDOW)) return false;
+    }
+    const p = g.player;
+    if (p.x === x && (p.y === wrap(y - 1, z) || p.y === wrap(y + 1, z))) return true;
+    return p.y === y && (p.x === wrap(x - 1, z) || p.x === wrap(x + 1, z));
+  }
+
+  private tmpTile(x: number, y: number): number {
+    return this.tmp[y * this.tw + x] & 0x7fff;
+  }
+  private black(x: number, y: number): boolean {
+    return this.tmp[y * this.tw + x] === 0;
+  }
+
+  private isWall(x: number, y: number, mask: number): boolean {
+    if (this.black(x, y)) return false;
+    const g = this.game;
+    const z = g.player.z;
+    const t = g.tiles.get(this.tmpTile(x, y));
+    if (t.flags1 & F1_WALL && t.flags1 & mask) return true;
+    const ot = g.objects.tileAt(wrap(this.curX - BORDER + x, z), wrap(this.curY - BORDER + y, z), z, false);
+    return !!ot && !!(ot.flags2 & F2_BOUNDARY) && !!(ot.flags1 & mask);
+  }
+
+  /** Walls at the edge of what is seen are redrawn so they end cleanly against the dark. */
+  private reshape(): void {
+    const g = this.game;
+    const z = g.player.z;
+    for (let y = 1; y < this.th - 1; y++) {
+      for (let x = 1; x < this.tw - 1; x++) {
+        if (this.black(x, y)) continue;
+        let tile = g.tiles.get(this.tmpTile(x, y));
+        if (tile.num < 140 || tile.num > 187) continue;
+        if (!tile.boundary && !g.objects.isBoundary(wrap(this.curX - BORDER + x, z), wrap(this.curY - BORDER + y, z), z)) continue;
+        const orig = tile.flags1 & F1_WALL_MASK;
+        let flag = 0;
+        if (this.isWall(x, y - 1, F1_WALL_SOUTH)) flag |= F1_WALL_NORTH;
+        if (this.isWall(x + 1, y, F1_WALL_WEST)) flag |= F1_WALL_EAST;
+        if (this.isWall(x, y + 1, F1_WALL_NORTH)) flag |= F1_WALL_SOUTH;
+        if (this.isWall(x - 1, y, F1_WALL_EAST)) flag |= F1_WALL_WEST;
+        if (!this.black(x, y - 1) && orig & F1_WALL_NORTH) flag |= F1_WALL_NORTH;
+        if (!this.black(x + 1, y) && orig & F1_WALL_EAST) flag |= F1_WALL_EAST;
+        if (!this.black(x, y + 1) && orig & F1_WALL_SOUTH) flag |= F1_WALL_SOUTH;
+        if (!this.black(x - 1, y) && orig & F1_WALL_WEST) flag |= F1_WALL_WEST;
+        if (flag === 0) continue;
+        const set = (n: number): void => void (this.tmp[y * this.tw + x] = n);
+        const corner = 266 + 2 * ((tile.num - (tile.num % 16) - 140) >> 4);
+        if (flag === 48 && this.black(x, y - 1) && this.black(x + 1, y)) {
+          set(corner);
+          continue;
+        }
+        if (flag === 192 && this.black(x, y + 1) && this.black(x - 1, y)) {
+          set(corner + 1);
+          continue;
+        }
+        if (orig === flag) continue;
+        const step = orig > flag && flag !== 144 ? -1 : 1;
+        for (let n = 0; n < 16 && (tile.flags1 & F1_WALL_MASK) !== flag && tile.flags1 & F1_WALL_MASK; n++) tile = g.tiles.get(tile.num + step);
+        if ((tile.flags1 & F1_WALL_MASK) === flag) set(tile.num);
+      }
+    }
+  }
+
+  private updateSight(): void {
+    const g = this.game;
+    const p = g.player;
+    const z = p.z;
+    this.curX = wrap(p.x - (this.cols >> 1), z);
+    this.curY = wrap(p.y - (this.rows >> 1), z);
+    this.tmp.fill(0);
+    let x = p.x;
+    let y = p.y;
+    // Standing in a doorway, look from the square beyond it.
+    if (g.objects.isBoundary(x, y, z)) {
+      const t = g.objects.tileAt(x, y, z, false);
+      if (t && (t.flags1 & F1_WALL_MASK) === (F1_WALL_NORTH | F1_WALL_SOUTH)) x = wrap(x + 1, z);
+      else y = wrap(y + 1, z);
+    }
+    this.fill(x, y);
+    this.reshape();
+  }
+
+  // ---- drawing ----
+
+  private blit(t: Tile, px: number, py: number): void {
+    const W = this.cols * 16;
+    const H = this.rows * 16;
+    const d = t.data;
+    for (let j = 0; j < 16; j++) {
+      const y = py + j;
+      if (y < 0 || y >= H) continue;
+      for (let i = 0; i < 16; i++) {
+        const x = px + i;
+        if (x < 0 || x >= W) continue;
+        const c = d[j * 16 + i];
+        if (t.transparent && c === 0xff) continue;
+        this.buf[y * W + x] = c;
+      }
+    }
+  }
+
+  private drawPart(t: Tile, x: number, y: number, top: boolean): void {
+    if (t.toptile === top) this.blit(t, x * 16, y * 16);
+  }
+
+  /** A tile with the others of a thing two squares wide or tall, to its left and above. */
+  private drawTile(t: Tile, x: number, y: number, top: boolean): void {
+    const tiles = this.game.tiles;
+    let n = t.num;
+    if (x < this.cols && y < this.rows) this.drawPart(tiles.get(n), x, y, top);
+    if (t.dblWidth) {
+      n--;
+      if (x > 0 && y < this.rows) this.drawPart(tiles.get(n), x - 1, y, top);
+    }
+    if (t.dblHeight) {
+      n--;
+      if (y > 0 && x < this.cols) this.drawPart(tiles.get(n), x, y - 1, top);
+    }
+    if (x > 0 && y > 0 && t.dblWidth && t.dblHeight) this.drawPart(tiles.get(n - 1), x - 1, y - 1, top);
+  }
+
+  private seen(vx: number, vy: number): boolean {
+    return this.tmp[(vy + BORDER) * this.tw + vx + BORDER] !== 0;
+  }
+
+  private drawObj(o: Obj, vx: number, vy: number, lower: boolean, top: boolean): void {
+    if (o.status & STATUS_INVISIBLE) return;
+    const t = this.game.objects.tileOf(o);
+    const forceLower = !!(t.flags3 & 0x4);
+    if (!lower && forceLower && !top) return;
+    if (lower && !forceLower) return;
+    if (!this.seen(vx, vy)) return;
+    // Nothing on a wall shows where the room beyond it is dark.
+    if ((!this.seen(vx + 1, vy) || !this.seen(vx, vy + 1)) && (!(t.flags1 & F1_WALL) || o.objN === OBJ.BARS)) return;
+    this.drawTile(t, vx, vy, top);
+  }
+
+  private drawObjs(lower: boolean, top: boolean): void {
+    const g = this.game;
+    const z = g.player.z;
+    for (let vy = 0; vy <= this.rows; vy++) {
+      for (let vx = 0; vx <= this.cols; vx++) {
+        const l = g.objects.list(wrap(this.curX + vx, z), wrap(this.curY + vy, z), z);
+        if (l) for (const o of l) this.drawObj(o, vx, vy, lower, top);
+      }
+    }
+  }
+
+  private drawActors(): void {
+    const g = this.game;
+    const z = g.player.z;
+    for (const a of g.actors.list) {
+      if (a.z !== z || !a.visible || a.objN === 0 || !a.alive) continue;
+      const vx = wrap(a.x - this.curX, z);
+      const vy = wrap(a.y - this.curY, z);
+      if (vx > this.cols || vy > this.rows || !this.seen(Math.min(vx, this.cols - 1), Math.min(vy, this.rows - 1))) continue;
+      if (vx < this.cols && vy < this.rows && !this.seen(vx, vy)) continue;
+      const t = g.tiles.get(g.objects.objToTile[a.objN] + a.frameN);
+      this.drawTile(t, vx, vy, false);
+      this.drawTile(t, vx, vy, true);
+    }
+  }
+
+  render(): void {
+    const g = this.game;
+    this.updateSight();
+    this.buf.fill(0);
+    for (let vy = 0; vy < this.rows; vy++) {
+      for (let vx = 0; vx < this.cols; vx++) {
+        const raw = this.tmp[(vy + BORDER) * this.tw + vx + BORDER];
+        if (raw === 0) continue;
+        const n = raw & 0x7fff;
+        if (n >= 16 && n < 48) this.blit(g.tiles.animBase(n), vx * 16, vy * 16);
+        this.blit(g.tiles.get(n), vx * 16, vy * 16);
+      }
+    }
+    this.drawObjs(true, false);
+    this.drawObjs(false, false);
+    this.drawActors();
+    this.drawObjs(false, true);
+    const out = new Uint32Array(this.image!.data.buffer);
+    for (let i = 0; i < this.buf.length; i++) out[i] = this.pal32[this.buf[i]];
+    this.ctx.putImageData(this.image!, 0, 0);
+    const z = g.player.z;
+    for (const m of this.marks) {
+      const vx = wrap(m.x - this.curX, z);
+      const vy = wrap(m.y - this.curY, z);
+      if (vx >= this.cols || vy >= this.rows) continue;
+      this.ctx.fillStyle = m.color;
+      if (m.kind === 'dot') this.ctx.fillRect(vx * 16 + 6, vy * 16 + 6, 4, 4);
+      else {
+        for (const [ox, oy, w, h] of [[0, 0, 5, 2], [0, 0, 2, 5], [11, 0, 5, 2], [14, 0, 2, 5], [0, 14, 5, 2], [0, 11, 2, 5], [11, 14, 5, 2], [14, 11, 2, 5]]) {
+          this.ctx.fillRect(vx * 16 + ox, vy * 16 + oy, w, h);
+        }
+      }
+    }
+  }
+
+  /** The map square under a point of the canvas (CSS pixels from its corner). */
+  squareAt(cx: number, cy: number): { x: number; y: number } {
+    const r = this.canvas.getBoundingClientRect();
+    const z = this.game.player.z;
+    const vx = Math.max(0, Math.min(this.cols - 1, Math.floor((cx / r.width) * this.cols)));
+    const vy = Math.max(0, Math.min(this.rows - 1, Math.floor((cy / r.height) * this.rows)));
+    return { x: wrap(this.curX + vx, z), y: wrap(this.curY + vy, z) };
+  }
+
+  /** A tile as a picture (for the party's faces and what they carry). */
+  tileImage(tileNum: number): HTMLCanvasElement {
+    const c = document.createElement('canvas');
+    c.width = c.height = 16;
+    const ctx = c.getContext('2d')!;
+    const img = ctx.createImageData(16, 16);
+    const out = new Uint32Array(img.data.buffer);
+    const t = this.game.tiles.original(tileNum);
+    for (let i = 0; i < 256; i++) out[i] = t.transparent && t.data[i] === 0xff ? 0 : this.pal32[t.data[i]];
+    ctx.putImageData(img, 0, 0);
+    return c;
+  }
+
+  /** A face (56 by 64) as a picture. */
+  portraitImage(data: Uint8Array): HTMLCanvasElement {
+    const c = document.createElement('canvas');
+    c.width = 56;
+    c.height = 64;
+    const ctx = c.getContext('2d')!;
+    const img = ctx.createImageData(56, 64);
+    const out = new Uint32Array(img.data.buffer);
+    for (let i = 0; i < 56 * 64; i++) out[i] = data[i] === 0xff ? 0 : this.pal32[data[i]];
+    ctx.putImageData(img, 0, 0);
+    return c;
+  }
+}
