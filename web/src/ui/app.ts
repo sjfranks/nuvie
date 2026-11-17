@@ -951,19 +951,60 @@ export class App {
     };
   }
 
-  /** The game is won. */
+  /** The game is won: ending.lua's scenes, as pages of its words. */
   private ending(): void {
     const g = this.game;
-    this.open('The Codex', (body) => {
-      body.append(
-        el('p', '', 'The Codex of Ultimate Wisdom has passed into the Ethereal Void, where both Britannians and gargoyles may look upon it, and neither may possess it.'),
-        el('p', '', 'The lenses, and the moonstones in the vortex cube, have done their work. The war between the peoples is over.'),
-        el('p', 'small', 'The ending sequence itself is not ported yet. Thou mayest go on exploring.'),
-      );
-    });
-    this.onClose = () => {
-      g.won = false;
+    const name = g.playerName();
+    const pages = [
+      'Tremors shake the shrine as the Vortex Cube draws the Codex into the Ethereal Void. A glowing portal springs from the floor!',
+      'From its crimson depths Lord British emerges, trailed by the mage Nystul. Anguish and disbelief prevail on the royal seer\'s face, but Lord British directs his stony gaze at you and speaks as if to a wayward child.',
+      '"Thou didst have just cause to burgle our Codex, I trust," His Majesty says. "But for Virtue\'s sake... WHAT HAST THOU DONE WITH IT?"',
+      'You pick up the concave lens and pass it to the King. "Was the book ever truly ours, Your Majesty? Was it written for Britannia alone? Thou dost no longer hold the Codex, but is its wisdom indeed lost? Look into the Vortex, and let the Codex answer for itself!"',
+      'As Lord British holds the glass before the wall, the Codex of Ultimate Wisdom wavers into view against a myriad of swimming stars! Yet the book remains closed.',
+      'And waves of heat shimmer in the air, heralding the birth of another red gate!',
+      'King Draxinusom of the Gargoyles strides forward, flanked by a small army of wingless attendants. Like Lord British, he seems to suppress his rage only through a heroic effort of will. His scaly hand grasps your shoulder, and your Amulet of Submission grows very warm. "Thy time hath come, Thief," he says.',
+      'Quickly you reach down to seize the convex lens... and you press it into the hand of the towering Gargoyle king, meeting his sunken eyes. "Join my Lord in his search for peace, I beg thee."',
+      'At your urging, King Draxinusom reluctantly raises his lens to catch the light. As Lord British holds up his own lens, every eye in the room, human and Gargoyle alike, fixes upon the image of the Codex which shines upon the wall.',
+      'The ancient book opens. Both kings gaze upon its pages in spellbound silence, as the eloquence of Ultimate Wisdom is revealed in the tongues of each lord\'s domain. You, too, can read the answers the Codex gives...',
+      '...and when its wisdom is gleaned, when Lord British and King Draxinusom turn to each other as friends, hating no longer, fearing no more, you know that your mission in Britannia has ended at last.',
+    ];
+    // How long the quest took (ending.lua: a year of 365 days, a month of 30, from 4 July 161).
+    const c = g.clock;
+    const time = Math.max(0, c.year * 365 + c.month * 30 + c.day - (161 * 365 + 7 * 30 + 4));
+    const years = Math.floor(time / 365);
+    const months = Math.floor((time - years * 365) / 30);
+    const days = time - years * 365 - months * 30;
+    const count = (n: number, w: string): string => `${n} ${w}${n === 1 ? '' : 's'}`;
+    const spent = [years && count(years, 'year'), months && count(months, 'month'), (days || (!years && !months)) && count(days, 'day')].filter(Boolean) as string[];
+    const took = spent.length > 1 ? `${spent.slice(0, -1).join(', ')} and ${spent.at(-1)}` : spent[0];
+    this.music.theme = 'end';
+    this.music.update();
+    const page = (i: number): void => {
+      this.open(i < pages.length ? 'The Codex' : 'Congratulations', (body) => {
+        if (i < pages.length) body.append(el('p', '', pages[i]));
+        else {
+          body.append(
+            el('p', '', `Thou hast completed Ultima VI: The False Prophet, in ${took}.`),
+            el('p', '', `Well done, ${name}.`),
+            el('p', 'small', 'Thou mayest go on in Britannia as long as thou wilt.'),
+          );
+        }
+        const row = el('div', 'row');
+        row.append(btn(i < pages.length ? 'Continue' : 'Close', () => {
+          if (i < pages.length) {
+            this.onClose = null; // the next page, not the end of it
+            page(i + 1);
+          } else this.close();
+        }, 'primary'));
+        body.append(row);
+      });
+      this.onClose = () => {
+        g.won = false;
+        this.music.theme = null;
+        this.music.update();
+      };
     };
+    page(0);
   }
 
   /** The spellbook: who casts, their magic and reagents, and the spells in their book by circle. */

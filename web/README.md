@@ -130,7 +130,8 @@ instruments, fans and the rubber ducky. A tap on a lever, crank, fire, bell or w
 The quest items work too: a rune with its shrine's mantra (typed) lifts the force field before the shrine; a
 moonstone buried in grass or earth raises its moongate there; the quest barrier stops the party until the Avatar
 has the quest; the gargish vocabulary teaches gargish; the vortex cube, at the Codex with both lenses and all eight
-moonstones, ends the game. The crystal ball shows a far place, a spellbook opens the spell list, cannons fire down
+moonstones, ends the game: ending.lua's scenes told in its own words over the ending music, and how long the
+quest took. The crystal ball shows a far place, a spellbook opens the spell list, cannons fire down
 the way they face, and a lit powder keg blows up after a few turns (doors, kegs and anyone near).
 
 **Rest** (the moon button): pass a turn, or camp 1-8 hours - not in towns, near foes or others, or on horseback.
@@ -155,7 +156,7 @@ Great creatures take more than one square: ships, dragons (head, wings and tail)
 two-square beasts, and the silver serpent, whose long body follows its head square by square and never turns back
 over its neck (U6Actor's surrounding objects).
 
-Not ported yet: the intro and ending cutscenes, and Savage Empire's and Martian Dreams' own combat, music and usecode.
+Not ported yet: the animated intro and ending pictures, and Savage Empire's and Martian Dreams' own combat, music and usecode.
 
 `tests/real.test.ts` runs on your copies put in `web/gamedata/ultima6/`, `savage/` and `martian/` (git-ignored).
 For each it loads a new game, saves and restores it, and talks with everyone who has a conversation (199 people in
