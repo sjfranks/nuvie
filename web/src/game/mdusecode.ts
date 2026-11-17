@@ -85,7 +85,9 @@ export class MdUseCode {
       case 102: return { 86: crate, 427: (_t, h, a) => this.hatch(h as Obj, a) };
       case 273: return { 86: crate };
       case 119: case 128: return { 129: spray, 261: spray };
-      case 124: case 235: return { 179: oil, 227: oil, 421: oil, 152: oil, 219: oil, 222: oil };
+      case 124: case 235: return { 179: oil, 227: oil, 421: oil, 152: oil, 219: oil, 222: oil, 0: (_o, t, a, x, y) => this.dreamDoor(t, a, x, y) };
+      case 88: return { 84: () => this.dreamQuestDone(0x57, 6) };
+      case 296: return { 288: (_g, t) => this.headgear(t as Obj), 289: (_g, t) => this.headgear(t as Obj) };
       case 231: return { 130: (_t, geode, a) => this.geode(geode as Obj, a), 298: () => this.gong() };
       case 129: case 261: return { 0: (gun, t, a) => this.spray(gun, t, a) };
       case 426: return { 287: (stone, woman) => this.heartstone(stone, woman as Obj) };
@@ -123,6 +125,7 @@ export class MdUseCode {
       case 399: return (_t, a) => this.poolTable(a);
       case 411: return (b) => this.switchBar(b);
       case 441: return (d) => this.drill(d);
+      case 458: return (panel) => this.panel(panel);
       default: return null;
     }
   }
@@ -265,7 +268,9 @@ export class MdUseCode {
       const lowell = this.g.actors.get(0x50);
       if (lowell) {
         lowell.talkFlags |= 1 << 6;
+        this.finishDreamQuest(lowell);
         this.g.talkTo(lowell);
+        this.wakeAfterTalk = true;
         return;
       }
     }
@@ -461,12 +466,12 @@ export class MdUseCode {
       } else a.hp = Math.max(5, a.hp - (hours * 2 + 5));
     }
     g.say('sys', `The party rests for ${hours} hour${hours === 1 ? '' : 's'}.`);
-    this.dream(dreamers);
+    this.obelisks(dreamers);
     g.onChange();
   }
 
   /** rest_level_up_actor: a level, thirty health, and a point of wits, dexterity or strength from the obelisk touched. */
-  private dream(dreamers: Actor[]): void {
+  private obelisks(dreamers: Actor[]): void {
     const g = this.g;
     const a = dreamers.shift();
     if (!a) return;
@@ -487,7 +492,7 @@ export class MdUseCode {
         if (i === 0) a.intelligence = Math.min(30, a.intelligence + 1);
         else if (i === 1) a.dex = Math.min(30, a.dex + 1);
         else a.strength = Math.min(30, a.strength + 1);
-        this.dream(dreamers);
+        this.obelisks(dreamers);
         g.onChange();
       },
     };
@@ -500,6 +505,11 @@ export class MdUseCode {
   /** After each turn (player_post_move_action): where the party stepped, the conveyor, the doors that open themselves. */
   turn(): void {
     const g = this.g;
+    if (this.wakeAfterTalk && !g.converse) {
+      this.wakeAfterTalk = false;
+      this.wake();
+      return;
+    }
     const p = g.player;
     const here = `${p.x},${p.y},${p.z}`;
     const moved = here !== this.last;
@@ -521,6 +531,7 @@ export class MdUseCode {
     const p = g.player;
     for (const o of g.objects.list(p.x, p.y, p.z) ?? []) {
       const n = o.objN;
+      if (n === 461 && this.dream) return this.teleporter(o);
       if (!(n === 175 || n === 163 || n === 180 || n === 178 || (n === 197 && o.frameN === 3) || n === 210)) continue;
       if (n === 197) {
         if (!((g.actors.get(0x73)?.talkFlags ?? 0) & (1 << 4))) {
@@ -586,6 +597,245 @@ export class MdUseCode {
         }
       }
     }
+  }
+
+  // ---- the dream machine and the dream world (usecode.lua, dreamworld.lua) ----
+
+  /** While the Avatar dreams: the waking party set aside, and the dream's stage. */
+  dream: {
+    seat: [number, number, number];
+    companions: { actor: Actor; name: string; at: [number, number, number] }[];
+    hp: number;
+    stage: number;
+    back: [number, number] | null;
+  } | null = null;
+  private wakeAfterTalk = false;
+
+  /** The dream, for a saved game. */
+  saveDream(): unknown {
+    const d = this.dream;
+    return d && { ...d, companions: d.companions.map((m) => ({ id: m.actor.id, name: m.name, at: m.at })) };
+  }
+
+  loadDream(v: unknown): void {
+    const d = v as { seat: [number, number, number]; companions: { id: number; name: string; at: [number, number, number] }[]; hp: number; stage: number; back: [number, number] | null } | undefined;
+    if (!d) return;
+    const g = this.g;
+    const companions = d.companions.map((m) => ({ actor: g.actors.get(m.id)!, name: m.name, at: m.at })).filter((m) => m.actor);
+    for (const m of companions) {
+      const i = g.party.findIndex((q) => q.actor === m.actor);
+      if (i > 0) g.party.splice(i, 1);
+    }
+    this.dream = { ...d, companions };
+  }
+
+  /** use_panel: a panel on its cabinet works what the cabinet holds - the dream machine, or lights to no effect. */
+  private panel(o: Obj): void {
+    if (o.quality & 2) return this.say('THE_PANEL_IS_BROKEN');
+    if (o.quality & 1) return this.say('THE_PANEL_IS_NOT_INSTALLED');
+    const cabinet = (this.g.objects.list(o.x, o.y, o.z) ?? []).find((n) => n.objN === 457);
+    if (!cabinet) return this.say('PANELS_ARE_ONLY_INSTALLED_ONTO_CABINETS');
+    const said = ['YOU_ARE_COMPLETELY_UNSURE_WHAT_YOU_JUST_DID', 'YOU_ACTUATE_THE_MECHANISM_TO_NO_APPARENT_EFFECT', 'STATUS_LIGHTS_CHANGE_BUT_YOU_SEE_NO_OTHER_EFFECT', 'LIGHTS_FLASH_AND_CHANGE_COLOR_BUT_NOTHING_ELSE_HAPPENS'];
+    if (cabinet.quality < 4) this.say(said[cabinet.quality]);
+    else if (cabinet.quality === 4) this.dreamMachine(o);
+    else if (cabinet.quality > 7) this.say('IT_HAS_NO_EFFECT');
+  }
+
+  /** use_head_gear: the headgear fitted to a dream machine. */
+  private headgear(t: Obj): void {
+    const g = this.g;
+    const machine = t.objN === 289 ? (g.objects.list(t.x, t.y, t.z) ?? []).find((n) => n.objN === 288) : t;
+    if (!machine) return this.say('IT_HAS_NO_EFFECT');
+    const gear = g.objects.create(100, 1, 0);
+    gear.frameN = 1;
+    [gear.x, gear.y, gear.z] = [machine.x, machine.y, machine.z];
+    g.objects.add(gear);
+    this.say('THE_HEADGEAR_IS_INSTALLED');
+    this.flag(0x74, 4);
+    if (this.hasFlag(0x74, 0)) this.flag(0x60, 2);
+  }
+
+  private flag(id: number, f: number, on = true): void {
+    const a = this.g.actors.get(id);
+    if (a) a.talkFlags = on ? a.talkFlags | (1 << f) : a.talkFlags & ~(1 << f);
+  }
+  private hasFlag(id: number, f: number): boolean {
+    return !!((this.g.actors.get(id)?.talkFlags ?? 0) & (1 << f));
+  }
+
+  /** use_dream_machine: powered, with headgear, and someone in its seat - who dreams. */
+  private dreamMachine(panel: Obj): void {
+    const g = this.g;
+    if (this.hasFlag(0x46, 3)) return this.say('THE_DREAM_MACHINES_SEEM_TO_HAVE_CEASED_FUNCTIONING');
+    let power = false;
+    let gear = false;
+    let seat: [number, number] | null = null;
+    let quality: number | null = null;
+    for (let y = panel.y - 5; y <= panel.y + 5; y++) {
+      for (let x = panel.x - 5; x <= panel.x + 5; x++) {
+        for (const o of g.objects.list(x, y, panel.z) ?? []) {
+          if (o.objN === 290 && o.frameN === 1) power = true;
+          else if (o.objN === 100) gear = true;
+          else if (o.objN === 289) seat = [o.x, o.y];
+          else if (o.objN === 288) quality = o.quality;
+        }
+      }
+    }
+    if (!power || quality === null || !gear || !seat) return this.say('THE_MACHINE_DOES_NOT_WORK');
+    const sitter = g.actors.at(seat[0], seat[1], panel.z);
+    if (!sitter) return this.say('THERE_IS_NOBODY_SITTING_IN_THE_MACHINE');
+    if (panel.z !== 0) return this.wake();
+    if (quality < 2) this.flag(0x60, 3);
+    if (quality === 3) return this.say('THE_MACHINE_DOES_NOT_WORK');
+    if (sitter.id !== 1) {
+      this.say('ACTOR_DREAMS_UNTIL_DAWN_WHILE_THE_PARTY_WAITS', g.partyMemberName(sitter.id) || g.lookActor(sitter));
+      const c = g.clock;
+      g.advance(60 - c.minute + ((c.hour < 8 ? 7 - c.hour : 31 - c.hour) * 60));
+      return;
+    }
+    // actor_use_dream_machine: the Avatar alone in the dream world, the party left waking.
+    const p = g.player;
+    const companions = g.party.slice(1).map((m) => ({ ...m, at: [m.actor.x, m.actor.y, m.actor.z] as [number, number, number] }));
+    g.party.splice(1);
+    for (const m of companions) m.actor.visible = false;
+    // The Avatar dreams empty-handed: what they carry waits with the dream actor's slot (actor 0), so it is saved.
+    for (const o of [...g.objects.inventories[p.id]]) {
+      g.objects.unlink(o);
+      g.objects.toInventory(o, 0);
+    }
+    this.dream = { seat: [p.x, p.y, p.z], companions, hp: p.hp, stage: 0, back: null };
+    p.hp = p.maxHp;
+    g.relocate(quality === 1 ? 0x64 : 0x93, quality === 1 ? 0x3b : 0x34, 2);
+    g.say('sys', 'You drift into a dream...');
+  }
+
+  /** Stepping on a dream teleporter (player_post_move_action, dreamworld_cleanup_state). */
+  private teleporter(o: Obj): boolean {
+    const g = this.g;
+    const d = this.dream!;
+    const stage = o.status & 0xe5;
+    if (stage === 0xa5 && g.player.hp <= 4) return false;
+    if (stage === 0) {
+      g.relocate(o.quality, o.qty, g.player.z);
+      return true;
+    }
+    if (stage === 1) {
+      d.stage = 0;
+      return false;
+    }
+    if (stage === 0x24) {
+      this.wake();
+      return true;
+    }
+    if (d.stage !== 0 && stage === 0x40) this.say('YOU_FALL_OFF_THE_CLIFF');
+    d.back = [o.quality, o.qty];
+    g.relocate(o.quality, o.qty, g.player.z);
+    if (stage !== 0xe5) {
+      if (stage === 0x25) {
+        const p = g.player;
+        const mother = g.combat.spawn(391, p.x, p.y - 1, p.z, 0, 0x15);
+        if (mother) mother.worktype = 0x8;
+      } else if (stage === 0x44) this.tiffanyStage();
+      d.stage = stage;
+    }
+    return true;
+  }
+
+  /** setup_tiffany_stage: the shop of pitchers and the minotaur. */
+  private tiffanyStage(): void {
+    const g = this.g;
+    this.flag(0x54, 0, false);
+    this.flag(0x54, 6, false);
+    const z = g.player.z;
+    for (const o of [...g.objects.all()]) {
+      if (o.loc === 'map' && o.z === z && o.x >= 0x21 && o.x < 0x3d && o.y >= 0x33 && o.y < 0x43 && [161, 162, 217, 218, 398].includes(o.objN)) g.objects.unlink(o);
+    }
+    const put = (n: number, x: number, y: number, frame = 0, qty = 1): void => {
+      const o = g.objects.create(n, qty, 0);
+      o.frameN = frame;
+      [o.x, o.y, o.z] = [x, y, z];
+      g.objects.add(o);
+    };
+    put(161, 0x24, 0x36);
+    const pitcher = (x: number, y: number): void => put(217, x, y, Math.floor(this.rand(0, 5) / 2), 3);
+    for (let i = 57; i <= 65; i++) {
+      if (i !== 0x3e) pitcher(0x37, i);
+      if (i > 0x3a && i !== 0x40) pitcher(0x39, i);
+      pitcher(0x3b, i);
+    }
+    pitcher(0x38, 0x39);
+    pitcher(0x38, 0x41);
+    pitcher(0x3a, 0x39);
+    pitcher(0x3a, 0x41);
+    const minotaur = g.combat.spawn(398, 0x3b, 0x41, z, 0, 0x16);
+    if (minotaur) minotaur.worktype = 0x16;
+  }
+
+  /** finish_dream_quest: the dreamer home, their teleporter and obelisk gone, and the count of quests done. */
+  private finishDreamQuest(a: Actor): void {
+    const g = this.g;
+    const home = a.sched?.[0];
+    if (home) {
+      a.x = home.x;
+      a.y = home.y;
+      a.z = home.z;
+      for (const [dy, n] of [[0, 461], [-1, 292]]) {
+        const o = (g.objects.list(home.x, home.y + dy, home.z) ?? []).find((q) => q.objN === n);
+        if (o) g.objects.unlink(o);
+      }
+    }
+    a.talkFlags |= 1 << 7;
+    const done = (ids: number[]): boolean => ids.every((id) => this.hasFlag(id, 7));
+    if (done([0x56, 0x54, 0x52, 0x55])) this.flag(0x60, 4);
+    if (done([0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57])) this.flag(0x20, 4);
+  }
+
+  private dreamQuestDone(id: number, flag: number): void {
+    const a = this.g.actors.get(id);
+    if (!a) return;
+    this.finishDreamQuest(a);
+    a.talkFlags |= 1 << flag;
+    this.g.talkTo(a);
+    this.wakeAfterTalk = true;
+  }
+
+  /** use_oil_on_dream_door: Melies' door in the dream (tile 8). */
+  private dreamDoor(t: Obj | Actor | null, a: Actor, x: number, y: number): void {
+    if (!t && this.dream && this.g.map.tileNum(x, y, a.z) === 8) this.dreamQuestDone(0x51, 6);
+    else this.say('IT_HAS_NO_EFFECT');
+  }
+
+  /** wake_from_dream: morning, the party as it was, the dream's things gone. */
+  wake(nightmare = false): void {
+    const g = this.g;
+    const d = this.dream;
+    if (!d) return;
+    if (nightmare) this.say('YOU_SHAKE_YOURSELF_AWAKE_FROM_THE_NIGHTMARE');
+    const c = g.clock;
+    const hour = c.hour + 1;
+    g.advance(60 - c.minute + (hour >= 8 ? 24 - hour + 8 : 8 - hour) * 60);
+    const p = g.player;
+    for (const o of [...g.objects.inventories[p.id]]) g.objects.unlink(o);
+    for (const o of [...g.objects.inventories[0]]) {
+      g.objects.unlink(o);
+      g.objects.toInventory(o, p.id);
+    }
+    p.hp = Math.max(1, d.hp);
+    p.statusFlags &= ~0x10;
+    p.visible = true;
+    for (const m of d.companions) {
+      [m.actor.x, m.actor.y, m.actor.z] = m.at;
+      m.actor.visible = true;
+      g.party.push({ actor: m.actor, name: m.name });
+    }
+    this.berries.clear();
+    for (const m of g.party) {
+      const a = m.actor;
+      if (a.statusFlags & 0x08) a.hp = a.hp <= 10 ? 1 : a.hp <= 30 ? this.rand(1, 10) : this.rand(24, 30);
+    }
+    this.dream = null;
+    g.relocate(d.seat[0], d.seat[1], d.seat[2]);
+    this.say('YOU_WAKE_UP');
   }
 
   // ---- pushing, the drill and the conveyor ----

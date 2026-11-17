@@ -453,6 +453,32 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     expect(tried).toBeGreaterThan(0);
   });
 
+  it.runIf(folder === 'martian')('dreams in the dream machine, travels the dream, and wakes', () => {
+    const g = new Game(load());
+    const p = g.player;
+    g.relocate(68, 168, 0);
+    [p.x, p.y] = [68, 167]; // in the machine's seat
+    const carried = g.objects.inventories[p.id].length;
+    const panel = g.objects.all().find((o) => o.objN === 458 && o.x === 69 && o.y === 166)!;
+    g.useObj(panel);
+    expect([p.x, p.y, p.z]).toEqual([0x93, 0x34, 2]);
+    expect(g.party.length).toBe(1);
+    expect(g.objects.inventories[p.id].length).toBe(0);
+    // A dream saved and loaded is still a dream.
+    const back = new Game(load(), g.save());
+    expect(back.mdUse.dream?.companions.length).toBe(2);
+    // A teleporter in the dream.
+    const t = g.objects.all().find((o) => o.objN === 461 && o.x === 145 && o.y === 49 && o.z === 2)!;
+    [p.x, p.y] = [t.x, t.y + 1];
+    g.move(0, -1);
+    expect([p.x, p.y]).toEqual([t.quality, t.qty]);
+    g.mdUse.wake();
+    expect([p.x, p.y, p.z]).toEqual([68, 167, 0]);
+    expect(g.party.length).toBe(3);
+    expect(g.objects.inventories[p.id].length).toBe(carried);
+    expect(g.clock.hour).toBe(8);
+  });
+
   it.runIf(folder === 'ultima6')('boards a skiff, sails it, goes ashore; rides a horse', () => {
     const g = new Game(load());
     for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });

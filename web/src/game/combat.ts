@@ -618,6 +618,18 @@ export class Combat {
    */
   private unconscious(): void {
     const g = this.g;
+    if (g.mdUse.dream) {
+      // Killed in a dream: back to the last teleporter, or awake (party_update).
+      const d = g.mdUse.dream;
+      if (d.back) {
+        g.player.hp = g.player.maxHp;
+        g.player.statusFlags &= ~(STATUS_DEAD | 0x08);
+        g.player.visible = true;
+        g.relocate(d.back[0], d.back[1], g.player.z);
+        g.say('sys', 'You feel your dream consciousness returning.');
+      } else g.mdUse.wake(true);
+      return;
+    }
     g.say('sys', 'Overcome by your wounds, you fall unconscious!');
     g.sfx('death');
     const mine = (g.actors.get(0x46)?.talkFlags ?? 0) & (1 << 3);

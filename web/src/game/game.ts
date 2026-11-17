@@ -59,6 +59,8 @@ export interface SaveState {
   rest?: number;
   keg?: number;
   wind?: [number, number];
+  /** Martian Dreams: the Avatar is dreaming, the party waiting. */
+  dream?: unknown;
   moonstones?: [number, number, number][];
   party: { id: number; name: string }[];
   flags: { karma: number; quest: number; garg: number; gender: number; face?: number };
@@ -1804,6 +1806,7 @@ export class Game implements ConvWorld {
       rest: this.restCounter,
       keg: this.kegTurns,
       wind: this.wind,
+      dream: this.kind === 'md' ? this.mdUse.saveDream() : undefined,
       moonstones: this.moonstones,
       party: this.party.map((m) => ({ id: m.actor.id, name: m.name })),
       flags: { karma: this.karma, quest: this.questFlag, garg: this.gargFlag, gender: this.gender, face: this.avatarPortrait },
@@ -1822,6 +1825,7 @@ export class Game implements ConvWorld {
     this.turns = s.turns;
     this.lightTurns = s.light ?? 0;
     if (s.wind) this.wind = s.wind;
+    if (this.kind === 'md') this.mdUse.loadDream(s.dream);
     this.restCounter = s.rest ?? 0;
     this.kegTurns = s.keg ?? 0;
     if (s.moonstones) this.moonstones = s.moonstones;

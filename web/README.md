@@ -123,8 +123,12 @@ drills turn the way they go, rail cars keep to their track. The drill bores into
 leaves the spoil beside it; while the power runs, the mine's conveyor carries what lies on it east each turn until it
 stops. Stairs and mine and cave mouths take the party where
 map_entrance_tbl says (a rail car at a mine's mouth goes through too), the alien pods once they work; with the
-power on, the mine's doors open for whoever comes near (update_objects_around_party). Not yet: the dream machine and
-its dreams, and the ruby slippers' way home.
+power on, the mine's doors open for whoever comes near (update_objects_around_party). The dream machine works as
+usecode.lua and dreamworld.lua have it: fit the headgear, power it with radium, sit in it and work its panel, and the
+Avatar dreams alone - empty-handed, the party waiting - from teleporter to teleporter through the dream's stages (Your
+Mother, the minotaur's pitcher shop); a dream quest done (Lowell's mirror, Twain's manuscript, Melies' door) or a
+nightmare ends it, and the Avatar wakes at eight with the party and their things. A companion in the seat dreams
+until dawn. Not yet: the ruby slippers' way home, and dream stages Nuvie left unfinished.
 
 Savage Empire's usecode.lua has only a little in use, and that is ported: corn from a corn stalk, clay with a digging
 stick, and a soft pot shaped from clay.
