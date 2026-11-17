@@ -87,7 +87,8 @@ button:disabled { opacity: .45; }
 
 .foot { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .bar-cmds { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; padding: 6px 8px 8px; }
-.bar-cmds.icons { grid-template-columns: repeat(7, 1fr); gap: 5px; }
+.bar-cmds.icons { grid-template-columns: repeat(8, 1fr); gap: 4px; }
+.item.spell { grid-template-columns: 1fr auto; }
 .iconbtn { padding: 0; min-height: 52px; display: flex; align-items: center; justify-content: center; }
 .iconbtn .icon { width: 32px; height: 32px; image-rendering: pixelated; }
 

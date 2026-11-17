@@ -38,6 +38,8 @@ Sunset and sunrise glow orange.
 - **Fighting**: tap a foe to walk up and attack it - from as far as the weapon reaches, a bow from across a room -
   or choose **Attack** and tap. The rest of the party fights by itself; blows land with the game's own hit
   sparks, and arrows and thrown weapons fly. Monsters hatch from the game's eggs as the party travels.
+- **Magic**: **Cast** opens the spellbook of whoever has one readied: their magic points and reagents, and their
+  spells by circle with the words of power. A spell aimed at someone or somewhere asks for a tap on the map.
 - **Look, Talk, Use, Get**: choose one (the game's own icons), then tap where. **Pass** lets a turn go by; the
   last button opens the journal.
 - **Talking**: the speaker's face shows over the map (which shrinks to give the words room), and the foot becomes a
@@ -62,6 +64,7 @@ Ported from the C++ (each file's header names its source):
 | `src/game/converse.ts` | `Converse.cpp`, `ConverseInterpret.cpp` |
 | `src/game/game.ts` | parts of `Game.cpp`, `Event.cpp`, `Player.cpp`, `Party.cpp`, `SaveGame.cpp`, `usecode/U6UseCode.cpp` |
 | `src/game/combat.ts`, `u6combat.ts` | `data/scripts/u6/actor.lua` (attack, hit, damage, death, targets, monster set-up; `npm run tables` regenerates), `EggManager.cpp`, the temporary actors of `ActorManager.cpp` |
+| `src/game/magic.ts` | `Magic.cpp`, `data/scripts/u6/magic.lua` and `magic/circle_*/*.lua` |
 | `src/ui/mapview.ts` | `MapWindow.cpp` (drawing order, line of sight, wall reshaping), `GamePalette.cpp` |
 
 Working: loading a new game or an original saved game; the map, objects, animated tiles and cycling colours; line
@@ -80,10 +83,17 @@ that take it, poison, experience for evil foes slain, bodies that hold what was 
 and death - the Avatar wakes in Lord British's castle with the fallen raised. Simplified: each fighter acts once a
 turn (not by movement points), monsters that cast fight bare-handed, and thrown weapons are not lost.
 
-Not ported yet: magic, most of Nuvie's other Lua scripts, vehicles and horses, moongates, sound and music, the intro and ending, most other usecode, and creatures made of several
+**Magic** has Magic.cpp's checks - a readied spellbook holding the spell, a level and magic points as high as its
+circle, a reagent of each kind - and magic points come back each hour. Ported spells: Create Food, Douse, Harm,
+Heal, Help, Ignite, Light, Magic Arrow, Poison, Sleep, Unlock Magic, Fireball, Great Light, Mass Awaken, Mass Sleep,
+Great Heal, Locate, Explosion, Lightning, Chain Bolt, Kill and Resurrect; the other 58 are listed and cost their
+reagents, but say they are not yet ported. Torches can be lit and held, and Light and torches widen the party's
+light at night.
+
+Not ported yet: most spells, most of Nuvie's other Lua scripts, vehicles and horses, moongates, sound and music, the intro and ending, most other usecode, and creatures made of several
 parts (they draw as one tile). `tests/real.test.ts` runs on your copies put in
 `web/gamedata/ultima6/`, `savage/` and `martian/` (git-ignored): for each it loads a new game, saves and restores
 it, talks with everyone who has a conversation, and (Ultima VI) hatches the opening gargoyles and fights a troll to
-the death - 199 in Ultima VI, 68 in Savage Empire, 99 in Martian Dreams.
+the death, readies and unreadies, and casts spells - 199 in Ultima VI, 68 in Savage Empire, 99 in Martian Dreams.
 
 Licensed as Nuvie is: GPL 2 or later.

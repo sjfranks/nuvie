@@ -9,6 +9,7 @@ import { lzwDecompress, lzwFile } from '../files/lzw.ts';
 import { Actor, Actors, STATUS_IN_PARTY, WT } from './actors.ts';
 import { Converse, ConverseLib, checkKeywords, type ConvAsk, type ConvWorld } from './converse.ts';
 import { Combat } from './combat.ts';
+import { Magic, type Spell } from './magic.ts';
 import { invCount, invDelete, invFind, invNew, invWeight } from './inventory.ts';
 import { Journal, type JournalData } from './journal.ts';
 import { detectKind, mdPortrait, OFFSETS, PALETTE, type Kind } from './kind.ts';
@@ -49,6 +50,7 @@ export interface SaveState {
   version: 1;
   clock: Clock;
   turns: number;
+  light?: number;
   party: { id: number; name: string }[];
   flags: { karma: number; quest: number; garg: number; gender: number };
   actors: number[][];
@@ -83,6 +85,9 @@ export class Game implements ConvWorld {
   readonly lib: ConverseLib;
   readonly journal = new Journal();
   readonly combat: Combat;
+  readonly magic: Magic;
+  /** Turns left of a Light spell's glow round the party. */
+  lightTurns = 0;
   readonly clock: Clock;
   party: PartyMember[] = [];
   log: LogLine[] = [];
@@ -146,6 +151,7 @@ export class Game implements ConvWorld {
     }
     for (const a of this.actors.list) a.schedPos = a.schedulePos(this.clock.hour);
     this.combat = new Combat(this);
+    this.magic = new Magic(this);
     if (saved) this.restore(saved);
     else this.say('sys', 'The world is loaded. Tap the map to walk.');
     this.combat.update(!saved);
@@ -340,6 +346,7 @@ export class Game implements ConvWorld {
         }
       }
       this.updateSchedules();
+      if (this.kind === 'u6') this.magic.hourly();
     }
   }
 
@@ -347,9 +354,10 @@ export class Game implements ConvWorld {
   where(): string {
     const p = this.player;
     if (p.z !== 0) return `underground, level ${p.z}`;
-    const lat = Math.round((p.y - 512) / 8);
-    const lon = Math.round((p.x - 512) / 8);
-    return `${Math.abs(lat)}${lat < 0 ? 'N' : 'S'} ${Math.abs(lon)}${lon < 0 ? 'W' : 'E'}`;
+    // As the Locate spell has it (locate.lua): eighths of the map from 38 across and 45 down.
+    const x = p.x >> 3;
+    const y = p.y >> 3;
+    return `${Math.abs(y - 45)}${y > 45 ? 'S' : 'N'} ${Math.abs(x - 38)}${x > 38 ? 'E' : 'W'}`;
   }
 
   // ---- moving ----
@@ -425,6 +433,7 @@ export class Game implements ConvWorld {
   private endTurn(): void {
     this.turns++;
     if (this.turns % 2 === 0) this.advance(1);
+    if (this.lightTurns > 0) this.lightTurns--;
     this.combat.update();
     this.combat.round();
     this.moveNpcs();
@@ -607,6 +616,15 @@ export class Game implements ConvWorld {
           break;
       }
     }
+  }
+
+  // ---- casting ----
+
+  /** Cast a spell (at a square, where it is aimed); a turn passes if it was cast. */
+  castSpell(caster: Actor, spell: Spell, x?: number, y?: number): void {
+    if (this.converse) return;
+    if (this.magic.cast(caster, spell, x, y)) this.endTurn();
+    else this.onChange();
   }
 
   // ---- fighting ----
@@ -906,7 +924,8 @@ export class Game implements ConvWorld {
         this.openContainer = o;
         this.say('sys', o.container.length ? `Searching the ${name}: ${o.container.map((c) => this.objects.look(c)).join(', ')}.` : `The ${name} is empty.`);
       }
-    } else if (FOOD.has(o.objN)) {
+    } else if (o.objN === OBJ.TORCH && this.kind === 'u6') this.useTorch(o);
+    else if (FOOD.has(o.objN)) {
       if (o.qty > 1) o.qty--;
       else this.objects.unlink(o);
       this.say('sys', 'You eat the food.');
@@ -962,6 +981,24 @@ export class Game implements ConvWorld {
     this.objects.add(o);
     this.say('sys', `Drop ${what}.`);
     this.endTurn();
+  }
+
+  /** Light a torch and hold it, or put one out (U6UseCode::use_torch, simplified). */
+  private useTorch(o: Obj): void {
+    if (o.frameN === 1) {
+      o.frameN = 0;
+      if (o.loc === 'readied') o.loc = 'inv';
+      this.say('sys', 'The torch goes out.');
+      return;
+    }
+    const holder = o.loc === 'inv' || o.loc === 'readied' ? this.actors.get(o.holder) : this.player;
+    if (!holder) return;
+    if (o.loc === 'map') this.objects.toInventory(o, holder.id);
+    if (this.ready(o, holder)) {
+      const lit = this.objects.inventories[holder.id].find((t) => t.objN === OBJ.TORCH && t.loc === 'readied' && t.frameN === 0);
+      if (lit) lit.frameN = 1;
+      this.say('sys', 'The torch is lit.');
+    }
   }
 
   /** Whether a thing can be worn or held (Ultima VI). */
@@ -1086,6 +1123,7 @@ export class Game implements ConvWorld {
       version: 1,
       clock: { ...this.clock },
       turns: this.turns,
+      light: this.lightTurns,
       party: this.party.map((m) => ({ id: m.actor.id, name: m.name })),
       flags: { karma: this.karma, quest: this.questFlag, garg: this.gargFlag, gender: this.gender },
       actors: this.actors.list.map((a) => [
@@ -1101,6 +1139,7 @@ export class Game implements ConvWorld {
   private restore(s: SaveState): void {
     Object.assign(this.clock, s.clock);
     this.turns = s.turns;
+    this.lightTurns = s.light ?? 0;
     this.karma = s.flags.karma;
     this.questFlag = s.flags.quest;
     this.gargFlag = s.flags.garg;

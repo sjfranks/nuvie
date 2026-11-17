@@ -101,7 +101,7 @@ export class Combat {
     return s ? s[0].toUpperCase() + s.slice(1) : s;
   }
 
-  private flash(x: number, y: number, z: number, kind: Flash['kind'], shot?: Flash['shot']): void {
+  flash(x: number, y: number, z: number, kind: Flash['kind'], shot?: Flash['shot']): void {
     const now = typeof performance !== 'undefined' ? performance.now() : 0;
     this.flashes.push({ x, y, z, kind, until: now + 450, shot });
     if (this.flashes.length > 24) this.flashes.shift();
@@ -283,6 +283,7 @@ export class Combat {
     const ac = this.ac(def);
     if (dmg !== 255 && ac > 0) dmg -= this.rand(1, ac);
     const who = this.cap(this.name(def));
+    if (dmg > 0) def.statusFlags &= ~0x04;
     if (dmg > 0) att.exp += this.hit(def, dmg);
     else this.g.say('sys', `${who} grazed.`);
     if (def.hp > 0 || dmg <= 0) {
@@ -293,6 +294,21 @@ export class Combat {
       if (dmg > 0) this.hitMessage(def);
       // The struck strike back.
       if (!FIGHTING.has(def.worktype) && !def.inParty && dmg > 0) {
+        def.worktype = WT.ASSAULT;
+        if (att.inParty) setAlignment(def, ALIGN.CHAOTIC);
+      }
+    } else if (def.id !== 1) this.g.say('sys', `${who} killed!`);
+  }
+
+  /** Damage that does not miss and no armour turns (spells): as a blow, with its messages. */
+  hurt(att: Actor, def: Actor, dmg: number): void {
+    const who = this.cap(this.name(def));
+    def.statusFlags &= ~0x04; // the hurt wake
+    this.flash(def.x, def.y, def.z, 'hit');
+    att.exp += this.hit(def, dmg);
+    if (def.hp > 0) {
+      this.hitMessage(def);
+      if (!FIGHTING.has(def.worktype) && !def.inParty) {
         def.worktype = WT.ASSAULT;
         if (att.inParty) setAlignment(def, ALIGN.CHAOTIC);
       }
@@ -452,6 +468,7 @@ export class Combat {
     for (const a of g.actors.list) {
       if (!g.party.length || g.player !== p) return; // the Avatar fell
       if (a.inParty || !this.standing(a) || a.z !== p.z || !FIGHTING.has(a.worktype)) continue;
+      if (this.asleep(a)) continue;
       if (Math.max(Math.abs(a.x - p.x), Math.abs(a.y - p.y)) > 16) continue;
       this.act(a);
     }
@@ -459,7 +476,7 @@ export class Combat {
     if (this.fighting) {
       for (const m of g.party.slice(1)) {
         const a = m.actor;
-        if (!this.standing(a) || a.z !== p.z) continue;
+        if (!this.standing(a) || a.z !== p.z || this.asleep(a)) continue;
         const t = this.findTarget(a);
         if (!t) continue;
         if (this.range(a, t.x, t.y) <= this.reach(a) && this.clearLine(a.x, a.y, t.x, t.y, a.z)) this.attack(a, t);
@@ -469,6 +486,17 @@ export class Combat {
     }
     const now = typeof performance !== 'undefined' ? performance.now() : 0;
     this.flashes = this.flashes.filter((f) => f.until > now - 2000);
+  }
+
+  /** Asleep, and stays so this turn (one chance in ten to wake). */
+  private asleep(a: Actor): boolean {
+    if (!(a.statusFlags & 0x04)) return false;
+    if (this.g.random(10) === 0) {
+      a.statusFlags &= ~0x04;
+      this.g.say('sys', `${this.cap(this.name(a))} awakens.`);
+      return false;
+    }
+    return true;
   }
 
   private act(a: Actor): void {

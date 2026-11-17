@@ -8,10 +8,11 @@ import { Game, type SaveState } from '../game/game.ts';
 import { invWeight } from '../game/inventory.ts';
 import type { Obj } from '../game/objects.ts';
 import { OBJ } from '../game/u6tables.ts';
+import { REAGENTS, reagentCounts, reagentNames, words, type Spell } from '../game/magic.ts';
 import { MapView } from './mapview.ts';
 import { haveIcons } from './theme.ts';
 
-type Mode = 'look' | 'talk' | 'use' | 'get' | 'attack' | null;
+type Mode = 'look' | 'talk' | 'use' | 'get' | 'attack' | 'cast' | null;
 type Pane = 'log' | 'party';
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', text = ''): HTMLElementTagNameMap[K] => {
@@ -53,6 +54,8 @@ export class App {
   private readonly tabLog: HTMLButtonElement;
   private readonly tabParty: HTMLButtonElement;
   private pane: Pane = 'log';
+  /** A spell chosen in the book, waiting for where. */
+  private pending: { caster: Actor; spell: Spell } | null = null;
   private wasTalking = false;
   private mode: Mode = null;
   private walk: { x: number; y: number; then: Mode | 'walk'; foe?: Actor } | null = null;
@@ -138,6 +141,13 @@ export class App {
     const p = g.player;
     const mode = this.mode;
     this.setMode(null);
+    if (mode === 'cast' && this.pending) {
+      const { caster, spell } = this.pending;
+      this.pending = null;
+      this.walk = null;
+      if (this.view.visible(sq.x, sq.y)) g.castSpell(caster, spell, sq.x, sq.y);
+      return;
+    }
     if (mode === 'look') {
       this.walk = null;
       if (this.view.visible(sq.x, sq.y)) g.look(sq.x, sq.y);
@@ -251,13 +261,14 @@ export class App {
       this.walk = null;
       g.move(d[0], d[1]);
     } else if (e.key === ' ') g.pass();
+    else if (e.key === 'c') this.spellbook();
     else if ('ltuga'.includes(e.key)) this.setMode(({ l: 'look', t: 'talk', u: 'use', g: 'get', a: 'attack' } as const)[e.key as 'l']);
   }
 
   private setMode(m: Mode): void {
     this.mode = m;
     this.modeTag.hidden = !m;
-    if (m) this.modeTag.textContent = `${m[0].toUpperCase() + m.slice(1)}: tap where`;
+    if (m) this.modeTag.textContent = m === 'cast' && this.pending ? `${this.pending.spell.name}: tap where` : `${m[0].toUpperCase() + m.slice(1)}: tap where`;
     this.footKey = '';
     this.drawFoot();
   }
@@ -383,6 +394,7 @@ export class App {
         icon(btn(label, () => this.setMode(this.mode === mode ? null : mode), this.mode === mode ? 'on' : ''), tile);
       bar.append(
         m('Attack', 'attack', 400),
+        icon(btn('Cast', () => this.spellbook()), 401),
         m('Look', 'look', 403), m('Talk', 'talk', 402), m('Use', 'use', 407), m('Get', 'get', 404),
         icon(btn('Pass', () => g.pass()), 408), icon(btn('Notes', () => this.journal()), 409),
       );
@@ -476,6 +488,62 @@ export class App {
         for (const o of inv) add(o, false);
       };
       draw(null);
+    });
+  }
+
+  /** The spellbook: who casts, their magic and reagents, and the spells in their book by circle. */
+  private spellbook(): void {
+    const g = this.game;
+    const casters = g.magic.casters();
+    this.open('Spellbook', (body) => {
+      const draw = (who: Actor | undefined): void => {
+        body.replaceChildren();
+        if (!who) {
+          body.append(el('p', '', 'No one in the party has a spellbook readied.'), el('p', 'small', 'Spellbooks and reagents are sold in the towns; ready the book from a member\'s sheet (Party, then their name).'));
+          return;
+        }
+        if (casters.length > 1) {
+          const seg = el('div', 'seg');
+          for (const c of casters) seg.append(btn(g.partyMemberName(c.id) || g.lookActor(c), () => draw(c), c === who ? 'on' : ''));
+          body.append(seg);
+        }
+        const counts = reagentCounts(g, who);
+        body.append(
+          el('div', 'partyhead', `Magic ${who.magic}/${g.magic.maxMagic(who)}  Level ${who.level}`),
+          el('p', 'small', REAGENTS.map((r, i) => `${r.name} ${counts[i]}`).join(', ')),
+        );
+        const known = g.magic.known(who);
+        if (!known.length) body.append(el('p', '', 'No spells in the spellbook.'));
+        for (let circle = 1; circle <= 8; circle++) {
+          const these = known.filter((s) => s.circle === circle);
+          if (!these.length) continue;
+          body.append(el('h3', '', `Circle ${circle}`));
+          for (const s of these) {
+            const why = g.magic.cannot(who, s);
+            const row = el('div', 'item spell');
+            const mid = el('div');
+            mid.append(el('div', '', s.name), el('div', 'small', `${words(s)}${reagentNames(s).length ? ' - ' + reagentNames(s).join(', ') : ''}`));
+            const b = btn('Cast', () => {
+              const aim = g.magic.aim(s);
+              if (aim === 'none') {
+                this.close();
+                g.castSpell(who, s);
+                return;
+              }
+              this.pending = { caster: who, spell: s };
+              this.close();
+              this.setMode('cast');
+            });
+            if (why) {
+              b.disabled = true;
+              b.title = why;
+            }
+            row.append(mid, b);
+            body.append(row);
+          }
+        }
+      };
+      draw(casters[0]);
     });
   }
 

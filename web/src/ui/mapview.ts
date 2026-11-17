@@ -419,7 +419,9 @@ export class MapView {
         const torch = g.objects.inventories[a.id].some((o) => o.objN === OBJ.TORCH && o.frameN === 1);
         const vx = wrap(a.x - this.curX, z);
         const vy = wrap(a.y - this.curY, z);
-        pool(vx, vy, torch ? 5 : a === g.player ? 2.6 : 1.6, torch ? 1 : 0.8);
+        // A Light spell lights the way for the leader; a torch for whoever holds it.
+        const spell = a === g.player && g.lightTurns > 0 ? (g.lightTurns > 100 ? 7 : 5.5) : 0;
+        pool(vx, vy, Math.max(spell, torch ? 5 : a === g.player ? 2.6 : 1.6), torch || spell ? 1 : 0.8);
         if (torch) warm.push([vx, vy, 5]);
       }
       // Firelight is warm against the blue.

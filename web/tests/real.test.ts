@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { GameFiles } from '../src/files/gamefiles.ts';
 import { Game } from '../src/game/game.ts';
+import { SPELLS } from '../src/game/u6combat.ts';
 
 const GAMES = [
   ['Ultima 6', 'ultima6', 199],
@@ -65,6 +66,38 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     const text = g.log.map((l) => l.text).join('\n');
     expect(text).toContain('Troll killed!');
     expect(g.party.length).toBe(4);
+  });
+
+  it.runIf(folder === 'ultima6')('casts spells from a readied book, using magic points and reagents', () => {
+    const g = new Game(load());
+    const avatar = g.player;
+    const spell = (name: string) => SPELLS.find((s) => s.name === name)!;
+    expect(g.magic.cannot(avatar, spell('Light'))).toBe('No spellbook is readied.');
+    const book = g.objects.create(57, 0, 0);
+    g.objects.toInventory(book, avatar.id);
+    expect(g.ready(book, avatar)).toBe(true);
+    const page = g.objects.create(58, 0, 255); // every spell
+    g.objects.toContainer(page, book);
+    expect(g.magic.known(avatar).length).toBe(80);
+    expect(g.magic.cannot(avatar, spell('Magic Arrow'))).toBe('No reagents.');
+    for (const r of [65, 66, 67, 68, 69, 70, 71, 72]) g.invNew(avatar.id, r, 10, 0);
+    avatar.level = 8;
+    avatar.magic = 30;
+    for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
+    const troll = g.combat.spawn(371, avatar.x + 2, avatar.y, avatar.z, 0, 8)!;
+    g.log = [];
+    g.castSpell(avatar, spell('Magic Arrow'), troll.x, troll.y);
+    expect(avatar.magic).toBe(28);
+    expect(g.invCount(avatar.id, 65)).toBe(9); // black pearl (and sulfurous ash)
+    g.castSpell(avatar, spell('Light'));
+    expect(g.lightTurns).toBeGreaterThan(90);
+    avatar.hp = 10;
+    g.castSpell(avatar, spell('Great Heal'), avatar.x, avatar.y);
+    expect(avatar.hp).toBe(avatar.maxHp);
+    g.castSpell(avatar, spell('Create Food'));
+    g.castSpell(avatar, spell('Kill'), troll.x, troll.y);
+    console.log(g.log.map((l) => l.text).join(' | '));
+    expect(g.log.some((l) => /Create \d+ food/.test(l.text))).toBe(true);
   });
 
   it.runIf(folder === 'ultima6')('readies and unreadies what the party carries', () => {
