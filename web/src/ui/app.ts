@@ -385,6 +385,7 @@ export class App {
     this.music?.update();
     if (g.openContainer && g.openContainer !== this.shownContainer && !g.converse) this.containerSheet(g.openContainer);
     if (g.askText && !this.sheet) this.textSheet();
+    if (g.askChoice && !this.sheet) this.choiceSheet();
     if (g.openBook) {
       g.openBook = false;
       this.spellbook();
@@ -810,6 +811,30 @@ export class App {
     });
     this.onClose = () => {
       if (g.askText === ask) g.askText = null;
+    };
+  }
+
+  /** The game asks for one of a list. */
+  private choiceSheet(): void {
+    const g = this.game;
+    const ask = g.askChoice;
+    if (!ask) return;
+    this.open(ask.label, (body) => {
+      const list = el('div', 'choices');
+      ask.options.forEach((name, i) => {
+        list.append(btn(name, () => {
+          this.onClose = null;
+          this.sheet?.remove();
+          this.sheet = null;
+          g.say('you', name);
+          ask.then(i);
+          this.changed();
+        }));
+      });
+      body.append(list);
+    });
+    this.onClose = () => {
+      if (g.askChoice === ask) g.askChoice = null;
     };
   }
 

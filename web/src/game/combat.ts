@@ -338,6 +338,71 @@ export class Combat {
     } else if (def.id !== 1) this.g.say('sys', `${who} killed!`);
   }
 
+  /**
+   * actor_map_dmg / actor_tile_dmg: what the square an actor stands on does to it - swamp and poison fields poison,
+   * fire burns, traps, spikes and force fields cut, webs hold, sleep fields put to sleep. Once a turn.
+   */
+  mapDamage(a: Actor): void {
+    const g = this.g;
+    if (!a.alive || !a.visible || !a.objN || a.id === 0) return;
+    const base = MONSTERS.get(a.objN);
+    if (base?.flies === 1 || a.statusFlags & PROTECTED) return;
+    if (a.inParty && g.vehicle) return;
+    let t = g.map.tile(a.x, a.y, a.z);
+    if (!t.damages) {
+      const objs = g.objects.list(a.x, a.y, a.z) ?? [];
+      let found = null;
+      for (let i = objs.length - 1; i >= 0 && !found; i--) {
+        const o = objs[i];
+        if (o.status & 0x10 && o.objN !== 173) continue; // invisible, but traps still bite
+        const ot = g.objects.tileOf(o);
+        if (ot.damages) found = ot;
+      }
+      if (!found) return;
+      t = found;
+    }
+    const n = t.num;
+    const name = this.cap(this.name(a));
+    if (n === 564) {
+      if (a.objN !== 0x169 && adj(a, a.strength) < this.rand(1, 30)) {
+        a.statusFlags |= PARALYZED;
+        g.say('sys', `${name} is stuck in a web!`);
+      }
+    } else if ((n >= 2 && n <= 5) || n === 1165) {
+      const boots = g.objects.inventories[a.id].some((o) => o.loc === 'readied' && o.objN === 28);
+      if ((!boots || n === 1165) && base?.poisonImmune !== 1 && !(a.statusFlags & POISONED)) {
+        a.statusFlags |= POISONED;
+        g.say('sys', `${name} poisoned!`);
+        this.flash(a.x, a.y, a.z, 'hit');
+      }
+    } else if ((n >= 220 && n <= 223) || [890, 1124, 1125, 1130, 1131, 1164, 1193].includes(n)) {
+      let dmg = n === 1164 ? this.rand(1, 30) : this.rand(1, 8);
+      if (base?.fireDouble === 1) dmg *= 2;
+      this.mapHit(a, dmg);
+    } else if (n === 732 || n === 1010) {
+      this.mapHit(a, this.rand(1, 30));
+      if (n === 732) for (const o of g.objects.list(a.x, a.y, a.z) ?? []) if (o.objN === 173) o.status &= ~0x10;
+    } else if (n >= 1458 && n <= 1463) {
+      if (a.objN !== 0x16e) this.mapHit(a, this.rand(1, 8));
+    } else if (n === 562 || n === 731) {
+      this.mapHit(a, this.rand(1, 8));
+    } else if (n === 1167) {
+      if (base?.sleepImmune !== 1 && !(a.statusFlags & ASLEEP)) {
+        a.statusFlags |= ASLEEP;
+        g.say('sys', `${name} falls asleep.`);
+      }
+    }
+  }
+
+  private mapHit(a: Actor, dmg: number): void {
+    const who = this.cap(this.name(a));
+    this.flash(a.x, a.y, a.z, 'hit');
+    this.g.sfx('hit');
+    this.hit(a, dmg);
+    if (a.hp > 0) this.hitMessage(a);
+    else if (a.id !== 1) this.g.say('sys', `${who} killed!`);
+  }
+
   /** actor_hit: the damage itself. Returns the experience it earns. */
   private hit(def: Actor, dmg: number): number {
     // The party's boat takes blows to its hull, but is not sunk here.

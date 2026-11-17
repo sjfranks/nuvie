@@ -126,6 +126,14 @@ export class Game implements ConvWorld {
   sfx: (id: SfxId, circle?: number) => void = () => {};
   /** Something wants words typed (a rune's mantra, the crystal ball's bearings): what to ask, and what to do with them. */
   askText: { label: string; then: (text: string) => void } | null = null;
+  /** The game asks the player to choose one of a list (a spell, a thing carried, a phase of the moons). */
+  askChoice: { label: string; options: string[]; then: (i: number) => void } | null = null;
+  /** Turns while no spell will take (Negate Magic; TIMER_STORM). */
+  stormTurns = 0;
+  /** Turns while the sun is darkened (Eclipse). */
+  eclipseTurns = 0;
+  /** Where the wind blows (Wind Change). */
+  wind: [number, number] = [0, 1];
   /** Hours before resting heals again (the clock's rest counter). */
   restCounter = 0;
   /** Turns until a lit powder keg goes off. */
@@ -616,9 +624,13 @@ export class Game implements ConvWorld {
     if (this.lightTurns > 0) this.lightTurns--;
     if (this.kegTurns > 0 && --this.kegTurns === 0) this.usecode.explodeKegs();
     if (this.infraTurns > 0) this.infraTurns--;
+    if (this.stormTurns > 0) this.stormTurns--;
+    if (this.eclipseTurns > 0) this.eclipseTurns--;
     this.combat.update();
     this.combat.round();
     this.moveNpcs();
+    const p = this.player;
+    for (const a of this.actors.list) if (a.z === p.z && Math.abs(a.x - p.x) <= 16 && Math.abs(a.y - p.y) <= 16) this.combat.mapDamage(a);
     this.onChange();
   }
 

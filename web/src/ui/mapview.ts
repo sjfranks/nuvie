@@ -374,6 +374,7 @@ export class MapView {
     if (z !== 0 && z !== 5) return 0.9;
     const t = g.clock.hour + g.clock.minute / 60;
     const NIGHT = 0.8;
+    if (g.eclipseTurns > 0) return NIGHT;
     if (t >= 6 && t < 19) return 0;
     if (t >= 19 && t < 21) return ((t - 19) / 2) * NIGHT;
     if (t >= 4 && t < 6) return ((6 - t) / 2) * NIGHT;

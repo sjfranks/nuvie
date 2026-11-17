@@ -118,14 +118,63 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
       const troll = g.combat.spawn(371, avatar.x + 2, avatar.y, avatar.z, 0, 8);
       g.log = [];
       const aim = g.magic.aim(sp);
-      expect(() => g.castSpell(avatar, sp, aim === 'none' ? undefined : troll?.x, aim === 'none' ? undefined : troll?.y)).not.toThrow();
+      expect(() => {
+        g.castSpell(avatar, sp, aim === 'none' ? undefined : troll?.x, aim === 'none' ? undefined : troll?.y);
+        if (g.askChoice) g.askChoice.then(0);
+        if (g.converse) g.converse = null;
+      }).not.toThrow();
+      g.stormTurns = 0;
+      g.eclipseTurns = 0;
+      g.scry = null;
       if (!g.log.some((l) => l.text.includes('not yet ported'))) ported.push(sp.name);
       if (troll && troll.objN) Object.assign(troll, { objN: 0, visible: false });
       for (const a of g.actors.list) if (a.id >= 203) Object.assign(a, { objN: 0, visible: false });
       g.peer = false;
     }
     console.log(ported.length, 'spells ported');
-    expect(ported.length).toBeGreaterThan(50);
+    expect(ported.length).toBe(SPELLS.length);
+  });
+
+  it.runIf(folder === 'ultima6')('lays fields that burn and sleep, and travels by gate', () => {
+    const g = new Game(load());
+    for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
+    const avatar = g.player;
+    const book = g.objects.create(57, 0, 0);
+    g.objects.toInventory(book, avatar.id);
+    g.ready(book, avatar);
+    g.objects.toContainer(g.objects.create(58, 0, 255), book);
+    avatar.level = 8;
+    const prep = (): void => {
+      for (const r of [65, 66, 67, 68, 69, 70, 71, 72]) if (g.invCount(avatar.id, r) < 2) g.invNew(avatar.id, r, 5, 0);
+      avatar.magic = 99;
+    };
+    const spell = (n: string) => SPELLS.find((s) => s.name === n)!;
+    let x = avatar.x + 2;
+    while (!g.canStand(x, avatar.y, avatar.z)) x++;
+    const troll = g.combat.spawn(371, x, avatar.y, avatar.z, 1, 0)!; // a neutral troll that stands still
+    troll.hp = 200;
+    const hp = troll.hp;
+    prep();
+    g.castSpell(avatar, spell('Fire Field'), troll.x, troll.y);
+    expect((g.objects.list(troll.x, troll.y, troll.z) ?? []).some((o) => o.objN === 317)).toBe(true);
+    expect(troll.hp).toBeLessThan(hp);
+    prep();
+    g.castSpell(avatar, spell('Dispel Field'), troll.x, troll.y);
+    expect((g.objects.list(troll.x, troll.y, troll.z) ?? []).some((o) => o.objN === 317)).toBe(false);
+    prep();
+    troll.hp = 60;
+    g.castSpell(avatar, spell('Sleep Field'), troll.x, troll.y);
+    expect(troll.statusFlags & 0x04).toBeTruthy();
+    prep();
+    g.castSpell(avatar, spell('Negate Magic'));
+    prep();
+    g.castSpell(avatar, spell('Light'));
+    expect(g.log.at(-1)!.text).toBe('No magic at this time!');
+    g.stormTurns = 0;
+    prep();
+    g.castSpell(avatar, spell('Gate Travel'));
+    g.askChoice!.then(4);
+    expect([avatar.x, avatar.y, avatar.z]).toEqual(g.moonstones[4]);
   });
 
   it.runIf(folder === 'ultima6')('boards a skiff, sails it, goes ashore; rides a horse', () => {

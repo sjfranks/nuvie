@@ -98,14 +98,19 @@ and death - the Avatar wakes in Lord British's castle with the fallen raised. Si
 turn (not by movement points), monsters that cast fight bare-handed, and thrown weapons are not lost.
 
 **Magic** has Magic.cpp's checks - a readied spellbook holding the spell, a level and magic points as high as its
-circle, a reagent of each kind - and magic points come back each hour. 55 of the 80 spells are ported from their Lua:
-the healing, harming and killing spells, the winds and storms, sleep, poison, paralysis, charm, curse, protection,
-invisibility, fear and confusion, Light, Infravision, X-ray and Peer (the land seen from above), locking and
-unlocking, Vanish and Reappear, Conjure, Insect Swarm and Summon, Time Stop, Tremor, Help and Resurrect. The rest
-(fields, Gate Travel, Wizard Eye, Enchant, Clone, Armageddon and the like) cost their reagents but say they are not
-yet ported. Their effects wear off as in the original, poison bites now and then, and the charmed fight for the
-party. Torches can be lit and held, and Light and torches widen the party's
-light at night.
+circle, a reagent of each kind - and magic points come back each hour. All 80 spells are ported from their Lua: the
+healing, harming and killing spells, the winds and storms, sleep, poison, paralysis, charm, curse, protection,
+invisibility, fear and confusion, Light, Infravision, X-ray, Peer and Wizard Eye (the land seen from above), locking
+and unlocking, trapping and untrapping, Detect Magic and Detect Trap, Telekinesis, Vanish and Reappear, Conjure,
+Insect Swarm, Summon, Animate and Clone, the fire, poison, sleep and energy fields and Dispel Field, Web, Replicate,
+Pickpocket and Enchant (choose from a list), Seance (cast on a body), Gate Travel (choose a phase of the moons),
+Negate Magic, Eclipse, Wind Change, Slime, Time Stop, Tremor, Help, Resurrect and Armageddon. Their effects wear off
+as in the original, poison bites now and then, and the charmed fight for the party. Torches can be lit and held, and
+Light and torches widen the party's light at night.
+
+**Harmful ground** (actor_map_dmg): once a turn, whoever stands in a swamp (without swamp boots) or a poison field is
+poisoned, fire and fire fields burn, traps, spikes and force fields cut, sleep fields put to sleep, and webs hold -
+unless they fly, are protected, or are aboard.
 
 **Using things** follows Nuvie's U6UseCode.cpp: doors, ladders and containers; levers and switches that raise and
 drop the portcullises and fields of their doorways; cranks that lower and raise drawbridges; keys and lock picks
@@ -131,7 +136,7 @@ moongates stand at the eight moonstones while either moon is in the sky, and lea
 tap water to sail, and land beside the boat to go ashore. Ships keep to open water and must have room to turn.
 Tap a roaming horse to ride it, and the rider to get down.
 
-Not ported yet: the remaining spells, most of Nuvie's other Lua scripts, balloons, music for Martian Dreams and Savage Empire, the intro and ending, the remaining usecode (balloons and a few rare items), the ending sequence, and the silver serpent's long body (it draws as
+Not ported yet: most of Nuvie's other Lua scripts (staffs' charges are not yet cast in a fight), balloons, music for Martian Dreams and Savage Empire, the intro and ending, the remaining usecode (balloons and a few rare items), the ending sequence, and the silver serpent's long body (it draws as
 one tile).
 
 `tests/real.test.ts` runs on your copies put in `web/gamedata/ultima6/`, `savage/` and `martian/` (git-ignored).
