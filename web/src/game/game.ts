@@ -21,6 +21,7 @@ import { Obj, Objects, STATUS_OK_TO_TAKE, STATUS_TEMPORARY, type Loc } from './o
 import { Tiles } from './tiles.ts';
 import { READY_BY_TILE } from './mdse.ts';
 import { MdUseCode } from './mdusecode.ts';
+import { SeUseCode } from './seusecode.ts';
 import { OBJ, READY_SLOT } from './u6tables.ts';
 
 export type LogKind = 'sys' | 'npc' | 'you' | 'read';
@@ -188,6 +189,8 @@ export class Game implements ConvWorld {
 
   /** Martian Dreams' usecode (usecode.lua). */
   readonly mdUse = new MdUseCode(this);
+  /** Savage Empire's usecode (usecode.lua). */
+  readonly seUse = new SeUseCode(this);
 
   /** A new game, not a saved one: the Avatar may be made anew (the intro's character creation). */
   readonly fresh: boolean;
@@ -1139,7 +1142,7 @@ export class Game implements ConvWorld {
     const l = this.objects.list(x, y, p.z);
     // Of what is here, the thing that does something when used; else the topmost.
     const door = l?.find((o) => this.objects.isDoor(o));
-    const working = l ? [...l].reverse().find((o) => !(o.status & 0x02) && (this.kind === 'md' ? this.mdUse.handles(o) : USED_IN_PLACE.has(o.objN) || this.usecode.handles(o))) : undefined;
+    const working = l ? [...l].reverse().find((o) => !(o.status & 0x02) && (this.kind === 'md' ? this.mdUse.handles(o) : this.kind === 'se' ? this.seUse.handles(o) : USED_IN_PLACE.has(o.objN) || this.usecode.handles(o))) : undefined;
     const o = door ?? working ?? this.objects.get(x, y, p.z);
     if (!o || o.status & 0x02) {
       this.say('sys', 'Nothing to use there.');
@@ -1150,6 +1153,11 @@ export class Game implements ConvWorld {
   }
 
   useObj(o: Obj): void {
+    if (this.kind === 'se' && this.seUse.handles(o)) {
+      const holder = o.loc === 'inv' || o.loc === 'readied' ? this.actors.get(o.holder) : null;
+      this.seUse.use(o, holder && holder.inParty ? holder : this.player);
+      return;
+    }
     if (this.kind === 'md' && this.mdUse.handles(o)) {
       // Whoever carries it uses it (berries are eaten by the one who has them).
       const holder = o.loc === 'inv' || o.loc === 'readied' ? this.actors.get(o.holder) : null;

@@ -118,8 +118,10 @@ ground, no foes or others near, no one dizzy with berries; rest until sunrise or
 six, and dream of the obelisks of book, heart and sword to gain a level and a point of wits, dexterity or strength.
 A shovel digs dirt and ice into holes and piles, fills holes, and loads ore, rocks and
 coal into wheelbarrows and rail cars and out again ("On -", then "To -"); coal in the furnace starts the power (the
-steam, furnaces and lamps). Not yet: the drill, the conveyor belt's movement, the dream machine, and Savage Empire's
-usecode.
+steam, furnaces and lamps). Not yet: the drill, the conveyor belt's movement, and the dream machine.
+
+Savage Empire's usecode.lua has only a little in use, and that is ported: corn from a corn stalk, clay with a digging
+stick, and a soft pot shaped from clay.
 
 **Combat** follows Ultima VI's rules as Nuvie's Lua has them: the hit roll (dexterity, or strength for clubs and
 maces, against the foe's dexterity), weapon damage less a roll against readied armour, half damage for the creatures

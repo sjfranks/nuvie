@@ -381,6 +381,19 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     expect([barrow.qty, car.qty, car.quality]).toEqual([0, 1, 2]);
   });
 
+  it.runIf(folder === 'savage')('picks corn, digs clay and shapes a pot', () => {
+    const g = new Game(load());
+    const stalk = g.objects.all().find((o) => o.objN === 61 && o.loc === 'map')!;
+    g.relocate(stalk.x, stalk.y + 1, stalk.z);
+    g.useObj(stalk);
+    const stick = g.objects.create(131, 1, 0);
+    g.objects.toInventory(stick, g.player.id);
+    g.useObj(stick);
+    g.useObj(g.objects.inventories[g.player.id].find((o) => o.objN === 192)!);
+    expect(g.log.slice(-3).map((l) => l.text)).toEqual(['You got some corn from the plant.', 'You get some clay.', 'You shaped a small, soft pot from the clay.']);
+    expect(g.objects.inventories[g.player.id].some((o) => o.objN === 132)).toBe(true);
+  });
+
   it.runIf(folder === 'ultima6')('boards a skiff, sails it, goes ashore; rides a horse', () => {
     const g = new Game(load());
     for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });

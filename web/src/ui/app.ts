@@ -356,6 +356,7 @@ export class App {
       // Levers, cranks, fires, bells, wells and the like are used where they stand.
       else if (g.kind === 'u6' && (g.objects.list(sq.x, sq.y, p.z) ?? []).some((n) => USED_IN_PLACE.has(n.objN) && !(n.status & 0x02))) then = 'use';
       else if (g.kind === 'md' && (g.objects.list(sq.x, sq.y, p.z) ?? []).some((n) => MD_IN_PLACE.has(n.objN) && !(n.status & 0x02))) then = 'use';
+      else if (g.kind === 'se' && (g.objects.list(sq.x, sq.y, p.z) ?? []).some((n) => n.objN === 61)) then = 'use'; // a corn stalk
       else if (a && a.objN === 428 && g.kind === 'u6') then = 'use';
     }
     const foe = then === 'attack' ? g.actors.at(sq.x, sq.y, p.z) ?? undefined : undefined;
