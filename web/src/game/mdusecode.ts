@@ -11,6 +11,9 @@ import type { Obj } from './objects.ts';
 import { Lib } from '../files/lib.ts';
 
 type On = (o: Obj, target: Obj | Actor | null, a: Actor, x: number, y: number) => void;
+/** A thing used on one thing, to another (use_obj_on_to: "On -", then "To -"). */
+type OnTo = (o: Obj, target: Obj, to: Obj, a: Actor) => void;
+type OnEntry = On | Record<number, OnTo>;
 
 const BERRY = 73;
 const OXIUM = 131;
@@ -45,7 +48,7 @@ export class MdUseCode {
     if (t) this.g.say('sys', t);
   }
 
-  private onTable(o: Obj): Record<number, On> | null {
+  private onTable(o: Obj): Record<number, OnEntry> | null {
     const crate: On = (tool, t) => this.crate(tool, t as Obj);
     const misc: On = (_tool, t) => this.misc(t as Obj);
     const oil: On = (tool, t) => this.oil(tool, t as Obj | null);
@@ -53,6 +56,21 @@ export class MdUseCode {
     const holes = { 255: misc, 257: misc };
     switch (o.objN) {
       case 65: case 67: case 263: case 327: return holes;
+      case 66: case 267: {
+        // use_shovel_on_tbl: dig, fill a hole, load and unload ore.
+        const unload: OnTo = (_s, from, to, a) => this.unload(from, to, a);
+        const load: OnTo = (_s, ore, to) => void this.load(ore, to);
+        return {
+          ...holes,
+          258: { 257: (_s, pile, hole) => this.fill(pile, hole) },
+          268: { 233: unload, 257: unload, 268: unload, 410: unload },
+          410: { 233: unload, 257: unload, 268: unload, 410: unload },
+          442: { 268: load, 410: load },
+          443: { 268: load, 410: load },
+          444: { 268: load, 410: load },
+          0: (_s, t, a, x, y) => this.dig(t, a, x, y),
+        };
+      }
       case 102: return { 86: crate, 427: (_t, h, a) => this.hatch(h as Obj, a) };
       case 273: return { 86: crate };
       case 119: case 128: return { 129: spray, 261: spray };
@@ -118,8 +136,23 @@ export class MdUseCode {
         const target: Obj | Actor | null = g.actors.at(x, y, a.z) ?? g.objects.get(x, y, a.z);
         const on = (target && table[target.objN]) ?? table[0];
         if (target) g.say('you', `On ${'id' in target ? g.lookActor(target) : g.objects.look(target)}`);
-        if (on) on(o, target, a, x, y);
-        else this.say(target ? 'NO_EFFECT' : 'NOTHING');
+        if (typeof on === 'function') on(o, target, a, x, y);
+        else if (on && target && !('id' in target)) {
+          // And to what (use_obj_on_to).
+          g.askWhere = {
+            label: 'To -',
+            then: (tx, ty) => {
+              g.askWhere = null;
+              const to = g.objects.get(tx, ty, a.z);
+              if (!to) this.say('SOMETHING');
+              else {
+                g.say('you', `To ${g.objects.look(to)}`);
+                on[to.objN]?.(o, target, to, a);
+              }
+              g.onChange();
+            },
+          };
+        } else this.say(target ? 'NO_EFFECT' : 'NOTHING');
         g.onChange();
       },
     };
@@ -446,6 +479,94 @@ export class MdUseCode {
         g.onChange();
       },
     };
+  }
+
+  // ---- digging and shovelling ----
+
+  /** use_tool_on_ground: dirt or ice dug out to a hole, the pile beside the digger. */
+  private dig(t: Obj | Actor | null, a: Actor, x: number, y: number): void {
+    const g = this.g;
+    if (t) return this.say('THE_GROUND_IS_NOT_CLEAR_FOR_DIGGING');
+    const tile = g.map.tileNum(x, y, a.z);
+    const pile = (tile >= 32 && tile <= 36) || tile === 12 || tile === 13 || (tile >= 40 && tile <= 63) ? 258 : [124, 125, 127].includes(tile) ? 256 : 0;
+    if (!pile) return this.say('IT_HAS_NO_EFFECT');
+    const around = [[-1, -1], [0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0]].map(([dx, dy]) => [a.x + dx, a.y + dy])
+      .find(([px, py]) => (px !== x || py !== y) && g.canStand(px, py, a.z) && !g.objects.get(px, py, a.z));
+    if (!around) return this.say('YOU_CANT_DIG_HERE');
+    const put = (n: number, px: number, py: number): void => {
+      const o = g.objects.create(n, 1, 0);
+      o.status |= 0x20;
+      [o.x, o.y, o.z] = [px, py, a.z];
+      g.objects.add(o);
+    };
+    put(pile === 256 ? 255 : 257, x, y);
+    put(pile, around[0], around[1]);
+  }
+
+  private fill(pile: Obj, hole: Obj): void {
+    this.g.objects.unlink(pile);
+    this.g.objects.unlink(hole);
+    this.say('YOU_FILLED_IN_THE_HOLE');
+  }
+
+  /** use_shovel_on_ore_to_container: ore into a wheelbarrow (one load) or a rail car (seven of a kind). */
+  private load(ore: Obj, to: Obj): boolean {
+    const quality = ({ 258: 1, 442: 2, 443: 3, 444: 4 } as Record<number, number>)[ore.objN] ?? 1;
+    const name = this.g.objects.name(ore);
+    if (to.objN === 268) {
+      if (to.qty === 1) return this.say('THERE_IS_NO_MORE_ROOM'), false;
+      to.qty = 1;
+      to.quality = quality;
+      this.say('YOU_PUT_THE_ORE_INTO_THE_WHEELBARROW', name);
+    } else if (to.objN === 410) {
+      if (to.qty >= 7) return this.say('THERE_IS_NO_MORE_ROOM'), false;
+      if (to.qty > 0 && to.quality !== quality) return this.say('YOU_CANT_MIX_DIFFERENT_THINGS_IN_THE_SAME_LOAD'), false;
+      to.quality = quality;
+      to.qty++;
+      if (to.qty === 1 || to.qty === 7) to.frameN += 2;
+      this.say('YOU_PUT_THE_ORE_INTO_THE_RAIL_CAR', name);
+    } else return false;
+    if (ore.loc !== 'none') this.g.objects.unlink(ore);
+    return true;
+  }
+
+  /** use_shovel_to_unload_container: a load out of a barrow or car, into another or the furnace. */
+  private unload(from: Obj, to: Obj, _a: Actor): void {
+    const g = this.g;
+    if (from.qty === 0) return this.say('THERE_IS_NOTHING_TO_UNLOAD');
+    const ore = g.objects.create([0, 258, 442, 443, 444][from.quality] ?? 258, 1, 0);
+    let ok = false;
+    if (to.objN === 268 || to.objN === 410) ok = this.load(ore, to);
+    else if (to.objN === 233) {
+      ok = true;
+      if (ore.objN === 444) {
+        if (to.frameN < 4) this.power();
+      } else this.say('IT_HAS_NO_EFFECT');
+    }
+    if (!ok) return;
+    from.qty--;
+    if (from.objN === 410 && (from.qty === 6 || from.qty === 0)) from.frameN -= 2;
+  }
+
+  /** activate_power_system: coal in the furnace - steam from the cracks, the furnaces lit, the lamps on. */
+  private power(): void {
+    const g = this.g;
+    this.say('THE_COAL_BEGINS_MOVING_DOWN_THE_BELT');
+    for (const [id, flag] of [[0x73, 2], [0x71, 3]]) {
+      const a = g.actors.get(id);
+      if (a) a.talkFlags |= 1 << flag;
+    }
+    const z = g.player.z;
+    for (const o of [...g.objects.all()]) {
+      if (o.loc !== 'map') continue;
+      if (o.z === z && o.objN === 208 && !(g.objects.list(o.x, o.y + 1, z) ?? []).some((n) => n.objN === 209)) {
+        const steam = g.objects.create(209, 1, 0);
+        steam.frameN = 1;
+        [steam.x, steam.y, steam.z] = [o.x, o.y + 1, z];
+        g.objects.add(steam);
+      } else if (o.z === z && o.objN === 233 && (o.frameN === 1 || o.frameN === 3)) o.frameN += 4;
+      else if (o.objN === 154 && (o.z === z || o.z === 4)) o.frameN = 1;
+    }
   }
 
   // ---- things used on something ----

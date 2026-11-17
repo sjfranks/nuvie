@@ -116,7 +116,10 @@ unit and the ray guns, the heartstone, the hand mirror, the hatch, ruby slippers
 Things used on something ask where ("On -"). The tent (and the Rest button, with a tent carried) camps as use_tent does: flat
 ground, no foes or others near, no one dizzy with berries; rest until sunrise or sunset or some hours, heal once in
 six, and dream of the obelisks of book, heart and sword to gain a level and a point of wits, dexterity or strength.
-Not yet: the drill, digging, the conveyor and power machinery, the dream machine, and Savage Empire's usecode.
+A shovel digs dirt and ice into holes and piles, fills holes, and loads ore, rocks and
+coal into wheelbarrows and rail cars and out again ("On -", then "To -"); coal in the furnace starts the power (the
+steam, furnaces and lamps). Not yet: the drill, the conveyor belt's movement, the dream machine, and Savage Empire's
+usecode.
 
 **Combat** follows Ultima VI's rules as Nuvie's Lua has them: the hit roll (dexterity, or strength for clubs and
 maces, against the foe's dexterity), weapon damage less a roll against readied armour, half damage for the creatures

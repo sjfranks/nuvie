@@ -344,6 +344,43 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     expect(p.strength).toBe(Math.min(30, str + 1));
   });
 
+  it.runIf(folder === 'martian')('digs, and shovels ore into a wheelbarrow and a rail car', () => {
+    const g = new Game(load());
+    const p = g.player;
+    const shovel = g.objects.create(66, 1, 0);
+    g.objects.toInventory(shovel, p.id);
+    // Somewhere with diggable ground beside open squares.
+    let at: number[] | null = null;
+    for (let r = 2; r < 80 && !at; r++) for (const [x, y] of [[p.x + r, p.y], [p.x - r, p.y], [p.x, p.y + r], [p.x, p.y - r]]) {
+      const t = g.map.tileNum(x + 1, y, 0);
+      if (!at && g.canStand(x, y, 0) && g.canStand(x, y + 1, 0) && !g.objects.get(x + 1, y, 0) && ((t >= 32 && t <= 36) || (t >= 40 && t <= 63))) at = [x, y];
+    }
+    g.relocate(at![0], at![1], 0);
+    g.useObj(shovel);
+    g.askWhere!.then(p.x + 1, p.y);
+    expect((g.objects.list(p.x + 1, p.y, 0) ?? []).some((o) => o.objN === 257)).toBe(true);
+    expect(g.objects.all().some((o) => o.objN === 258 && Math.abs(o.x - p.x) <= 1 && Math.abs(o.y - p.y) <= 1)).toBe(true);
+    // Rocks into a barrow, the barrow into a rail car.
+    const put = (n: number, x: number, y: number): ReturnType<typeof g.objects.create> => {
+      const o = g.objects.create(n, n === 268 || n === 410 ? 0 : 1, 0);
+      [o.x, o.y, o.z] = [x, y, 0];
+      g.objects.add(o);
+      return o;
+    };
+    for (const m of g.party.slice(1)) m.actor.visible = false; // out of the way
+    const rocks = put(442, p.x - 1, p.y);
+    const barrow = put(268, p.x, p.y - 1);
+    const car = put(410, p.x - 1, p.y - 1);
+    g.useObj(shovel);
+    g.askWhere!.then(rocks.x, rocks.y);
+    g.askWhere!.then(barrow.x, barrow.y);
+    expect([barrow.qty, barrow.quality, rocks.loc]).toEqual([1, 2, 'none']);
+    g.useObj(shovel);
+    g.askWhere!.then(barrow.x, barrow.y);
+    g.askWhere!.then(car.x, car.y);
+    expect([barrow.qty, car.qty, car.quality]).toEqual([0, 1, 2]);
+  });
+
   it.runIf(folder === 'ultima6')('boards a skiff, sails it, goes ashore; rides a horse', () => {
     const g = new Game(load());
     for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
