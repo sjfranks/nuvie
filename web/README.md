@@ -23,6 +23,11 @@ With your copy of the game the interface takes its look from the game's own file
 map, the pane and every sheet), its scroll's ink and red keywords, and its command icons on the buttons. None of it
 is in this repository; the demo world uses the same colours with a plain frame.
 
+**Music** (Ultima VI) is the game's own: its `.m` songs played by a port of AdPlug's Ultima 6 player (`u6m.cpp`) on
+DOSBox's FM synthesiser compiled to WebAssembly ([@malvineous/opl](https://github.com/Malvineous/opljs)), changing as
+the original's does - a song of the land, the battle song in a fight, the hornpipe aboard ship, the dungeon's below.
+It starts at the first touch, and Menu turns it off and on.
+
 **Night** is a modern take, not the original's black that closes in square by square: a soft blue dusk over the map,
 deeper underground, with smooth pools of light round the party, and warm firelight from lamps, braziers and torches.
 Sunset and sunrise glow orange.
@@ -103,7 +108,8 @@ moongates stand at the eight moonstones while either moon is in the sky, and lea
 tap water to sail, and land beside the boat to go ashore. Ships keep to open water and must have room to turn.
 Tap a roaming horse to ride it, and the rider to get down.
 
-Not ported yet: the remaining spells, most of Nuvie's other Lua scripts, balloons, sound and music, the intro and ending, most other usecode, and the silver serpent's long body (it draws as
+Not ported yet: the remaining spells, most of Nuvie's other Lua scripts, balloons, sound effects, music for Martian Dreams and Savage
+Empire, the intro and ending, most other usecode, and the silver serpent's long body (it draws as
 one tile).
 
 `tests/real.test.ts` runs on your copies put in `web/gamedata/ultima6/`, `savage/` and `martian/` (git-ignored).
@@ -111,4 +117,5 @@ For each it loads a new game, saves and restores it, and talks with everyone who
 Ultima VI, 68 in Savage Empire, 99 in Martian Dreams). For Ultima VI it also hatches the opening gargoyles, fights a
 troll to the death, readies and unreadies, casts spells, and goes through a red moongate.
 
-Licensed as Nuvie is: GPL 2 or later.
+Licensed as Nuvie is: GPL 2 or later. The music's synthesiser (@malvineous/opl) is GPL 3, so a build that
+includes it is distributed under GPL 3.

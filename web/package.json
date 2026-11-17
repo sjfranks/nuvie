@@ -6,11 +6,12 @@
   "description": "A TypeScript port of the Nuvie engine for phones and browsers. Plays the player's own game data.",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "dev": "node tools/copy-opl.mjs && vite",
+    "build": "node tools/copy-opl.mjs && tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "tables": "node tools/gen-tables.mjs && node tools/gen-combat.mjs"
+    "tables": "node tools/gen-tables.mjs && node tools/gen-combat.mjs",
+    "postinstall": "node tools/copy-opl.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
@@ -19,6 +20,7 @@
     "vitest": "^3.0.0"
   },
   "dependencies": {
+    "@malvineous/opl": "^1.0.0",
     "fflate": "^0.8.2",
     "opentype.js": "^1.3.4"
   }

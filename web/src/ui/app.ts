@@ -11,6 +11,7 @@ import { OBJ } from '../game/u6tables.ts';
 import { REAGENTS, reagentCounts, reagentNames, words, type Spell } from '../game/magic.ts';
 import { MapView } from './mapview.ts';
 import { haveIcons } from './theme.ts';
+import { Music } from '../audio/music.ts';
 
 type Mode = 'look' | 'talk' | 'use' | 'get' | 'attack' | 'cast' | 'where' | null;
 type Pane = 'log' | 'party';
@@ -57,6 +58,7 @@ export class App {
   /** A spell chosen in the book, waiting for where. */
   private pending: { caster: Actor; spell: Spell } | null = null;
   private wasTalking = false;
+  private readonly music: Music;
   private mode: Mode = null;
   private walk: { x: number; y: number; then: Mode | 'walk'; foe?: Actor } | null = null;
   private walkTimer = 0;
@@ -139,7 +141,13 @@ export class App {
       clearTimeout(this.walkTimer);
       clearTimeout(this.saveTimer);
       this.sheet?.remove();
+      this.music.stop();
     };
+    this.music = new Music(game);
+    // Sound may start only once the player has touched the page.
+    const wake = (): void => void this.music.start();
+    window.addEventListener('pointerdown', wake, { once: true });
+    window.addEventListener('keydown', wake, { once: true });
     game.onChange = () => this.changed();
     this.timers.push(window.setInterval(() => {
       this.view.tick();
@@ -349,6 +357,7 @@ export class App {
 
   private changed(): void {
     const g = this.game;
+    this.music?.update();
     if (g.peer) {
       g.peer = false;
       this.open('Peer', (body) => {
@@ -684,6 +693,12 @@ export class App {
         body.append(row);
       };
       item('Journal', () => this.journal());
+      if (this.music.available) {
+        item(this.music.enabled ? 'Music: on' : 'Music: off', () => {
+          this.music.setEnabled(!this.music.enabled);
+          this.close();
+        });
+      }
       item('Save now', () => {
         this.hooks.save(g.save());
         g.say('sys', 'Saved.');
