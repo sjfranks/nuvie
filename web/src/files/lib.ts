@@ -16,7 +16,7 @@ export class Lib {
   /** `skip4`: the file starts with its own length (Martian Dreams and Savage Empire; Ultima 6's do not). */
   constructor(
     private readonly data: Uint8Array,
-    private readonly width: 2 | 4,
+    width: 2 | 4,
     skip4 = false,
   ) {
     const v = new DataView(data.buffer, data.byteOffset, data.byteLength);
