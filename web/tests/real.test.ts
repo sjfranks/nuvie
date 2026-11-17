@@ -394,6 +394,46 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     expect(g.objects.inventories[g.player.id].some((o) => o.objN === 132)).toBe(true);
   });
 
+  it.runIf(folder === 'martian')('pushes a wheelbarrow, drills rock, and runs the conveyor', () => {
+    const g = new Game(load());
+    const p = g.player;
+    const hide = (): void => {
+      for (const m of g.party.slice(1)) m.actor.visible = false;
+    };
+    let pushedOk = false;
+    for (const b of g.objects.all().filter((o) => o.objN === 268)) {
+      const d = [[1, 0], [-1, 0], [0, 1], [0, -1]].find(([dx, dy]) => g.canStand(b.x - dx, b.y - dy, b.z) && g.canStand(b.x + dx, b.y + dy, b.z));
+      if (!d) continue;
+      g.relocate(b.x - d[0], b.y - d[1], b.z);
+      hide();
+      const [bx, by] = [b.x, b.y];
+      expect(g.move(d[0], d[1])).toBe(true);
+      expect([b.x, b.y]).toEqual([bx + d[0], by + d[1]]);
+      expect([p.x, p.y]).toEqual([bx, by]);
+      pushedOk = true;
+      break;
+    }
+    expect(pushedOk).toBe(true);
+    // A drill facing rock (tiles 0xf0 to 0xfb) leaves a pile of rocks beside it.
+    const drill = g.objects.all().find((o) => o.objN === 441)!;
+    const ahead = drill.frameN === 1 ? [drill.x - 1, drill.y] : drill.frameN === 3 ? [drill.x, drill.y - 1] : drill.frameN === 4 ? [drill.x, drill.y + 1] : [drill.x + 1, drill.y];
+    g.relocate(drill.x, drill.y + 1, drill.z);
+    const piles = (): number => g.objects.all().filter((o) => o.objN >= 442 && o.objN <= 444 && Math.abs(o.x - drill.x) <= 1 && Math.abs(o.y - drill.y) <= 1).length;
+    const before = piles();
+    g.useObj(drill);
+    const t = g.map.tileNum(ahead[0], ahead[1], drill.z);
+    if (t >= 0xf0 && t <= 0xfb) expect(piles()).toBe(before + 1);
+    else expect(g.log.length).toBeGreaterThan(0);
+    // The belt carries coal east while the power runs.
+    const coal = g.objects.create(447, 1, 0);
+    [coal.x, coal.y, coal.z] = [0x3a, 0x63, 5];
+    g.objects.add(coal);
+    g.actors.get(0x73)!.talkFlags |= 1 << 2;
+    g.relocate(0x3a, 0x65, 5);
+    g.pass();
+    expect(coal.x).toBe(0x3b);
+  });
+
   it.runIf(folder === 'ultima6')('boards a skiff, sails it, goes ashore; rides a horse', () => {
     const g = new Game(load());
     for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });

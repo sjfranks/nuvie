@@ -17,6 +17,8 @@ type OnEntry = On | Record<number, OnTo>;
 
 const BERRY = 73;
 const OXIUM = 131;
+/** usecode_move_obj_table: the wheelbarrow, plank, rail car and drill. */
+const MOVED: ReadonlySet<number> = new Set([268, 395, 410, 441]);
 /** rest_level_up_actor's experience for each level. */
 const LEVEL_EXP = [0, 100, 200, 400, 800, 1600, 3200, 6400, 32767];
 
@@ -111,6 +113,7 @@ export class MdUseCode {
       case 331: return (d, a) => this.dreamstuff(d, a);
       case 399: return (_t, a) => this.poolTable(a);
       case 411: return (b) => this.switchBar(b);
+      case 441: return (d) => this.drill(d);
       default: return null;
     }
   }
@@ -479,6 +482,136 @@ export class MdUseCode {
         g.onChange();
       },
     };
+  }
+
+  // ---- pushing, the drill and the conveyor ----
+
+  /** Whether a thing is pushed rather than walked over (usecode_move_obj_table). */
+  pushable(o: Obj): boolean {
+    return MOVED.has(o.objN);
+  }
+
+  /**
+   * Push a thing a square (move_obj): a wheelbarrow or drill turns to the way it goes, a rail car keeps to its track,
+   * a plank simply moves. Returns whether it moved.
+   */
+  push(o: Obj, dx: number, dy: number): boolean {
+    const g = this.g;
+    if (dx && dy) {
+      if (o.objN === 410) this.say('IT_WONT_GO_IN_THAT_DIRECTION');
+      return false;
+    }
+    const nx = o.x + dx;
+    const ny = o.y + dy;
+    if (o.objN === 410) {
+      const along = dx ? [0, 2, 4] : [1, 3, 5];
+      if (!along.includes(o.frameN) || !this.track(o, nx, ny)) {
+        this.say('IT_WONT_GO_IN_THAT_DIRECTION');
+        return false;
+      }
+    } else if (!g.map.tile(nx, ny, o.z).passable || (g.objects.list(nx, ny, o.z) ?? []).some((n) => !g.objects.tileOf(n).passable)) return false;
+    if (g.actors.at(nx, ny, o.z)) return false;
+    if (o.objN === 268) o.frameN = dx < 0 ? 3 : dx > 0 ? 1 : dy < 0 ? 0 : 2;
+    else if (o.objN === 441) o.frameN = dx < 0 ? 1 : dx > 0 ? 4 : dy < 0 ? 3 : 5;
+    g.objects.move(o, nx, ny, o.z);
+    return true;
+  }
+
+  /** check_for_track */
+  private track(car: Obj, x: number, y: number): boolean {
+    const g = this.g;
+    for (const n of g.objects.list(x, y, car.z) ?? []) {
+      if ((n.objN >= 412 && n.objN <= 414) || n.objN === 419 || n.objN === 175 || n.objN === 163) {
+        return car.frameN % 2 === n.frameN || n.frameN === 2 || n.objN === 412 || n.objN === 175 || n.objN === 163;
+      }
+      if (n.objN !== 417 && n.objN !== 338) return false;
+    }
+    return [108, 109, 110, 77, 79].includes(g.map.tileNum(x, y, car.z));
+  }
+
+  /** use_assembled_drill: into rock, iron ore, a coal vein or a cave-in ahead; the spoil beside the drill. */
+  private drill(d: Obj): void {
+    const g = this.g;
+    g.sfx('quake');
+    let [x, y] = [d.x + 1, d.y];
+    if (d.frameN === 1) x = d.x - 1;
+    else if (d.frameN === 3) [x, y] = [d.x, d.y - 1];
+    else if (d.frameN === 4) [x, y] = [d.x, d.y + 1];
+    const target = (g.objects.list(x, y, d.z) ?? []).find((n) => n.objN === 445 || n.objN === 446 || n.objN === 213);
+    let spoil = 0;
+    if (!target) {
+      const t = g.map.tileNum(x, y, d.z);
+      if (t >= 0xf0 && t <= 0xfb) spoil = 442;
+      else {
+        const a = g.actors.at(x, y, d.z);
+        if (a) g.combat.hurt(g.player, a, 40);
+        else this.say('THERE_IS_NOTHING_TO_DRILL_INTO');
+        return;
+      }
+    } else if (target.objN === 445) spoil = 443;
+    else if (target.objN === 446) spoil = 444;
+    if (spoil) {
+      const at = [[-1, -1], [0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0]].map(([dx, dy]) => [d.x + dx, d.y + dy])
+        .find(([px, py]) => (!g.objects.get(px, py, d.z) || g.objects.get(px, py, d.z)!.objN === 338) && g.map.tile(px, py, d.z).passable);
+      if (at) {
+        const o = g.objects.create(spoil, 1, 0);
+        [o.x, o.y, o.z] = [at[0], at[1], d.z];
+        g.objects.add(o);
+      } else this.say('THERE_IS_NO_ROOM_LEFT_FOR_THE_ORE');
+    }
+    if (target) {
+      if (spoil && target.quality > 1) target.quality--;
+      else g.objects.unlink(target);
+    }
+  }
+
+  /**
+   * update_conveyor_belt: while the power runs, the mine's one belt (from 0x3c, 0x63 on level 5 westward) carries
+   * what lies on it, and whoever stands on it, a square east each turn; now and then it stops.
+   */
+  conveyor(canStop: boolean): void {
+    const g = this.g;
+    const flag = (id: number, f: number): boolean => !!((g.actors.get(id)?.talkFlags ?? 0) & (1 << f));
+    if (!flag(0x73, 2) || g.player.z !== 5) return;
+    const z = 5;
+    let x = 0x3c;
+    const y = 0x63;
+    const at = (cx: number, n: number): Obj | undefined => (g.objects.list(cx, y, z) ?? []).find((o) => o.objN === n);
+    let belt = at(x, 188);
+    while (belt) {
+      if (belt.frameN === 2) {
+        const seam = at(x, 189);
+        if (seam) g.objects.unlink(seam);
+      } else if (belt.frameN === 0) {
+        if (belt.qty === 0) {
+          const seam = g.objects.create(189, 1, 0);
+          [seam.x, seam.y, seam.z] = [x, y, z];
+          g.objects.add(seam);
+          belt.qty = 4;
+        }
+        belt.qty--;
+      }
+      for (const o of [...(g.objects.list(x, y, z) ?? [])]) {
+        if (o.objN === 189 || o.objN === 447 || (o.objN !== 188 && g.objects.weightOf(o) > 0)) g.objects.move(o, x + 1, y, z);
+      }
+      const a = g.actors.at(x, y, z);
+      if (a && !g.actors.at(x + 1, y, z)) a.x = x + 1;
+      x--;
+      belt = at(x, 188);
+    }
+    if (canStop && flag(0x71, 3) && g.random(7) === 0) {
+      this.say('THE_CONVEYOR_BELT_STOPS');
+      for (const [id, f] of [[0x73, 2], [0x71, 3]]) {
+        const a = g.actors.get(id);
+        if (a) a.talkFlags &= ~(1 << f);
+      }
+      for (const o of [...g.objects.all()]) {
+        if (o.loc !== 'map') continue;
+        if (o.z === z && o.objN === 209) g.objects.unlink(o);
+        else if (o.z === z && o.objN === 233 && (o.frameN === 5 || o.frameN === 7)) o.frameN -= 4;
+        else if (o.objN === 154 && (o.z === z || o.z === 4)) o.frameN = 0;
+      }
+    }
   }
 
   // ---- digging and shovelling ----

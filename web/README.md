@@ -118,7 +118,10 @@ ground, no foes or others near, no one dizzy with berries; rest until sunrise or
 six, and dream of the obelisks of book, heart and sword to gain a level and a point of wits, dexterity or strength.
 A shovel digs dirt and ice into holes and piles, fills holes, and loads ore, rocks and
 coal into wheelbarrows and rail cars and out again ("On -", then "To -"); coal in the furnace starts the power (the
-steam, furnaces and lamps). Not yet: the drill, the conveyor belt's movement, and the dream machine.
+steam, furnaces and lamps). Walking into a wheelbarrow, rail car or drill pushes it ahead (move_obj): barrows and
+drills turn the way they go, rail cars keep to their track. The drill bores into the rock, ore or coal it faces and
+leaves the spoil beside it; while the power runs, the mine's conveyor carries what lies on it east each turn until it
+stops. Not yet: the dream machine and its dreams, and the ruby slippers' way home.
 
 Savage Empire's usecode.lua has only a little in use, and that is ported: corn from a corn stalk, clay with a digging
 stick, and a soft pot shaped from clay.

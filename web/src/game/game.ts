@@ -513,6 +513,19 @@ export class Game implements ConvWorld {
       this.onChange();
       return false;
     }
+    // Martian Dreams' wheelbarrows, drills, rail cars and planks are pushed ahead (move_obj).
+    const pushed = this.kind === 'md' && !this.actors.at(nx, ny, p.z) ? (this.objects.list(nx, ny, p.z) ?? []).find((o) => this.mdUse.pushable(o) && !this.objects.tileOf(o).passable) : undefined;
+    if (pushed) {
+      if (!this.mdUse.push(pushed, dx, dy)) {
+        this.sfx('blocked');
+        this.onChange();
+        return false;
+      }
+      if (!this.map.isPassable(nx, ny, p.z)) {
+        this.endTurn();
+        return true;
+      }
+    }
     const other = this.actors.at(nx, ny, p.z);
     if (other && this.combat.hostile(other)) {
       this.combat.attack(p, other);
@@ -660,6 +673,7 @@ export class Game implements ConvWorld {
     if (this.kegTurns > 0 && --this.kegTurns === 0) this.usecode.explodeKegs();
     if (this.infraTurns > 0) this.infraTurns--;
     if (this.stormTurns > 0) this.stormTurns--;
+    if (this.kind === 'md') this.mdUse.conveyor(true);
     if (this.eclipseTurns > 0) this.eclipseTurns--;
     this.combat.update();
     this.combat.round();
