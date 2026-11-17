@@ -885,6 +885,21 @@ export class App {
         g.pass();
       }));
       body.append(row);
+      if (g.kind === 'md') {
+        // Martian Dreams camps in a tent (use_tent).
+        const tent = g.party.map((m) => g.objects.inventories[m.actor.id].find((o) => o.objN === 106)).find(Boolean);
+        body.append(el('p', 'small', tent ? 'Pitch the tent and sleep, away from foes and others.' : 'The party has no tent to sleep in.'));
+        if (tent) {
+          const r = el('div', 'row');
+          r.append(btn('Pitch the tent', () => {
+            this.close();
+            g.mdUse.tent(null);
+            this.changed();
+          }, 'primary'));
+          body.append(r);
+        }
+        return;
+      }
       body.append(el('p', 'small', 'Camp and sleep - away from towns, foes and others. Those with food heal, once in twelve hours.'));
       const hours = el('div', 'row');
       for (const h of [1, 2, 4, 8]) {

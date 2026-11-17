@@ -318,6 +318,32 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     expect(g.log.at(-1)!.text.length).toBeGreaterThan(40);
   });
 
+  it.runIf(folder === 'martian')('camps in the tent: rests, heals, and dreams of the obelisks', () => {
+    const g = new Game(load());
+    for (const a of g.actors.list) if (a.id >= 224) Object.assign(a, { objN: 0, visible: false });
+    const p = g.player;
+    g.mdUse.tent(null);
+    expect(g.log.at(-1)!.text).toBe('The ground is not flat enough.');
+    let spot: number[] | null = null;
+    for (let r = 3; r < 60 && !spot; r++) for (const [x, y] of [[p.x + r, p.y], [p.x - r, p.y], [p.x, p.y + r], [p.x, p.y - r]]) {
+      let ok = !spot;
+      for (let yy = y - 2; yy <= y + 1; yy++) for (let xx = x - 1; xx <= x + 1; xx++) ok &&= g.canStand(xx, yy, 0);
+      if (ok && !g.actors.list.some((a) => a.objN && a.visible && !a.inParty && Math.abs(a.x - x) < 7 && Math.abs(a.y - y) < 7)) spot = [x, y];
+    }
+    g.relocate(spot![0], spot![1], 0);
+    p.hp = 10;
+    p.exp = 1000;
+    const level = p.level;
+    const str = p.strength;
+    g.mdUse.tent(null);
+    expect(g.askChoice!.label).toMatch(/^Rest until (sunset|sunrise)\?$/);
+    g.askChoice!.then(0);
+    expect(p.hp).toBeGreaterThan(10);
+    expect(p.level).toBe(level + 1);
+    g.askChoice!.then(2); // the sword
+    expect(p.strength).toBe(Math.min(30, str + 1));
+  });
+
   it.runIf(folder === 'ultima6')('boards a skiff, sails it, goes ashore; rides a horse', () => {
     const g = new Game(load());
     for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });

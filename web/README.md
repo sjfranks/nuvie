@@ -113,8 +113,10 @@ bars and hammers on crates, gates, levers that work the doors they name, switch 
 potash on rusted doors, the oxium bin and hammering geodes, books, notes, scrolls and the affidavit (mdtext.lzc),
 instruments, the spittoon, the pool table, spray guns and their paint or weed killer, dreamstuff, radium for the power
 unit and the ray guns, the heartstone, the hand mirror, the hatch, ruby slippers and things readied by using them.
-Things used on something ask where ("On -"). Not yet: the drill, digging, the conveyor and power machinery, the
-dream machine, the tent, and Savage Empire's usecode.
+Things used on something ask where ("On -"). The tent (and the Rest button, with a tent carried) camps as use_tent does: flat
+ground, no foes or others near, no one dizzy with berries; rest until sunrise or sunset or some hours, heal once in
+six, and dream of the obelisks of book, heart and sword to gain a level and a point of wits, dexterity or strength.
+Not yet: the drill, digging, the conveyor and power machinery, the dream machine, and Savage Empire's usecode.
 
 **Combat** follows Ultima VI's rules as Nuvie's Lua has them: the hit roll (dexterity, or strength for clubs and
 maces, against the foe's dexterity), weapon damage less a roll against readied armour, half damage for the creatures

@@ -14,6 +14,8 @@ type On = (o: Obj, target: Obj | Actor | null, a: Actor, x: number, y: number) =
 
 const BERRY = 73;
 const OXIUM = 131;
+/** rest_level_up_actor's experience for each level. */
+const LEVEL_EXP = [0, 100, 200, 400, 800, 1600, 3200, 6400, 32767];
 
 /** Things used where they stand when tapped on the map: levers, gates, bins, tables, crates and chests. */
 export const MD_IN_PLACE: ReadonlySet<number> = new Set([86, 87, 104, 181, 196, 212, 284, 286, 311, 312, 399, 411]);
@@ -30,7 +32,8 @@ export class MdUseCode {
   private text$(key: string, ...args: (string | number)[]): string {
     let t = MD_TEXT[key] ?? key;
     for (const a of args) t = t.replace(/%[sd]/, String(a));
-    return t;
+    // '*' waits for a key in the original, '@' marks a word to press.
+    return t.replace(/\*/g, '').replace(/@/g, '');
   }
 
   /** Print strings as the original does, one after another: those that end without a new line run on. */
@@ -86,6 +89,7 @@ export class MdUseCode {
       case 212: return (_b, a) => this.oxiumBin(a);
       case 280: case 281: case 282: case 283: return (i) => this.instrument(i);
       case 286: return () => this.say('YOU_SPIT_INTO_THE_SPITTOON');
+      case 106: return (t) => this.tent(t);
       case 331: return (d, a) => this.dreamstuff(d, a);
       case 399: return (_t, a) => this.poolTable(a);
       case 411: return (b) => this.switchBar(b);
@@ -339,6 +343,109 @@ export class MdUseCode {
       if (made) g.say('sys', this.text$('YOU_IMAGINE') + g.lookActor(made));
     }
     g.objects.unlink(o);
+  }
+
+  /**
+   * use_tent: pitch camp where the tent is (or the party stands) - flat ground, no foes near, no one about, no one
+   * dizzy with berries - and rest until sunrise or sunset, or some hours. Six hours apart, more than four hours' rest
+   * heals; each member may dream and grow (rest_level_up_actor); the poisoned get better or worse.
+   */
+  tent(o: Obj | null): void {
+    const g = this.g;
+    const p = g.player;
+    const at = o && o.loc === 'map' ? { x: o.x, y: o.y, z: o.z } : { x: p.x, y: p.y, z: p.z };
+    const fail = (key: string, ...args: string[]): void => {
+      this.say(key, ...args);
+      g.sfx('failure');
+    };
+    for (let y = at.y - 2; y <= at.y; y++) {
+      for (let x = at.x - 1; x <= at.x + 1; x++) {
+        if (!g.map.tile(x, y, at.z).passable) return fail('THE_GROUND_IS_NOT_FLAT_ENOUGH');
+        const thing = (g.objects.list(x, y, at.z) ?? []).find((n) => n !== o && !g.objects.tileOf(n).passable);
+        if (thing) return fail('TENT_OBJ_IN_THE_WAY', g.objects.name(thing));
+      }
+    }
+    if (g.combat.fighting) return fail('NOT_WHILE_IN_COMBAT_MODE');
+    const near = (a: Actor, r: number): boolean => a.z === at.z && Math.abs(a.x - at.x) < r && Math.abs(a.y - at.y) < r;
+    if (g.combat.foes(40).length) return fail('NOT_WHILE_FOES_ARE_NEAR');
+    const npc = g.actors.list.find((a) => a.alive && a.objN && a.visible && !a.inParty && !(a.statusFlags & 0x04) && near(a, 6));
+    if (npc) return fail('IS_TOO_NEAR_TO_SETUP_CAMP', g.lookActor(npc));
+    for (const m of g.party) if (m.actor.statusFlags & 0x08) this.say('IS_POISONED', m.name);
+    let dizzy = false;
+    for (const m of g.party) {
+      const [, green, brown] = this.berries.get(m.actor.id) ?? [0, 0, 0];
+      if (green && brown) this.say('COMPLAINS_OF_TOO_MUCH_LIGHT_AND_INANIMATE', m.name);
+      else if (brown) this.say('COMPLAINS_OF_TOO_MUCH_LIGHT', m.name);
+      else if (green) this.say('COMPLAINS_OF_INANIMATE_THINGS_TALKING', m.name);
+      dizzy ||= !!(green || brown);
+    }
+    if (dizzy) return this.say(g.party.length === 1 ? 'YOU_CANT_SLEEP' : 'NOBODY_CAN_SLEEP');
+    const h = g.clock.hour;
+    const night = h < 7 || h > 16;
+    const until = night ? (h < 7 ? 7 - h : 24 - h + 7) : 18 - h;
+    this.say('REST');
+    g.askChoice = {
+      label: this.text$('REST_UNTIL', this.text$(night ? 'SUNRISE' : 'SUNSET')).trim(),
+      options: [`Yes (${until} hours)`, '1 hour', '2 hours', '4 hours', '8 hours'],
+      then: (i) => {
+        g.askChoice = null;
+        this.sleep([until, 1, 2, 4, 8][i] ?? until);
+      },
+    };
+    g.onChange();
+  }
+
+  private sleep(hours: number): void {
+    const g = this.g;
+    if (g.restCounter === 0 && hours > 4) {
+      for (const m of g.party) m.actor.hp = Math.min(m.actor.maxHp, m.actor.hp + this.rand(3, 8) + this.rand(3, 8) * Math.floor(hours / 2));
+      g.restCounter = 6;
+    }
+    const dreamers: Actor[] = [];
+    for (let i = 0; i < hours * 3; i++) {
+      g.advance(20);
+      const m = g.party[i]?.actor;
+      if (m && m.id <= 15 && m.exp > LEVEL_EXP[Math.min(8, m.level)]) dreamers.push(m);
+    }
+    for (const m of g.party) {
+      const a = m.actor;
+      if (!(a.statusFlags & 0x08)) continue;
+      if (this.rand(1, 8) + this.rand(1, 8) >= 15) {
+        a.statusFlags &= ~0x08;
+        this.say('FEELS_BETTER', m.name);
+      } else a.hp = Math.max(5, a.hp - (hours * 2 + 5));
+    }
+    g.say('sys', `The party rests for ${hours} hour${hours === 1 ? '' : 's'}.`);
+    this.dream(dreamers);
+    g.onChange();
+  }
+
+  /** rest_level_up_actor: a level, thirty health, and a point of wits, dexterity or strength from the obelisk touched. */
+  private dream(dreamers: Actor[]): void {
+    const g = this.g;
+    const a = dreamers.shift();
+    if (!a) return;
+    a.level++;
+    a.hp = Math.min(a.maxHp, a.hp + 30);
+    const name = g.partyMemberName(a.id);
+    const female = [344, 346].includes(a.objN) || (a.objN >= 354 && a.objN <= 357);
+    const pro = female ? 'She' : 'He';
+    this.say('HAS_A_DREAM', name);
+    this.say('SEES_THREE_STONE_OBELISKS', pro);
+    this.say('FEELS_DRAWN_TO_ONE_OF_THE_OBELISKS', pro);
+    this.say('DOES_TOUCH_THE_OBELISK', name);
+    g.askChoice = {
+      label: `Which obelisk does ${name} touch?`,
+      options: ['The book', 'The heart', 'The sword'],
+      then: (i) => {
+        g.askChoice = null;
+        if (i === 0) a.intelligence = Math.min(30, a.intelligence + 1);
+        else if (i === 1) a.dex = Math.min(30, a.dex + 1);
+        else a.strength = Math.min(30, a.strength + 1);
+        this.dream(dreamers);
+        g.onChange();
+      },
+    };
   }
 
   // ---- things used on something ----
