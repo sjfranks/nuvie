@@ -287,6 +287,37 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     expect(rounds()).toBeLessThanOrEqual(before);
   });
 
+  it.runIf(folder === 'martian')('uses Martian Dreams\' things as usecode.lua has them', () => {
+    const g = new Game(load());
+    const p = g.player;
+    const kinds = [...new Set(g.objects.all().filter((o) => g.mdUse.handles(o)).map((o) => o.objN))];
+    expect(kinds.length).toBeGreaterThan(40);
+    for (const n of kinds) {
+      const o = g.objects.all().find((q) => q.objN === n)!;
+      if (o.loc === 'map') g.relocate(o.x, o.y + 1, o.z);
+      expect(() => {
+        g.useObj(o);
+        if (g.askWhere) g.askWhere.then(p.x, p.y - 1);
+        g.converse = null;
+      }).not.toThrow();
+    }
+    // A rusted door, and lamp oil on it.
+    const door = g.objects.all().find((o) => (o.objN === 179 || o.objN === 152) && o.quality & 0x80 && o.loc === 'map')!;
+    expect(door).toBeTruthy();
+    const oil = g.objects.create(124, 1, 0);
+    g.objects.toInventory(oil, p.id);
+    g.relocate(door.x, door.y + 1, door.z);
+    g.useObj(oil);
+    g.askWhere!.then(door.x, door.y);
+    expect(door.quality & 0x80).toBe(0);
+    expect(g.log.some((l) => l.text === 'The door is unstuck!' || /unstuck/.test(l.text))).toBe(true);
+    // A book from mdtext.lzc.
+    const book = g.objects.all().find((o) => o.objN === 148 && o.quality > 0)!;
+    g.relocate(book.x, book.y + 1, book.z);
+    g.useObj(book);
+    expect(g.log.at(-1)!.text.length).toBeGreaterThan(40);
+  });
+
   it.runIf(folder === 'ultima6')('boards a skiff, sails it, goes ashore; rides a horse', () => {
     const g = new Game(load());
     for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });

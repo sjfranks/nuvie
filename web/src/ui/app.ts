@@ -9,6 +9,7 @@ import { invWeight } from '../game/inventory.ts';
 import type { Obj } from '../game/objects.ts';
 import { OBJ } from '../game/u6tables.ts';
 import { USED_IN_PLACE } from '../game/usecode.ts';
+import { MD_IN_PLACE } from '../game/mdusecode.ts';
 import { REAGENTS, reagentCounts, reagentNames, words, type Spell } from '../game/magic.ts';
 import { Gypsy } from './gypsy.ts';
 import { MapView } from './mapview.ts';
@@ -354,6 +355,7 @@ export class App {
       else if (door || (o && USABLE.has(o.objN) && !g.map.isPassable(sq.x, sq.y, p.z)) || (o && (o.objN === OBJ.LADDER || o.objN === OBJ.CAVE || o.objN === OBJ.HOLE))) then = 'use';
       // Levers, cranks, fires, bells, wells and the like are used where they stand.
       else if (g.kind === 'u6' && (g.objects.list(sq.x, sq.y, p.z) ?? []).some((n) => USED_IN_PLACE.has(n.objN) && !(n.status & 0x02))) then = 'use';
+      else if (g.kind === 'md' && (g.objects.list(sq.x, sq.y, p.z) ?? []).some((n) => MD_IN_PLACE.has(n.objN) && !(n.status & 0x02))) then = 'use';
       else if (a && a.objN === 428 && g.kind === 'u6') then = 'use';
     }
     const foe = then === 'attack' ? g.actors.at(sq.x, sq.y, p.z) ?? undefined : undefined;
