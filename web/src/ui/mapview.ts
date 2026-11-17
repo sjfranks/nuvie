@@ -45,7 +45,7 @@ export class MapView {
     readonly canvas: HTMLCanvasElement,
   ) {
     this.ctx = canvas.getContext('2d')!;
-    const pal = game.files.get('u6pal');
+    const pal = game.files.get(game.paletteFile);
     if (pal) for (let i = 0; i < 768; i++) this.palette[i] = Math.min(255, (pal[i] << 2) | (pal[i] >> 4));
     this.buildPal();
     this.resize(11, 11);
@@ -310,7 +310,7 @@ export class MapView {
         const raw = this.tmp[(vy + BORDER) * this.tw + vx + BORDER];
         if (raw === 0) continue;
         const n = raw & 0x7fff;
-        if (n >= 16 && n < 48) this.blit(g.tiles.animBase(n), vx * 16, vy * 16);
+        if (g.kind === 'u6' && n >= 16 && n < 48) this.blit(g.tiles.animBase(n), vx * 16, vy * 16);
         this.blit(g.tiles.get(n), vx * 16, vy * 16);
       }
     }
@@ -456,15 +456,16 @@ export class MapView {
     return c;
   }
 
-  /** A face (56 by 64) as a picture. */
-  portraitImage(data: Uint8Array): HTMLCanvasElement {
+  /** A face as a picture. */
+  portraitImage(face: { w: number; h: number; data: Uint8Array }): HTMLCanvasElement {
     const c = document.createElement('canvas');
-    c.width = 56;
-    c.height = 64;
+    c.width = face.w;
+    c.height = face.h;
     const ctx = c.getContext('2d')!;
-    const img = ctx.createImageData(56, 64);
+    const img = ctx.createImageData(face.w, face.h);
     const out = new Uint32Array(img.data.buffer);
-    for (let i = 0; i < 56 * 64; i++) out[i] = data[i] === 0xff ? 0 : this.pal32[data[i]];
+    const data = face.data;
+    for (let i = 0; i < face.w * face.h; i++) out[i] = data[i] === 0xff ? 0 : this.pal32[data[i]];
     ctx.putImageData(img, 0, 0);
     return c;
   }

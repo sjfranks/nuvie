@@ -2,3 +2,5 @@
 
 Nothing of the game is in this repository. To play, choose your own copy's folder (or a .zip of it) on the first
 screen; it is kept in your browser. Files put here are ignored by git.
+
+For the tests, put a copy in `ultima6/`, `savage/` or `martian/` here.

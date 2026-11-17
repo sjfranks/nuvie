@@ -7,6 +7,7 @@
  */
 import opentype from 'opentype.js';
 import type { GameFiles } from '../files/gamefiles.ts';
+import { Lib } from '../files/lib.ts';
 import { lzwFile } from '../files/lzw.ts';
 
 const FAMILY = 'NuvieGame';
@@ -16,10 +17,14 @@ const PAL_TEXT = 0x48;
 const PAL_KEY = 0x0c;
 
 /** The game's letters as a font: each lit pixel a square of the glyph's outline. */
-async function installFont(ch: Uint8Array): Promise<boolean> {
+async function installFont(ch: Uint8Array, wou: boolean): Promise<boolean> {
   const U = 100;
   const glyphs = [new opentype.Glyph({ name: '.notdef', unicode: 0, advanceWidth: 8 * U, path: new opentype.Path() })];
-  for (let c = 32; c < 127; c++) {
+  // Curly quotes are drawn with the game's own: Martian Dreams and Savage Empire have an opening " and a closing &.
+  const codes: [number, number][] = [];
+  for (let c = 32; c < 127; c++) codes.push([c, c]);
+  codes.push([0x201c, 34], [0x201d, wou ? 38 : 34]);
+  for (const [unicode, c] of codes) {
     const path = new opentype.Path();
     for (let row = 0; row < 8; row++) {
       const bits = ch[c * 8 + row] ?? 0;
@@ -38,7 +43,7 @@ async function installFont(ch: Uint8Array): Promise<boolean> {
         x = x1;
       }
     }
-    glyphs.push(new opentype.Glyph({ name: `c${c}`, unicode: c, advanceWidth: 8 * U, path }));
+    glyphs.push(new opentype.Glyph({ name: `u${unicode.toString(16)}`, unicode, advanceWidth: 8 * U, path }));
   }
   const font = new opentype.Font({ familyName: FAMILY, styleName: 'Regular', unitsPerEm: 8 * U, ascender: 7 * U, descender: -U, glyphs });
   const face = new FontFace(FAMILY, font.toArrayBuffer());
@@ -95,12 +100,14 @@ export async function installTheme(files: GameFiles): Promise<void> {
   root.classList.remove('game-font', 'game-paper');
   haveIcons = files.has('u6.ch') && files.has('paper.bmp');
   for (const v of ['--paper', '--parch', '--ink', '--key']) root.style.removeProperty(v);
-  const pal = files.get('u6pal');
+  const pal = files.get('u6pal') ?? files.get('mdpal') ?? files.get('sepal');
   const rgb = (i: number): [number, number, number] => (pal ? [Math.min(255, pal[i * 3] << 2), Math.min(255, pal[i * 3 + 1] << 2), Math.min(255, pal[i * 3 + 2] << 2)] : [0, 0, 0]);
   const css = (i: number): string => `rgb(${rgb(i).join(',')})`;
   try {
-    const ch = files.get('u6.ch');
-    if (ch && ch.length >= 127 * 8 && (await installFont(ch))) root.classList.add('game-font');
+    // Ultima 6's letters, or the system font the other two keep in system.lzc (FontManager::initWOUSystemFont).
+    const u6 = files.get('u6.ch');
+    const ch = u6 ?? (files.has('system.lzc') ? new Lib(files.get('system.lzc')!, 4, true).item(3) ?? undefined : undefined);
+    if (ch && ch.length >= 127 * 8 && (await installFont(ch, !u6))) root.classList.add('game-font');
   } catch {
     // The device's own letters will do.
   }

@@ -156,7 +156,7 @@ export class App {
     if (!mode) {
       const a = g.actors.at(sq.x, sq.y, p.z);
       const o = g.objects.get(sq.x, sq.y, p.z);
-      const door = g.objects.list(sq.x, sq.y, p.z)?.some((d) => g.objects.isDoor(d) && d.frameN > 3);
+      const door = g.objects.list(sq.x, sq.y, p.z)?.some((d) => g.objects.isDoor(d) && g.objects.isShut(d));
       if (a && !a.inParty) then = 'talk';
       else if (door || (o && USABLE.has(o.objN) && !g.map.isPassable(sq.x, sq.y, p.z)) || (o && (o.objN === OBJ.LADDER || o.objN === OBJ.CAVE || o.objN === OBJ.HOLE))) then = 'use';
     }

@@ -1,6 +1,7 @@
 # Nuvie Web
 
-A TypeScript port of the Nuvie engine, for a phone held upright (or sideways) and for any browser. Like Nuvie, it
+A TypeScript port of the Nuvie engine - Ultima VI, Martian Dreams and The Savage Empire - for a phone held upright
+(or sideways) and for any browser. Like Nuvie, it
 plays **your own copy** of the game and ships none of it: on the first screen, choose the game's folder, its files or
 a .zip, and they are kept in the browser (IndexedDB) and never leave the device.
 
@@ -64,10 +65,15 @@ of sight; walking with a party following; schedules (people go about their day);
 interpreter; doors, keys, ladders, caves, secret doors, passthroughs, containers, signs and books, food; getting,
 dropping and giving; saving.
 
+**Martian Dreams and The Savage Empire** load too, from the same screen (the game is told by its files): their map,
+people, schedules, conversations, faces (`mdfaces.lzc`, `faces.lzc`), palette, and their own 8-pixel font
+(`system.lzc`), with Martian Dreams' doors. They have no parchment picture, so they take the plain frame. Their Lua
+usecode (most of what using things does in them) and the scenes behind their faces are not ported.
+
 Not ported yet: combat, magic, Nuvie's Lua scripts (which hold most of both), eggs and monster spawning, vehicles
-and horses, moongates, lighting and night, sound and music, the intro and ending, most other usecode, creatures
-made of several parts (they draw as one tile), and Martian Dreams and Savage Empire. `tests/real.test.ts` runs on a copy of Ultima 6
-put in `web/gamedata/ultima6/` (git-ignored): it loads a new game, saves and restores it, and talks with all 199
-people who have a conversation.
+and horses, moongates, sound and music, the intro and ending, most other usecode, and creatures made of several
+parts (they draw as one tile). `tests/real.test.ts` runs on your copies put in
+`web/gamedata/ultima6/`, `savage/` and `martian/` (git-ignored): for each it loads a new game, saves and restores
+it, and talks with everyone who has a conversation - 199 in Ultima VI, 68 in Savage Empire, 99 in Martian Dreams.
 
 Licensed as Nuvie is: GPL 2 or later.

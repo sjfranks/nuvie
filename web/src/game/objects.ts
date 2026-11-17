@@ -3,6 +3,7 @@
  */
 import type { GameFiles } from '../files/gamefiles.ts';
 import { F2_BOUNDARY, F3_FORCED_PASSABLE, F3_IGNORE, type Tile, type Tiles } from './tiles.ts';
+import { EGG, MD_CONTAINERS, MD_DOORS, STACKABLE, type Kind } from './kind.ts';
 import { OBJ } from './u6tables.ts';
 
 export const STATUS_OK_TO_TAKE = 0x01;
@@ -32,7 +33,7 @@ export class Obj {
   holder = -1;
 }
 
-const STACKABLE: ReadonlySet<number> = new Set([
+const U6_STACKABLE: ReadonlySet<number> = new Set([
   OBJ.LOCK_PICK, OBJ.GEM, OBJ.ARROW, OBJ.BOLT, OBJ.BLACK_PEARL, OBJ.BLOOD_MOSS, OBJ.GARLIC, OBJ.GINSENG,
   OBJ.MANDRAKE_ROOT, OBJ.NIGHTSHADE, OBJ.SPIDER_SILK, OBJ.SULFUROUS_ASH, OBJ.EFFECT, OBJ.BREAD, OBJ.MEAT_PORTION,
   OBJ.FLASK_OF_OIL, OBJ.EGG, OBJ.GOLD_NUGGET, OBJ.ZU_YLEM, OBJ.SNAKE_VENOM, OBJ.GOLD,
@@ -62,6 +63,7 @@ export class Objects {
   constructor(
     files: GameFiles,
     readonly tiles: Tiles,
+    readonly kind: Kind = 'u6',
   ) {
     const basetile = files.get('basetile');
     if (!basetile) throw new Error('missing game file: basetile');
@@ -73,11 +75,14 @@ export class Objects {
 
   isStackable(o: Obj): boolean {
     if (o.loc === 'readied') return false;
+    if (this.kind !== 'u6') return STACKABLE[this.kind].has(o.objN);
     if (o.objN === OBJ.TORCH) return o.frameN !== 1;
-    return STACKABLE.has(o.objN);
+    return U6_STACKABLE.has(o.objN);
   }
 
   isContainer(objN: number): boolean {
+    if (this.kind === 'md') return MD_CONTAINERS.has(objN);
+    if (this.kind === 'se') return false;
     return CONTAINERS.has(objN);
   }
 
@@ -101,7 +106,7 @@ export class Objects {
       o.loc = where === STATUS_IN_CONTAINER ? 'cont' : where === STATUS_IN_INVENTORY ? 'inv' : where === STATUS_READIED ? 'readied' : 'map';
       if (this.isStackable(o)) o.qty |= o.quality << 8;
       list.push(o);
-      if (o.objN === OBJ.EGG) o.status |= STATUS_INVISIBLE;
+      if (o.objN === EGG[this.kind]) o.status |= STATUS_INVISIBLE;
       if (this.isContainer(o.objN)) o.container = [];
       if (o.loc === 'inv' || o.loc === 'readied') {
         o.holder = o.x & 0xff;
@@ -284,7 +289,14 @@ export class Objects {
   }
 
   isDoor(o: Obj): boolean {
+    if (this.kind === 'md') return MD_DOORS.has(o.objN);
+    if (this.kind === 'se') return false;
     return o.objN >= OBJ.OAKEN_DOOR && o.objN <= OBJ.STEEL_DOOR;
+  }
+
+  /** Whether a door is shut (each game marks it its own way). */
+  isShut(o: Obj): boolean {
+    return this.kind === 'md' ? !!(o.frameN & 2) : o.frameN > 3;
   }
 
   look(o: Obj): string {

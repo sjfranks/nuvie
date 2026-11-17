@@ -7,7 +7,14 @@ import { describe, expect, it } from 'vitest';
 import type { GameFiles } from '../src/files/gamefiles.ts';
 import { Game } from '../src/game/game.ts';
 
-const DIR = join(import.meta.dirname, '../gamedata/ultima6');
+const GAMES = [
+  ['Ultima 6', 'ultima6', 199],
+  ['Savage Empire', 'savage', 40],
+  ['Martian Dreams', 'martian', 40],
+] as const;
+
+for (const [title, folder, people] of GAMES) {
+const DIR = join(import.meta.dirname, '../gamedata', folder);
 const have = existsSync(join(DIR, 'MAP')) || existsSync(join(DIR, 'map'));
 
 function load(): GameFiles {
@@ -23,11 +30,11 @@ function load(): GameFiles {
   return files;
 }
 
-describe.skipIf(!have)('a real copy of Ultima 6', () => {
+describe.skipIf(!have)(`a real copy of ${title}`, () => {
   it('loads a new game', () => {
     const g = new Game(load());
     const p = g.player;
-    console.log('player', g.playerName(), p.x, p.y, p.z, 'obj', p.objN, g.date(), g.time(), 'party', g.party.map((m) => m.name + ':' + m.actor.id));
+    console.log(g.kind, 'player', g.playerName(), p.x, p.y, p.z, 'obj', p.objN, g.date(), g.time(), 'party', g.party.map((m) => m.name + ':' + m.actor.id));
     console.log('objects on map', g.objects.all().length, 'ground', g.tiles.look(g.map.tileNum(p.x, p.y, p.z), 0));
     expect(g.party.length).toBeGreaterThan(0);
     expect(g.objects.all().length).toBeGreaterThan(5000);
@@ -64,12 +71,15 @@ describe.skipIf(!have)('a real copy of Ultima 6', () => {
         for (let n = 0; n < 30 && g.converse; n++) (g.paused ? g.continueTalk() : g.reply(g.asking()?.type === 'char' ? 'n' : 'bye'));
       }
       const text = g.log.map((l) => l.text).join('');
-      if (g.converse) odd.push(`${a.id}: still talking`);
+      // A few story scenes will not let go until the right thing is asked; that is the script, not the interpreter.
+      if (g.converse && !g.log.some((l) => l.kind === 'npc')) odd.push(`${a.id}: said nothing`);
       if (/\[|[\x00-\x09\x0b-\x1f\x7f-\xff]/.test(text)) odd.push(`${a.id}: ${JSON.stringify(text.match(/.{0,30}(\[|[\x00-\x09\x0b-\x1f\x7f-\xff]).{0,30}/)?.[0])}`);
       g.converse = null;
       g.paused = false;
     }
     console.log('talked with', talked, 'odd:', odd.length, odd.slice(0, 25));
-    expect(talked).toBeGreaterThan(100);
+    expect(odd).toEqual([]);
+    expect(talked).toBeGreaterThanOrEqual(people);
   });
 });
+}

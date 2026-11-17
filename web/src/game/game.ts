@@ -10,6 +10,8 @@ import { Actor, Actors, STATUS_IN_PARTY, WT } from './actors.ts';
 import { Converse, ConverseLib, checkKeywords, type ConvAsk, type ConvWorld } from './converse.ts';
 import { invCount, invDelete, invFind, invNew, invWeight } from './inventory.ts';
 import { Journal, type JournalData } from './journal.ts';
+import { detectKind, mdPortrait, OFFSETS, PALETTE, type Kind } from './kind.ts';
+import { readShape, type Shape } from '../files/shape.ts';
 import { GameMap, wrap } from './map.ts';
 import { Obj, Objects, STATUS_OK_TO_TAKE, type Loc } from './objects.ts';
 import { Tiles } from './tiles.ts';
@@ -72,6 +74,7 @@ export function facing(dx: number, dy: number): number {
 }
 
 export class Game implements ConvWorld {
+  readonly kind: Kind;
   readonly tiles: Tiles;
   readonly objects: Objects;
   readonly map: GameMap;
@@ -106,21 +109,24 @@ export class Game implements ConvWorld {
     readonly files: GameFiles,
     saved?: SaveState,
   ) {
-    this.tiles = new Tiles(files);
-    this.objects = new Objects(files, this.tiles);
+    this.kind = detectKind(files);
+    this.tiles = new Tiles(files, this.kind);
+    this.objects = new Objects(files, this.tiles, this.kind);
     this.map = new GameMap(files, this.tiles, this.objects);
     const objlist = this.loadObjects();
-    this.actors = new Actors(files, objlist);
-    this.lib = new ConverseLib(files);
+    this.actors = new Actors(files, objlist, this.kind);
+    this.lib = new ConverseLib(files, this.kind);
     const lib = (n: string, w: 2 | 4): Lib | null => (files.has(n) ? new Lib(files.get(n)!, w) : null);
     this.books = lib('book.dat', 2);
-    this.portraits = [lib('portrait.a', 4), lib('portrait.b', 4), lib('portrait.z', 4)];
+    const wou = (n: string): Lib | null => (files.has(n) ? new Lib(files.get(n)!, 4, true) : null);
+    this.portraits = this.kind === 'u6' ? [lib('portrait.a', 4), lib('portrait.b', 4), lib('portrait.z', 4)] : [wou(this.kind === 'md' ? 'mdfaces.lzc' : 'faces.lzc')];
     const r1 = (o: number): number => objlist[o] ?? 0;
-    this.clock = { minute: r1(0x1bf3), hour: r1(0x1bf4) % 24, day: r1(0x1bf5), month: r1(0x1bf6), year: r1(0x1bf7) | (r1(0x1bf8) << 8) };
+    const t = OFFSETS[this.kind].gametime;
+    this.clock = { minute: r1(t) % 60, hour: r1(t + 1) % 24, day: Math.max(1, r1(t + 2)), month: Math.max(1, r1(t + 3)), year: r1(t + 4) | (r1(t + 5) << 8) };
     this.questFlag = r1(0x1bf1);
     this.karma = r1(0x1bf9);
     this.gargFlag = r1(0x1c5f);
-    this.gender = r1(0x1c71);
+    this.gender = this.kind === 'se' ? 0 : r1(OFFSETS[this.kind].gender);
     this.avatarPortrait = Math.max(0, r1(0x1c72) - 1);
     const n = Math.min(16, r1(0xff0));
     for (let i = 0; i < n; i++) {
@@ -129,7 +135,7 @@ export class Game implements ConvWorld {
       let name = '';
       for (let c = 0; c < 14 && r1(0xf00 + i * 14 + c) !== 0; c++) name += String.fromCharCode(r1(0xf00 + i * 14 + c));
       a.statusFlags |= STATUS_IN_PARTY;
-      this.party.push({ actor: a, name });
+      this.party.push({ actor: a, name: this.cleanName(name) });
     }
     if (this.party.length === 0) {
       const a = this.actors.get(1)!;
@@ -158,12 +164,30 @@ export class Game implements ConvWorld {
         const name = 'Avatar';
         for (let i = 0; i <= name.length; i++) objlist[0xf00 + i] = name.charCodeAt(i) || 0;
       }
-      if (objlist[0x1c72] === 0) objlist[0x1c72] = 1;
       objlist[0x901] = objlist[0xa01] = objlist[0xb01] = 0xf;
-      objlist[0xc02] = 0x72;
-      objlist[0xc03] = 0x01;
-      objlist[0x13f2] = 0x1e;
-      objlist[0xff2] = 3;
+      if (this.kind === 'u6') {
+        if (objlist[0x1c72] === 0) objlist[0x1c72] = 1;
+        objlist[0xc02] = 0x72;
+        objlist[0xc03] = 0x01;
+        objlist[0x13f2] = 0x1e;
+        objlist[0xff2] = 3;
+      } else if (this.kind === 'se') {
+        objlist[0xe01] = 0xf * 2 + 0xf;
+        objlist[0x14f2] = 0xf;
+      } else {
+        // Martian Dreams (update_objlist_for_new_game_md), as a man.
+        objlist[0xc02] = 600 & 0xff;
+        objlist[0xc03] = 600 >> 8;
+        objlist[0xe01] = 0xf * 2 + 4 * 24;
+        objlist[0xff2] = 4;
+        objlist[0x14f2] = 0xf;
+        objlist[0x15f2] = 20;
+        objlist[0x1d27] = 0;
+        for (const at of [0x402, 0x16f3]) {
+          objlist[at] = 343 & 0xff;
+          objlist[at + 1] = (343 >> 8) | (objlist[at + 1] & 0xfc);
+        }
+      }
       return objlist;
     }
     const letters = 'abcdefgh';
@@ -219,7 +243,7 @@ export class Game implements ConvWorld {
     if (this.partyContains(a.id)) return;
     a.statusFlags |= STATUS_IN_PARTY;
     a.worktype = WT.IN_PARTY;
-    this.party.push({ actor: a, name: this.lib.name(this.lib.scriptNum(a)).slice(0, 13) || this.lookActor(a) });
+    this.party.push({ actor: a, name: this.cleanName(this.lib.name(this.lib.scriptNum(a)).slice(0, 13)) || this.lookActor(a) });
   }
   partyRemove(a: Actor): void {
     const i = this.party.findIndex((m) => m.actor === a);
@@ -228,6 +252,11 @@ export class Game implements ConvWorld {
     a.statusFlags &= ~STATUS_IN_PARTY;
     a.worktype = WT.MOTIONLESS;
   }
+  /** A name as the files spell it: Ultima 6 writes "." as "_", the other two a space. */
+  cleanName(n: string): string {
+    return n.replace(/_/g, this.kind === 'u6' ? '.' : ' ').replace(/\.\s*$/, '');
+  }
+
   lookActor(a: Actor): string {
     return this.tiles.look(this.objects.objToTile[a.objN], 0, false);
   }
@@ -328,7 +357,7 @@ export class Game implements ConvWorld {
 
   private closedDoorAt(x: number, y: number, z: number): Obj | null {
     const l = this.objects.list(x, y, z);
-    return l?.find((o) => this.objects.isDoor(o) && o.frameN > 3) ?? null;
+    return l?.find((o) => this.objects.isDoor(o) && this.objects.isShut(o)) ?? null;
   }
 
   /** Step the party one square. Returns whether a turn passed. */
@@ -428,7 +457,8 @@ export class Game implements ConvWorld {
         return !a || a.inParty;
       }
       const d = this.closedDoorAt(wrap(x, p.z), wrap(y, p.z), p.z);
-      return !!d && d.frameN !== 9 && d.frameN !== 11 && d.frameN !== 13 && d.frameN !== 15;
+      if (!d) return false;
+      return this.kind === 'md' ? !(d.quality & 0x80) : d.frameN !== 9 && d.frameN !== 11 && d.frameN !== 13 && d.frameN !== 15;
     };
     const goal = (x: number, y: number): boolean =>
       beside ? Math.abs(x - tx) <= 1 && Math.abs(y - ty) <= 1 && !(x === tx && y === ty) : x === tx && y === ty;
@@ -570,7 +600,7 @@ export class Game implements ConvWorld {
     let text: string;
     if (a) {
       const m = this.party.find((m) => m.actor === a);
-      text = m ? m.name : a.met ? this.lib.name(this.lib.scriptNum(a)) || this.tiles.look(this.objects.objToTile[a.objN], 0) : this.tiles.look(this.objects.objToTile[a.objN], 0);
+      text = m ? m.name : a.met ? this.cleanName(this.lib.name(this.lib.scriptNum(a))) || this.tiles.look(this.objects.objToTile[a.objN], 0) : this.tiles.look(this.objects.objToTile[a.objN], 0);
     } else if (o && !(o.status & 0x02)) text = this.objects.look(o);
     else text = this.tiles.look(this.map.tileNum(x, y, p.z), 0);
     this.say('sys', `Thou dost see ${text}.`);
@@ -630,10 +660,12 @@ export class Game implements ConvWorld {
     while (this.pending.length) {
       const e = this.pending.shift()!;
       if (e.type === 'text') {
+        // Martian Dreams and Savage Empire write a closing quote as &.
+        if (this.kind !== 'u6') e.text = e.text.replace(/"/g, '\u201c').replace(/&/g, '\u201d');
         this.say('npc', e.text);
         this.said += e.text;
         this.learn(c, e.text);
-      } else if (e.type === 'portrait') this.speaker = { actor: e.actor, name: e.name };
+      } else if (e.type === 'portrait') this.speaker = { actor: e.actor, name: this.cleanName(e.name) };
       else if (e.type === 'pause') {
         // A stop with nothing after it but the question needs no tap.
         this.said += ' ';
@@ -656,7 +688,7 @@ export class Game implements ConvWorld {
 
   private keepNote(c: Converse): void {
     const a = c.npc;
-    const name = a.met || this.partyContains(a.id) ? c.name.replace(/_/g, '.') : '';
+    const name = a.met || this.partyContains(a.id) ? this.cleanName(c.name) : '';
     this.journal.meet(a.id, name, c.desc, this.where(), this.date());
     if (this.asked) this.journal.note(a.id, this.asked === 'met' ? 'On meeting' : this.asked, this.said, this.date());
     this.said = '';
@@ -735,6 +767,16 @@ export class Game implements ConvWorld {
   // ---- using ----
 
   private useDoor(o: Obj): void {
+    if (this.kind === 'md') {
+      // usecode.lua use_door: stuck with rust, or blocked, or turned.
+      if (o.quality & 0x80) this.say('sys', 'It is locked.');
+      else if (this.actors.at(o.x, o.y, o.z)) this.say('sys', 'Blocked.');
+      else {
+        o.frameN ^= 2;
+        this.say('sys', o.frameN & 2 ? 'Closed.' : 'Opened.');
+      }
+      return;
+    }
     if (o.frameN === 13 || o.frameN === 15) this.say('sys', 'Magically locked.');
     else if (o.frameN === 9 || o.frameN === 11) {
       const holder = o.quality !== 0 ? this.party.find((m) => invFind(this.objects, m.actor.id, OBJ.KEY, o.quality, true)) : undefined;
@@ -896,8 +938,13 @@ export class Game implements ConvWorld {
     return this.actors.get(top.holder);
   }
 
-  /** A face for an actor: 56 by 64 palette indices, or null. */
-  portrait(a: Actor): Uint8Array | null {
+  /** A face for an actor, or null. */
+  portrait(a: Actor): Shape | null {
+    if (this.kind !== 'u6') {
+      const num = this.kind === 'md' ? mdPortrait(a.id, a.objFlags, a.talkFlags, this.gender === 1) : a.id - 1;
+      const item = num >= 0 ? this.portraits[0]?.item(num) : null;
+      return item && item.length > 16 ? readShape(item, 8) : null;
+    }
     let lib: Lib | null;
     let num: number;
     if (a === this.actors.get(1)) {
@@ -920,10 +967,15 @@ export class Game implements ConvWorld {
     if (!raw) return null;
     try {
       const d = lzwDecompress(raw);
-      return d.length >= 56 * 64 ? d : null;
+      return d.length >= 56 * 64 ? { w: 56, h: 64, data: d } : null;
     } catch {
       return null;
     }
+  }
+
+  /** The palette's file. */
+  get paletteFile(): string {
+    return PALETTE[this.kind];
   }
 
   // ---- saving ----

@@ -7,6 +7,7 @@ import type { GameFiles } from '../files/gamefiles.ts';
 import { Lib } from '../files/lib.ts';
 import { isLzw, lzwDecompress } from '../files/lzw.ts';
 import type { Actor } from './actors.ts';
+import type { Kind } from './kind.ts';
 import { OBJ } from './u6tables.ts';
 
 const OP = {
@@ -112,16 +113,19 @@ const enum Answer { NO, YES, DONE }
 export class ConverseLib {
   private readonly a: Lib | null;
   private readonly b: Lib | null;
-  constructor(files: GameFiles) {
-    const a = files.get('converse.a');
-    const b = files.get('converse.b');
-    this.a = a ? new Lib(a, 4) : null;
-    this.b = b ? new Lib(b, 4) : null;
+  constructor(
+    files: GameFiles,
+    readonly kind: Kind = 'u6',
+  ) {
+    const lib = (n: string, skip4: boolean): Lib | null => (files.has(n) ? new Lib(files.get(n)!, 4, skip4) : null);
+    // Ultima 6 splits its people between two files; the others keep them all in talk.lzc.
+    this.a = kind === 'u6' ? lib('converse.a', false) : lib('talk.lzc', true);
+    this.b = kind === 'u6' ? lib('converse.b', false) : null;
   }
 
   /** Which script an actor speaks: wisps and guards share one each. */
   scriptNum(a: Actor): number {
-    if (a.id > 200) {
+    if (this.kind === 'u6' && a.id > 200) {
       if (a.objN === OBJ.WISP) return 201;
       if (a.objN === OBJ.GUARD) return 202;
     }
@@ -130,6 +134,11 @@ export class ConverseLib {
 
   /** Script `n`, decoded; null where there is none. */
   script(n: number): Uint8Array | null {
+    if (this.kind !== 'u6') {
+      // Savage Empire's scripts start at its third actor.
+      const item = this.a?.item(this.kind === 'se' ? n - 2 : n);
+      return item && item.length > 4 ? item : null;
+    }
     const lib = n <= 98 ? this.a : this.b;
     const raw = lib?.raw(n <= 98 ? n : n - 99);
     if (!raw || raw.length <= 4) return null;
@@ -142,9 +151,7 @@ export class ConverseLib {
     const s = this.script(n);
     if (!s) return '';
     let out = '';
-    for (let c = 0; c <= 14 && c + 2 < s.length && s[c + 2] !== 0xf1 && s[c + 2] !== 0xf3; c++) {
-      out += s[c + 2] === 0x5f ? '.' : String.fromCharCode(s[c + 2]);
-    }
+    for (let c = 0; c <= 14 && c + 2 < s.length && s[c + 2] !== 0xf1 && s[c + 2] !== 0xf3; c++) out += String.fromCharCode(s[c + 2]);
     return out;
   }
 

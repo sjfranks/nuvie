@@ -3,6 +3,7 @@
  * (Nuvie's actors/Actor.cpp, ActorManager.cpp and U6Actor.cpp).
  */
 import type { GameFiles } from '../files/gamefiles.ts';
+import { OFFSETS, type Kind } from './kind.ts';
 import { ACTOR_TYPES } from './u6tables.ts';
 
 export const NUM_ACTORS = 256;
@@ -69,7 +70,10 @@ export class Actor {
   private walkFrame = 0;
   private walkInc = 1;
 
-  constructor(readonly id: number) {}
+  constructor(
+    readonly id: number,
+    readonly kind: Kind = 'u6',
+  ) {}
 
   get alive(): boolean {
     return !(this.statusFlags & STATUS_DEAD);
@@ -81,7 +85,8 @@ export class Actor {
     return !!(this.talkFlags & 1);
   }
   get maxHp(): number {
-    return this.level * 30;
+    const v = this.kind === 'md' ? this.level * 24 + this.strength * 2 : this.kind === 'se' ? this.level * 4 + this.strength * 2 : this.level * 30;
+    return Math.min(255, v);
   }
   /** Stones they can carry. */
   get maxWeight(): number {
@@ -91,6 +96,10 @@ export class Actor {
   /** Turn to face `d`, taking the next step of the walk. */
   setDirection(d: number): void {
     if (d < 0 || d > 3 || !this.alive) return;
+    if (this.kind !== 'u6') {
+      this.wouDirection(d);
+      return;
+    }
     const t = TYPES.get(this.objN) ?? DEFAULT_TYPE;
     const frames = t.framesPerDir || 4;
     if (this.walkFrame === 0) this.walkInc = 1;
@@ -98,6 +107,18 @@ export class Actor {
     this.walkFrame = (this.walkFrame + this.walkInc + frames) % frames;
     this.direction = d;
     this.frameN = t.tileStart + d * t.tilesPerDir + this.walkFrame * t.tilesPerFrame + t.tilesPerFrame - 1;
+  }
+
+  /** Martian Dreams' and Savage Empire's walk (MDActor::set_direction, Actor::set_direction). */
+  private wouDirection(d: number): void {
+    this.direction = d;
+    if (this.kind === 'md' && this.objN === 391) {
+      this.frameN = this.frameN ? 0 : 1;
+      return;
+    }
+    const n = this.kind === 'md' ? (this.objN >= 342 && this.objN <= 358 ? 4 : 2) : 4;
+    this.walkFrame = (this.walkFrame + 1) % n;
+    this.frameN = d * n + [0, 1, 2, 1][this.walkFrame];
   }
 
   /** Which of the day's schedule entries holds at `hour`. */
@@ -115,8 +136,12 @@ export class Actor {
 export class Actors {
   readonly list: Actor[] = [];
 
-  constructor(files: GameFiles, objlist: Uint8Array) {
-    for (let i = 0; i < NUM_ACTORS; i++) this.list.push(new Actor(i));
+  constructor(
+    files: GameFiles,
+    objlist: Uint8Array,
+    readonly kind: Kind = 'u6',
+  ) {
+    for (let i = 0; i < NUM_ACTORS; i++) this.list.push(new Actor(i, kind));
     this.load(objlist);
     const sched = files.get('schedule');
     if (sched) this.loadSchedules(sched);
@@ -148,12 +173,13 @@ export class Actors {
       a.exp = r1(0xc00 + i * 2) | (r1(0xc01 + i * 2) << 8);
       a.hp = r1(0xe00 + i);
       a.level = r1(0xff1 + i);
+      const o = OFFSETS[this.kind];
       a.worktype = r1(0x11f1 + i);
-      a.combatMode = r1(0x12f1 + i);
-      a.magic = r1(0x13f1 + i);
-      a.moves = r1(0x14f1 + i);
-      a.talkFlags = r1(0x17f1 + i);
-      a.movementFlags = r1(0x19f1 + i);
+      a.combatMode = r1(o.combatMode + i);
+      a.magic = r1(o.magic + i);
+      a.moves = r1(o.movementPoints + i);
+      a.talkFlags = r1(o.talkFlags + i);
+      a.movementFlags = r1(o.movementFlags + i);
     }
     // Actor 0 is the party's vehicle, and nothing unless the party is aboard one.
     const v = this.list[0];
