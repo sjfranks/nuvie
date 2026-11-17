@@ -51,6 +51,7 @@ export interface SaveState {
   clock: Clock;
   turns: number;
   light?: number;
+  moonstones?: [number, number, number][];
   party: { id: number; name: string }[];
   flags: { karma: number; quest: number; garg: number; gender: number };
   actors: number[][];
@@ -73,6 +74,9 @@ const RED_GATES: readonly [number, number, number][] = [
   [0x29b, 0x43, 0],
 ];
 const LORD_BRITISH = 5;
+const MOONGATE = 85;
+const TRAMMEL_PHASE = 1.75;
+const FELUCCA_PHASE = 1.1666666666666667;
 const SKIFF = 414;
 const RAFT = 415;
 const BOATS: ReadonlySet<number> = new Set([SHIP, SKIFF, RAFT]);
@@ -111,6 +115,8 @@ export class Game implements ConvWorld {
   xrayUntil = 0;
   /** What Vanish took, for Reappear. */
   vanished: { objN: number; frameN: number } | null = null;
+  /** Where the eight moonstones lie, by phase (objlist 0x1c1b); a blue moongate stands at each while a moon is up. */
+  moonstones: [number, number, number][] = [];
   /** The Peer spell asks for the map seen from above. */
   peer = false;
   readonly clock: Clock;
@@ -158,6 +164,10 @@ export class Game implements ConvWorld {
     const t = OFFSETS[this.kind].gametime;
     this.clock = { minute: r1(t) % 60, hour: r1(t + 1) % 24, day: Math.max(1, r1(t + 2)), month: Math.max(1, r1(t + 3)), year: r1(t + 4) | (r1(t + 5) << 8) };
     this.questFlag = r1(0x1bf1);
+    if (this.kind === 'u6') {
+      const r2 = (o: number): number => r1(o) | (r1(o + 1) << 8);
+      for (let i = 0; i < 8; i++) this.moonstones.push([r2(0x1c1b + i * 6), r2(0x1c1d + i * 6), r2(0x1c1f + i * 6)]);
+    }
     this.karma = r1(0x1bf9);
     this.gargFlag = r1(0x1c5f);
     this.gender = this.kind === 'se' ? 0 : r1(OFFSETS[this.kind].gender);
@@ -183,6 +193,7 @@ export class Game implements ConvWorld {
     if (saved) this.restore(saved);
     else this.say('sys', 'The world is loaded. Tap the map to walk.');
     this.combat.update(!saved);
+    if (this.kind === 'u6' && !saved) this.updateMoongates();
   }
 
   /** Read every object, and return the objlist: a new game's packed files, else a saved game's. */
@@ -395,7 +406,10 @@ export class Game implements ConvWorld {
         }
       }
       this.updateSchedules();
-      if (this.kind === 'u6') this.magic.hourly();
+      if (this.kind === 'u6') {
+        this.magic.hourly();
+        this.updateMoongates();
+      }
     }
   }
 
@@ -1257,8 +1271,44 @@ export class Game implements ConvWorld {
     this.onChange();
   }
 
-  /** Stepping into a red moongate (U6UseCode::enter_moongate): away, if it goes anywhere. */
+  /** The moons' phases and places in the sky (Weather::is_moon_visible, U6UseCode::enter_moongate). */
+  private moons(): { trammel: number; felucca: number; posT: number; posF: number } {
+    const { day, hour } = this.clock;
+    const trammel = Math.round((day - 1) / TRAMMEL_PHASE) % 8;
+    const pb = ((day - 1) % Math.round(FELUCCA_PHASE * 8)) - 1;
+    const felucca = pb >= 0 ? pb : 0;
+    return { trammel, felucca, posT: (hour + 1 + 3 * trammel) % 24, posF: (((hour - 1 + 3 * felucca) % 24) + 24) % 24 };
+  }
+
+  /** Blue moongates stand at the moonstones while either moon is up (update_moongates in init.lua). */
+  updateMoongates(): void {
+    const m = this.moons();
+    const show = (m.posT >= 5 && m.posT <= 19) || (m.posF >= 5 && m.posF <= 19);
+    for (const [x, y, z] of this.moonstones) {
+      if (x === 0 && y === 0) continue;
+      const gate = this.objects.list(x, y, z)?.find((o) => o.objN === MOONGATE);
+      if (show && !gate) {
+        const o = this.objects.create(MOONGATE, 1, 0);
+        o.frameN = 1;
+        [o.x, o.y, o.z] = [x, y, z];
+        this.objects.add(o);
+      } else if (!show && gate) this.objects.unlink(gate);
+    }
+  }
+
+  /** Stepping into a moongate (U6UseCode::enter_moongate): a red one where its place says, a blue one where the moons do. */
   private enterGate(x: number, y: number, z: number): boolean {
+    const blue = this.objects.list(x, y, z)?.find((o) => o.objN === MOONGATE && o.x === x);
+    if (blue) {
+      // The moon nearer the top of the sky chooses the moonstone.
+      const m = this.moons();
+      const phase = Math.abs(m.posT - 12) < Math.abs(m.posF - 12) ? m.trammel : m.felucca;
+      const to = 8 - phase < 8 ? this.moonstones[8 - phase] : undefined;
+      if (!to || (to[0] === 0 && to[1] === 0)) return false;
+      this.relocate(to[0], to[1], to[2]);
+      this.say('sys', 'The world shimmers...');
+      return true;
+    }
     const gate = this.objects.list(x, y, z)?.find((o) => o.objN === OBJ.RED_GATE && o.x === x);
     if (!gate) return false;
     const to = RED_GATES[gate.quality] ?? RED_GATES[0];
@@ -1417,6 +1467,7 @@ export class Game implements ConvWorld {
       clock: { ...this.clock },
       turns: this.turns,
       light: this.lightTurns,
+      moonstones: this.moonstones,
       party: this.party.map((m) => ({ id: m.actor.id, name: m.name })),
       flags: { karma: this.karma, quest: this.questFlag, garg: this.gargFlag, gender: this.gender },
       actors: this.actors.list.map((a) => [
@@ -1433,6 +1484,7 @@ export class Game implements ConvWorld {
     Object.assign(this.clock, s.clock);
     this.turns = s.turns;
     this.lightTurns = s.light ?? 0;
+    if (s.moonstones) this.moonstones = s.moonstones;
     this.karma = s.flags.karma;
     this.questFlag = s.flags.quest;
     this.gargFlag = s.flags.garg;

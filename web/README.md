@@ -96,14 +96,14 @@ party. Torches can be lit and held, and Light and torches widen the party's
 light at night.
 
 **The Orb of the Moons** works as in Ultima VI once Lord British has told of it: use it from the Avatar's sheet,
-tap a square near the party, and a red moongate opens there that leads where that square says; step in.
+tap a square near the party, and a red moongate opens there that leads where that square says; step in. Blue
+moongates stand at the eight moonstones while either moon is in the sky, and lead where the moons' phases say.
 
 **Boats and horses**: tap a ship, skiff or raft beside the party to board it (a ship whose deed the party holds);
 tap water to sail, and land beside the boat to go ashore. Ships keep to open water and must have room to turn.
 Tap a roaming horse to ride it, and the rider to get down.
 
-Not ported yet: the remaining spells, most of Nuvie's other Lua scripts, balloons, the blue moongates of the
-moons, sound and music, the intro and ending, most other usecode, and the silver serpent's long body (it draws as
+Not ported yet: the remaining spells, most of Nuvie's other Lua scripts, balloons, sound and music, the intro and ending, most other usecode, and the silver serpent's long body (it draws as
 one tile).
 
 `tests/real.test.ts` runs on your copies put in `web/gamedata/ultima6/`, `savage/` and `martian/` (git-ignored).

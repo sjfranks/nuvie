@@ -163,6 +163,22 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     expect(g.actors.list.some((a) => a.objN === 430 && a.id >= 203)).toBe(true);
   });
 
+  it.runIf(folder === 'ultima6')('shows blue moongates while a moon is up, and goes through one', () => {
+    const g = new Game(load());
+    for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
+    g.clock.day = 4; // Trammel is up at noon
+    g.clock.hour = 12;
+    g.updateMoongates();
+    const gates = g.objects.all().filter((o) => o.objN === 85 && o.z === 0);
+    expect(gates.length).toBeGreaterThanOrEqual(7);
+    const gate = gates.find((o) => [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => g.canStand(o.x + dx, o.y + dy, 0)))!;
+    const [dx, dy] = [[1, 0], [-1, 0], [0, 1], [0, -1]].find(([dx, dy]) => g.canStand(gate.x + dx, gate.y + dy, 0))!;
+    g.relocate(gate.x + dx, gate.y + dy, 0);
+    g.move(-dx, -dy);
+    const p = g.player;
+    expect(g.moonstones.some(([x, y, z]) => p.x === x && p.y === y && p.z === z)).toBe(true);
+  });
+
   it.runIf(folder === 'ultima6')('opens a red moongate with the orb, and goes through it', () => {
     const g = new Game(load());
     for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
