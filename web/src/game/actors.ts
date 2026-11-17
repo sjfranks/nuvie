@@ -46,7 +46,14 @@ export const HYDRA = 374;
 /** The hydra's tentacles are another kind of object (OBJ_U6_HYDRA_BODY). */
 export const HYDRA_BODY = 425;
 /** Every kind that fills more than its own square. */
-export const MANY_SQUARES: ReadonlySet<number> = new Set([...SPLIT, SHIP, DRAGON, HYDRA]);
+export const SILVER_SERPENT = 413;
+export const MANY_SQUARES: ReadonlySet<number> = new Set([...SPLIT, SHIP, DRAGON, HYDRA, SILVER_SERPENT]);
+
+/** init_new_silver_serpent's coil: a body frame and a tail frame, and the step to the next segment. */
+const COIL = [[10, 1, 0, 1], [13, 7, 1, 0], [12, 5, 0, -1], [11, 3, -1, 0]] as const;
+/** move_silver_serpent_objs_relative's frames for the segment behind the head, and for the tail. */
+const SEG_FRAME = [[8, 10, 0, 13, 0], [12, 9, 0, 0, 13], [0, 0, 0, 0, 0], [11, 0, 0, 9, 10], [0, 11, 0, 12, 8]];
+const TAIL_FRAME = [[0, 0, 0, 0, 0, 0], [1, 0, 0, 3, 7, 0], [0, 0, 0, 0, 0, 0], [0, 3, 0, 0, 5, 1], [0, 0, 0, 0, 0, 0], [5, 0, 3, 0, 0, 7], [0, 0, 0, 0, 0, 0], [0, 7, 1, 5, 0, 0]];
 
 const DEFAULT_TYPE: ActorType = { framesPerDir: 0, tilesPerDir: 0, tilesPerFrame: 1, tileStart: 0 };
 
@@ -126,8 +133,59 @@ export class Actor {
    * The squares an actor fills beyond its own, with the frame drawn on each: a two-square creature's back half
    * (U6Actor::init_splitactor), a ship's bow and stern (set_direction_of_surrounding_ship_objs).
    */
+  /** A silver serpent's body, head to tail, and where the head was when it was last laid out. */
+  body: { x: number; y: number; frame: number }[] = [];
+  private bodyAt: [number, number, number] | null = null;
+
+  /**
+   * The serpent's body follows its head (U6Actor::move_silver_serpent_objs_relative): each segment takes the place of
+   * the one before. A new serpent, or one moved other than by a step, is laid out afresh (init_new_silver_serpent).
+   */
+  private serpent(): { x: number; y: number; frame: number }[] {
+    const w = this.z === 0 ? 1023 : 255;
+    const at = this.bodyAt;
+    const rx = at ? ((this.x - at[0] + w + 1 + (w + 1) / 2) & w) - (w + 1) / 2 : 0;
+    const ry = at ? ((this.y - at[1] + w + 1 + (w + 1) / 2) & w) - (w + 1) / 2 : 0;
+    if (!at || at[2] !== this.z || !this.body.length || Math.abs(rx) + Math.abs(ry) > 1) {
+      this.body = [];
+      let [x, y] = [this.x, this.y];
+      const length = 4 + (this.id % 5);
+      // Straight out behind the head (Nuvie's coil, `j = (j + 1) % 4`, folds back over the head).
+      for (let i = 0; i < length; i++) {
+        const c = COIL[0];
+        x = (x + c[2]) & w;
+        y = (y + c[3]) & w;
+        this.body.push({ x, y, frame: i === length - 1 ? c[1] : 8 });
+      }
+      this.setDirection(0);
+    } else if (rx || ry) {
+      const first = this.body[0];
+      let [ox, oy, of] = [first.x, first.y, first.frame];
+      first.x = (this.x - rx) & w;
+      first.y = (this.y - ry) & w;
+      const newPos = 2 + rx + ry * 2;
+      const oldPos = 2 + (first.x - ox) + (first.y - oy) * 2;
+      first.frame = SEG_FRAME[newPos]?.[oldPos] ?? of;
+      for (const seg of this.body.slice(1)) {
+        const [tx, ty, tf] = [seg.x, seg.y, seg.frame];
+        [seg.x, seg.y] = [ox, oy];
+        seg.frame = tf < 8 ? TAIL_FRAME[tf]?.[of - 8] ?? tf : of;
+        [ox, oy, of] = [tx, ty, tf];
+      }
+      // The tail points away from the segment before it.
+      const tail = this.body[this.body.length - 1];
+      const prev = this.body[this.body.length - 2] ?? { x: this.x, y: this.y };
+      const tx = Math.sign(((tail.x - prev.x + w + 1 + (w + 1) / 2) & w) - (w + 1) / 2);
+      const ty = Math.sign(((tail.y - prev.y + w + 1 + (w + 1) / 2) & w) - (w + 1) / 2);
+      tail.frame = ty > 0 ? 1 : ty < 0 ? 5 : tx > 0 ? 7 : 3;
+    }
+    this.bodyAt = [this.x, this.y, this.z];
+    return this.body;
+  }
+
   parts(): { x: number; y: number; frame: number; objN?: number }[] {
     if (this.kind !== 'u6') return [];
+    if (this.objN === SILVER_SERPENT) return this.serpent();
     const w = this.z === 0 ? 1023 : 255;
     const t = TYPES.get(this.objN) ?? DEFAULT_TYPE;
     const [fx, fy] = [[0, -1], [1, 0], [0, 1], [-1, 0]][this.direction & 3];

@@ -236,6 +236,21 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     expect(g.objects.all().some((o) => o.objN === 420 && Math.abs(o.x - p.x) <= 1 && Math.abs(o.y - p.y) <= 1)).toBe(true);
   });
 
+  it.runIf(folder === 'ultima6')('draws a silver serpent whole, its body following its head', () => {
+    const g = new Game(load());
+    const s = g.combat.spawn(413, 0x133 + 40, 0x160 + 40, 0, 2, 0)!;
+    const chain = () => [{ x: s.x, y: s.y, frame: -1 }, ...s.parts()];
+    const whole = () => chain().every((c, i, l) => i === 0 || Math.abs(c.x - l[i - 1].x) + Math.abs(c.y - l[i - 1].y) === 1);
+    expect(s.parts().length).toBeGreaterThanOrEqual(4);
+    for (let i = 0; i < 30; i++) {
+      g.combat.step(s, s.x + (i % 7 < 4 ? 5 : 0), s.y + (i % 7 < 4 ? 0 : 5));
+      expect(whole()).toBe(true);
+      expect(s.parts().at(-1)!.frame % 2).toBe(1); // a tail
+      expect(s.parts().slice(0, -1).every((c) => c.frame >= 8 && c.frame <= 13)).toBe(true);
+    }
+    expect(g.actors.at(s.parts()[2].x, s.parts()[2].y, 0)).toBe(s);
+  });
+
   it.runIf(folder === 'ultima6')('boards a skiff, sails it, goes ashore; rides a horse', () => {
     const g = new Game(load());
     for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });

@@ -8,7 +8,7 @@
  * than by movement points; thrown weapons are not lost.
  */
 import type { Actor } from './actors.ts';
-import { STATUS_DEAD, STATUS_IN_PARTY } from './actors.ts';
+import { SILVER_SERPENT, STATUS_DEAD, STATUS_IN_PARTY } from './actors.ts';
 import type { Game } from './game.ts';
 import { carried, invCount, invDelete } from './inventory.ts';
 import { wrap } from './map.ts';
@@ -536,7 +536,14 @@ export class Combat {
     const g = this.g;
     x = wrap(x, a.z);
     y = wrap(y, a.z);
-    if (g.actors.at(x, y, a.z)) return false;
+    const there = g.actors.at(x, y, a.z);
+    if (there && there !== a) return false;
+    // A silver serpent goes straight, never back over its own neck (check_move_silver_serpent).
+    if (a.objN === SILVER_SERPENT) {
+      if (x !== a.x && y !== a.y) return false;
+      const neck = a.parts()[0];
+      if (neck && neck.x === x && neck.y === y) return false;
+    }
     const mt = MOVETYPE.get(a.objN) ?? 1;
     if (mt === MOVETYPE_WATER_LOW || mt === MOVETYPE_WATER_HIGH) return g.map.isWater(x, y, a.z);
     if (mt === MOVETYPE_AIR_LOW || mt === MOVETYPE_AIR_HIGH) return g.map.isPassable(x, y, a.z) || g.map.isWater(x, y, a.z);

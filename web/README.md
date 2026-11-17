@@ -143,8 +143,11 @@ blows - any tap, or a pass, lets it drift a square - over land, water and walls 
 beside it. The wind (shown by the clock while aboard) changes every half hour or so, as Weather.cpp has it; a fan
 turns it a step round, and Wind Change sets it.
 
-Not ported yet: most of Nuvie's other Lua scripts, music for Martian Dreams and Savage Empire, the intro and ending, a few rare items' usecode, the ending sequence, and the silver serpent's long body (it draws as
-one tile).
+Great creatures take more than one square: ships, dragons (head, wings and tail), hydras (eight tentacles), the
+two-square beasts, and the silver serpent, whose long body follows its head square by square and never turns back
+over its neck (U6Actor's surrounding objects).
+
+Not ported yet: the intro and ending cutscenes, and Savage Empire's and Martian Dreams' own combat, music and usecode.
 
 `tests/real.test.ts` runs on your copies put in `web/gamedata/ultima6/`, `savage/` and `martian/` (git-ignored).
 For each it loads a new game, saves and restores it, and talks with everyone who has a conversation (199 people in
