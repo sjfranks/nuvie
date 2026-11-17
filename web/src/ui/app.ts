@@ -35,7 +35,7 @@ const esc = (s: string): string => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '
 /** Things a tap uses rather than walks onto. */
 const USABLE: ReadonlySet<number> = new Set([
   OBJ.OAKEN_DOOR, OBJ.WINDOWED_DOOR, OBJ.CEDAR_DOOR, OBJ.STEEL_DOOR, OBJ.LADDER, OBJ.CAVE, OBJ.HOLE, OBJ.SIGN,
-  OBJ.SIGN_ARROW, OBJ.GRAVE, OBJ.CHEST, OBJ.BARREL, OBJ.CRATE, OBJ.DRAWER, OBJ.BOOK, OBJ.SCROLL, 412, 414, 415,
+  OBJ.SIGN_ARROW, OBJ.GRAVE, OBJ.CHEST, OBJ.BARREL, OBJ.CRATE, OBJ.DRAWER, OBJ.BOOK, OBJ.SCROLL, 412, 414, 415, 420, 423,
 ]);
 
 export interface AppHooks {
@@ -415,6 +415,12 @@ export class App {
     }
     this.view.render();
     this.status.textContent = `${String(g.clock.hour).padStart(2, '0')}:${String(g.clock.minute).padStart(2, '0')}`;
+    // Afloat or aloft, the wind matters: shown as the way it blows from.
+    if (g.vehicle) {
+      const [dx, dy] = g.wind;
+      const from = (dy > 0 ? 'N' : dy < 0 ? 'S' : '') + (dx > 0 ? 'W' : dx < 0 ? 'E' : '');
+      this.status.textContent += ` ${from ? `Wind ${from}` : 'Calm'}`;
+    }
     // While someone talks, or a container stands open, the pane shows the log whatever was chosen.
     const pane: Pane = g.converse ? 'log' : this.pane;
     this.face.hidden = !(g.converse && g.speaker);

@@ -666,7 +666,7 @@ const CASTS = new Map<number, Cast>([
     const dy = Math.sign(y - c.y);
     if (!dx && !dy) return void m.noEffect();
     const name = (dy < 0 ? 'north' : dy > 0 ? 'south' : '') + (dx < 0 ? 'west' : dx > 0 ? 'east' : '');
-    m.g.wind = [dx, dy];
+    m.g.setWind([dx, dy]);
     m.g.say('sys', `The wind blows to the ${name}.`);
   } }],
   [64, field(319, 0x17f)],

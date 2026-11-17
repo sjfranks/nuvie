@@ -137,7 +137,13 @@ moongates stand at the eight moonstones while either moon is in the sky, and lea
 tap water to sail, and land beside the boat to go ashore. Ships keep to open water and must have room to turn.
 Tap a roaming horse to ride it, and the rider to get down.
 
-Not ported yet: most of Nuvie's other Lua scripts (staffs' charges are not yet cast in a fight), balloons, music for Martian Dreams and Savage Empire, the intro and ending, the remaining usecode (balloons and a few rare items), the ending sequence, and the silver serpent's long body (it draws as
+**The balloon**: with the balloon plans, a mammoth silk bag, a balloon basket, a cauldron and a rope, use the plans
+to make a balloon; use it to lay it out and fill it, and tap it to board. Aloft, the balloon goes where the wind
+blows - any tap, or a pass, lets it drift a square - over land, water and walls alike. Tap the party to come down
+beside it. The wind (shown by the clock while aboard) changes every half hour or so, as Weather.cpp has it; a fan
+turns it a step round, and Wind Change sets it.
+
+Not ported yet: most of Nuvie's other Lua scripts, music for Martian Dreams and Savage Empire, the intro and ending, a few rare items' usecode, the ending sequence, and the silver serpent's long body (it draws as
 one tile).
 
 `tests/real.test.ts` runs on your copies put in `web/gamedata/ultima6/`, `savage/` and `martian/` (git-ignored).

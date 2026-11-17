@@ -46,6 +46,7 @@ const CODEX = 59;
 const CRYSTAL_BALL = 155;
 const SPELLBOOK = 57;
 const CANNON = 221;
+const BALLOON_PLANS = 270;
 const POWDER_KEG = 223;
 
 const POTIONS = ['awaken', 'cure', 'heal', 'poison', 'sleep', 'protection', 'invisibility', 'x-ray vision'];
@@ -60,7 +61,7 @@ export class UseCode {
       (USED_IN_PLACE.has(o.objN) || FOODS.has(o.objN) || o.objN in INSTRUMENTS ||
         (o.objN >= RUNE_FIRST && o.objN <= RUNE_LAST) ||
         [OBJ.KEY, OBJ.LOCK_PICK, U.FISHING_POLE, U.SHOVEL, U.PICK, U.POTION, U.SEXTANT, U.FAN, U.RUBBER_DUCKY, U.GEM,
-          MOONSTONE, GARGISH_VOCABULARY, VORTEX_CUBE, CRYSTAL_BALL, SPELLBOOK, CANNON, POWDER_KEG].includes(o.objN as never))
+          BALLOON_PLANS, MOONSTONE, GARGISH_VOCABULARY, VORTEX_CUBE, CRYSTAL_BALL, SPELLBOOK, CANNON, POWDER_KEG].includes(o.objN as never))
     );
   }
 
@@ -115,9 +116,16 @@ export class UseCode {
         g.say('sys', p.x === o.x && p.y > o.y && p.y <= o.y + 2 ? 'You can see yourself!' : 'You see nothing.');
         return this.done();
       }
-      case U.FAN:
+      case U.FAN: {
+        // The fan turns the wind a step round (use_fan's wind_tbl).
         g.say('sys', 'You feel a breeze.');
+        const ROUND: [number, number][] = [[0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1], [1, 0], [1, 1]];
+        const i = ROUND.findIndex(([x, y]) => x === g.wind[0] && y === g.wind[1]);
+        g.setWind(ROUND[(i < 0 ? 0 : i + 1) % 8]);
         return this.done();
+      }
+      case BALLOON_PLANS:
+        return this.balloonPlans();
       case U.RUBBER_DUCKY:
         g.say('sys', 'Squeak!');
         g.sfx('success');
@@ -523,6 +531,31 @@ export class UseCode {
       },
     };
     g.onChange();
+  }
+
+  /** use_balloon_plans: with the bag, basket, cauldron and rope, a balloon is made. */
+  private balloonPlans(): void {
+    const g = this.g;
+    const need: [number, string][] = [[421, 'a mammoth silk bag'], [422, 'a balloon basket'], [OBJ.CAULDRON, 'a cauldron'], [OBJ.ROPE, 'a rope']];
+    const find = (n: number): Obj | undefined => {
+      for (const m of g.party) {
+        const o = g.objects.inventories[m.actor.id].find((q) => q.objN === n) ?? [...g.objects.inventories[m.actor.id]].flatMap((q) => q.container ?? []).find((q) => q.objN === n);
+        if (o) return o;
+      }
+      return undefined;
+    };
+    const missing = need.filter(([n]) => !find(n));
+    for (const [, name] of missing) g.say('sys', `Missing ${name}.`);
+    if (!missing.length) {
+      for (const [n] of need) g.objects.unlink(find(n)!);
+      const p = g.player;
+      const b = g.objects.create(420, 1, 0);
+      b.status |= 0x01;
+      [b.x, b.y, b.z] = [p.x, p.y, p.z];
+      g.objects.add(b);
+      g.say('sys', 'Done!');
+    }
+    this.done();
   }
 
   /** Bury a moonstone where the party stands: a moongate will rise there. */

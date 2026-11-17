@@ -197,6 +197,45 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     expect(said.some((t) => /^Mage casts /.test(t))).toBe(true);
   });
 
+  it.runIf(folder === 'ultima6')('makes a balloon from its plans, flies it on the wind, and lands', () => {
+    const g = new Game(load());
+    for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
+    const p = g.player;
+    // Out of the castle, onto open ground.
+    let spot: [number, number] | null = null;
+    for (let r = 20; r < 200 && !spot; r += 3) for (const [x, y] of [[p.x + r, p.y], [p.x, p.y + r]]) {
+      let ok = !spot;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) ok &&= g.canStand(x + dx, y + dy, 0);
+      if (ok) spot = [x, y];
+    }
+    g.relocate(spot![0], spot![1], 0);
+    const plans = g.objects.create(270, 1, 0);
+    g.objects.toInventory(plans, 1);
+    g.useObj(plans);
+    expect(g.log.some((l) => l.text === 'Missing a balloon basket.')).toBe(true);
+    for (const n of [421, 422, 147, 284]) g.objects.toInventory(g.objects.create(n, 1, 0), 1);
+    g.useObj(plans);
+    const balloon = (g.objects.list(p.x, p.y, 0) ?? []).find((o) => o.objN === 420)!;
+    expect(balloon).toBeTruthy();
+    g.get(p.x, p.y, balloon);
+    expect(balloon.loc).toBe('inv');
+    g.useObj(balloon);
+    expect(balloon.objN).toBe(423);
+    g.useObj(balloon);
+    expect(g.vehicle?.objN).toBe(423);
+    (g as unknown as { windMinutes: number }).windMinutes = 999;
+    g.setWind([1, 0]);
+    const x0 = p.x;
+    g.move(0, 1); // the wind decides, not the party
+    g.pass();
+    expect([p.x - x0, g.vehicle!.x - x0]).toEqual([2, 2]);
+    g.setWind([0, 0]);
+    expect(g.move(1, 0)).toBe(false);
+    g.use(p.x, p.y);
+    expect(g.vehicle).toBeNull();
+    expect(g.objects.all().some((o) => o.objN === 420 && Math.abs(o.x - p.x) <= 1 && Math.abs(o.y - p.y) <= 1)).toBe(true);
+  });
+
   it.runIf(folder === 'ultima6')('boards a skiff, sails it, goes ashore; rides a horse', () => {
     const g = new Game(load());
     for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });

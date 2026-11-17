@@ -55,6 +55,7 @@ export interface SaveState {
   light?: number;
   rest?: number;
   keg?: number;
+  wind?: [number, number];
   moonstones?: [number, number, number][];
   party: { id: number; name: string }[];
   flags: { karma: number; quest: number; garg: number; gender: number };
@@ -84,6 +85,13 @@ const FELUCCA_PHASE = 1.1666666666666667;
 const SKIFF = 414;
 const RAFT = 415;
 const BOATS: ReadonlySet<number> = new Set([SHIP, SKIFF, RAFT]);
+const BALLOON = 420;
+const INFLATED_BALLOON = 423;
+/** What the party can be aboard: boats, and the inflated balloon. */
+const VEHICLES: ReadonlySet<number> = new Set([SHIP, SKIFF, RAFT, INFLATED_BALLOON]);
+/** Nuvie's directions as the wind gives them (N, NE, E, SE, S, SW, W, NW): the way it blows from. */
+const WIND_FROM: readonly [number, number][] = [[0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1]];
+export const WIND_NAMES = ['north', 'northeast', 'east', 'southeast', 'south', 'southwest', 'west', 'northwest'];
 const HORSE = 430;
 const HORSE_WITH_RIDER = 431;
 const SHIP_DEED = 149;
@@ -132,8 +140,10 @@ export class Game implements ConvWorld {
   stormTurns = 0;
   /** Turns while the sun is darkened (Eclipse). */
   eclipseTurns = 0;
-  /** Where the wind blows (Wind Change). */
-  wind: [number, number] = [0, 1];
+  /** Where the wind blows to, a step a turn; [0, 0] is calm (Weather.cpp). */
+  wind: [number, number] = [0, 0];
+  /** Minutes before the wind changes. */
+  private windMinutes = 10;
   /** Hours before resting heals again (the clock's rest counter). */
   restCounter = 0;
   /** Turns until a lit powder keg goes off. */
@@ -193,6 +203,8 @@ export class Game implements ConvWorld {
     const t = OFFSETS[this.kind].gametime;
     this.clock = { minute: r1(t) % 60, hour: r1(t + 1) % 24, day: Math.max(1, r1(t + 2)), month: Math.max(1, r1(t + 3)), year: r1(t + 4) | (r1(t + 5) << 8) };
     this.questFlag = r1(0x1bf1);
+    const w = r1(0x1bfa);
+    this.wind = w < 8 ? [-WIND_FROM[w][0], -WIND_FROM[w][1]] : [0, 0];
     if (this.kind === 'u6') {
       const r2 = (o: number): number => r1(o) | (r1(o + 1) << 8);
       for (let i = 0; i < 8; i++) this.moonstones.push([r2(0x1c1b + i * 6), r2(0x1c1d + i * 6), r2(0x1c1f + i * 6)]);
@@ -306,7 +318,7 @@ export class Game implements ConvWorld {
   /** The boat the party is aboard (actor 0, as in the original), or null. */
   get vehicle(): Actor | null {
     const v = this.actors.get(0);
-    return v && v.objN !== 0 && v.visible && BOATS.has(v.objN) ? v : null;
+    return v && v.objN !== 0 && v.visible && VEHICLES.has(v.objN) ? v : null;
   }
 
   get player(): Actor {
@@ -423,6 +435,13 @@ export class Game implements ConvWorld {
   private advance(minutes: number): void {
     const c = this.clock;
     c.minute += minutes;
+    // The wind changes every so often, to any way or none (Weather::change_wind_dir).
+    this.windMinutes -= minutes;
+    if (this.windMinutes <= 0) {
+      this.windMinutes = this.random(30) + 1;
+      const d = this.random(9);
+      this.setWind(d < 8 ? [-WIND_FROM[d][0], -WIND_FROM[d][1]] : [0, 0]);
+    }
     while (c.minute >= 60) {
       c.minute -= 60;
       if (++c.hour >= 24) {
@@ -469,7 +488,7 @@ export class Game implements ConvWorld {
   /** Step the party one square. Returns whether a turn passed. */
   move(dx: number, dy: number): boolean {
     if (this.converse) return false;
-    if (this.vehicle) return this.sail(dx, dy);
+    if (this.vehicle) return this.vehicle.objN === INFLATED_BALLOON ? this.drift() : this.sail(dx, dy);
     const p = this.player;
     const nx = wrap(p.x + dx, p.z);
     const ny = wrap(p.y + dy, p.z);
@@ -614,6 +633,10 @@ export class Game implements ConvWorld {
   /** Let a turn go by. */
   pass(): void {
     if (this.converse) return;
+    if (this.vehicle?.objN === INFLATED_BALLOON && (this.wind[0] || this.wind[1])) {
+      this.drift();
+      return;
+    }
     this.say('sys', 'Pass.');
     this.endTurn();
   }
@@ -1090,7 +1113,8 @@ export class Game implements ConvWorld {
   use(x: number, y: number): void {
     const p = this.player;
     if (this.vehicle) {
-      this.disembark(x, y);
+      if (this.vehicle.objN === INFLATED_BALLOON) this.land();
+      else this.disembark(x, y);
       return;
     }
     const steed = this.actors.at(x, y, p.z);
@@ -1146,8 +1170,11 @@ export class Game implements ConvWorld {
         this.say('sys', o.container.length ? `Searching the ${name}.` : `The ${name} is empty.`);
       }
     } else if (o.objN === OBJ.TORCH && this.kind === 'u6') this.useTorch(o);
-    else if (BOATS.has(o.objN) && this.kind === 'u6') {
+    else if ((BOATS.has(o.objN) || o.objN === INFLATED_BALLOON) && this.kind === 'u6') {
       this.board(o);
+      return;
+    } else if (o.objN === BALLOON && this.kind === 'u6') {
+      this.inflate(o);
       return;
     } else if (o.objN === OBJ.ORB_OF_THE_MOONS && this.kind === 'u6') {
       this.useOrb();
@@ -1236,6 +1263,8 @@ export class Game implements ConvWorld {
         return;
       }
       centre = mid;
+    } else if (o.objN === INFLATED_BALLOON) {
+      // Aloft from where it stands.
     } else if (!this.map.isWater(o.x, o.y, o.z) && !this.map.tile(o.x, o.y, o.z).water) {
       this.say('sys', 'You must place it in water first.');
       this.onChange();
@@ -1279,6 +1308,7 @@ export class Game implements ConvWorld {
       m.actor.visible = false;
     }
     this.say('sys', `Board the ${this.tiles.look(this.objects.objToTile[centre.objN], 0, false)}.`);
+    if (centre.objN === INFLATED_BALLOON) this.say('sys', `The wind is ${this.windWords()}.`);
     this.endTurn();
   }
 
@@ -1289,6 +1319,7 @@ export class Game implements ConvWorld {
   afloat(v: Actor, x: number, y: number): boolean {
     const other = this.actors.at(wrap(x, v.z), wrap(y, v.z), v.z);
     if (other && other !== v) return false;
+    if (v.objN === INFLATED_BALLOON) return true;
     if (!this.map.isWater(x, y, v.z)) return false;
     const n = this.map.tileNum(x, y, v.z);
     return !(v.objN === SHIP && n >= 16 && n <= 47);
@@ -1345,6 +1376,80 @@ export class Game implements ConvWorld {
     for (const m of this.party) m.actor.visible = true;
     this.relocate(land[0], land[1], v.z === 0 ? this.player.z : this.player.z);
     this.say('sys', 'The party goes ashore.');
+    this.endTurn();
+  }
+
+  // ---- the balloon (U6UseCode::use_balloon, Player::moveRelative) ----
+
+  /** The wind as words: "from the north", or calm. */
+  windWords(): string {
+    const [dx, dy] = this.wind;
+    if (!dx && !dy) return 'calm';
+    const i = WIND_FROM.findIndex(([fx, fy]) => fx === -dx && fy === -dy);
+    return `from the ${WIND_NAMES[i]}`;
+  }
+
+  setWind(w: [number, number]): void {
+    const p = this.player;
+    if (p.z > 0 && p.z < 5) w = [0, 0];
+    const changed = w[0] !== this.wind[0] || w[1] !== this.wind[1];
+    this.wind = w;
+    if (changed && this.vehicle?.objN === INFLATED_BALLOON) this.say('sys', `The wind is ${this.windWords()}.`);
+  }
+
+  /** Lay out a balloon carried, or one on the ground, and fill it: it stands ready to board. */
+  inflate(o: Obj): void {
+    const p = this.player;
+    if (p.z > 0 && p.z < 5) {
+      this.say('sys', 'Not usable.');
+      return this.onChange();
+    }
+    if (o.loc !== 'map') {
+      let spot: [number, number] = [p.x, p.y];
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if ((dx || dy) && spot[0] === p.x && spot[1] === p.y && this.canStand(p.x + dx, p.y + dy, p.z)) spot = [p.x + dx, p.y + dy];
+      this.objects.unlink(o);
+      [o.x, o.y, o.z] = [spot[0], spot[1], p.z];
+      o.status |= STATUS_OK_TO_TAKE;
+      this.objects.add(o);
+    }
+    o.objN = INFLATED_BALLOON;
+    o.frameN = 3;
+    this.say('sys', 'Done!');
+    this.endTurn();
+  }
+
+  /** The balloon goes where the wind takes it, over anything; the party's wishes count for nothing. */
+  private drift(): boolean {
+    const v = this.vehicle!;
+    const [dx, dy] = this.wind;
+    if (!dx && !dy) {
+      this.say('sys', 'Thou canst not move without wind!');
+      this.onChange();
+      return false;
+    }
+    v.x = wrap(v.x + dx, v.z);
+    v.y = wrap(v.y + dy, v.z);
+    for (const m of this.party) [m.actor.x, m.actor.y] = [v.x, v.y];
+    this.endTurn();
+    return true;
+  }
+
+  /** Come down beside the balloon's square (use_boat_find_land: north, east, south, west); it lies there, empty. */
+  private land(): void {
+    const v = this.vehicle!;
+    const spot = ([[0, -1], [1, 0], [0, 1], [-1, 0]] as const).map(([dx, dy]) => [v.x + dx, v.y + dy]).find(([x, y]) => this.canStand(x, y, v.z) && !this.map.tile(x, y, v.z).water);
+    if (!spot) {
+      this.say('sys', 'Only next to land.');
+      return this.onChange();
+    }
+    const o = this.objects.create(BALLOON, 1, 0);
+    [o.x, o.y, o.z] = [spot[0], spot[1], v.z];
+    o.status |= STATUS_OK_TO_TAKE;
+    this.objects.add(o);
+    Object.assign(v, { objN: 0, visible: false, worktype: 0, x: 0, y: 0, z: 0 });
+    for (const m of this.party) m.actor.visible = true;
+    this.relocate(spot[0], spot[1], this.player.z);
+    this.say('sys', 'The party climbs down.');
     this.endTurn();
   }
 
@@ -1622,6 +1727,7 @@ export class Game implements ConvWorld {
       light: this.lightTurns,
       rest: this.restCounter,
       keg: this.kegTurns,
+      wind: this.wind,
       moonstones: this.moonstones,
       party: this.party.map((m) => ({ id: m.actor.id, name: m.name })),
       flags: { karma: this.karma, quest: this.questFlag, garg: this.gargFlag, gender: this.gender },
@@ -1639,6 +1745,7 @@ export class Game implements ConvWorld {
     Object.assign(this.clock, s.clock);
     this.turns = s.turns;
     this.lightTurns = s.light ?? 0;
+    if (s.wind) this.wind = s.wind;
     this.restCounter = s.rest ?? 0;
     this.kegTurns = s.keg ?? 0;
     if (s.moonstones) this.moonstones = s.moonstones;
