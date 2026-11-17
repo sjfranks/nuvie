@@ -8,6 +8,7 @@ import { Lib } from '../files/lib.ts';
 import { lzwDecompress, lzwFile } from '../files/lzw.ts';
 import { Actor, Actors, STATUS_IN_PARTY, WT } from './actors.ts';
 import { Converse, ConverseLib, checkKeywords, type ConvAsk, type ConvWorld } from './converse.ts';
+import { Combat } from './combat.ts';
 import { invCount, invDelete, invFind, invNew, invWeight } from './inventory.ts';
 import { Journal, type JournalData } from './journal.ts';
 import { detectKind, mdPortrait, OFFSETS, PALETTE, type Kind } from './kind.ts';
@@ -81,6 +82,7 @@ export class Game implements ConvWorld {
   readonly actors: Actors;
   readonly lib: ConverseLib;
   readonly journal = new Journal();
+  readonly combat: Combat;
   readonly clock: Clock;
   party: PartyMember[] = [];
   log: LogLine[] = [];
@@ -143,8 +145,10 @@ export class Game implements ConvWorld {
       this.party.push({ actor: a, name: 'Avatar' });
     }
     for (const a of this.actors.list) a.schedPos = a.schedulePos(this.clock.hour);
+    this.combat = new Combat(this);
     if (saved) this.restore(saved);
     else this.say('sys', 'The world is loaded. Tap the map to walk.');
+    this.combat.update(!saved);
   }
 
   /** Read every object, and return the objlist: a new game's packed files, else a saved game's. */
@@ -368,6 +372,11 @@ export class Game implements ConvWorld {
     const ny = wrap(p.y + dy, p.z);
     this.openContainer = null;
     const other = this.actors.at(nx, ny, p.z);
+    if (other && this.combat.hostile(other)) {
+      this.combat.attack(p, other);
+      this.endTurn();
+      return true;
+    }
     if (other && other.inParty) {
       // Change places with a companion.
       other.x = p.x;
@@ -389,8 +398,9 @@ export class Game implements ConvWorld {
     p.x = nx;
     p.y = ny;
     p.setDirection(facing(dx, dy));
-    // Each companion takes the square the one ahead has left.
-    for (let i = 1; i < this.party.length; i++) {
+    // Each companion takes the square the one ahead has left - but in a fight, each fights.
+    const fighting = this.combat.fighting;
+    for (let i = 1; i < this.party.length && !fighting; i++) {
       const a = this.party[i].actor;
       if (a === other || a.z !== p.z) continue;
       const t = trail[i - 1];
@@ -415,8 +425,16 @@ export class Game implements ConvWorld {
   private endTurn(): void {
     this.turns++;
     if (this.turns % 2 === 0) this.advance(1);
+    this.combat.update();
+    this.combat.round();
     this.moveNpcs();
     this.onChange();
+  }
+
+  /** Move the party to a place, as a ladder or death does, and let the eggs there hatch. */
+  relocate(x: number, y: number, z: number): void {
+    this.teleport(x, y, z);
+    this.combat.update(true);
   }
 
   /** Put the whole party at a place (ladders, dungeon mouths). */
@@ -589,6 +607,31 @@ export class Game implements ConvWorld {
           break;
       }
     }
+  }
+
+  // ---- fighting ----
+
+  /** Attack whoever is at a square, if the party's leader can reach them from here. Returns false where not. */
+  attackAt(x: number, y: number): boolean {
+    if (this.converse) return false;
+    const p = this.player;
+    const foe = this.actors.at(x, y, p.z);
+    if (!foe || foe === p) {
+      this.say('sys', 'Nothing to attack there.');
+      this.onChange();
+      return true;
+    }
+    if (foe.inParty) {
+      this.say('sys', 'Not a party member!');
+      this.onChange();
+      return true;
+    }
+    if (this.combat.range(p, x, y) > this.combat.reach(p) || !this.combat.clearLine(p.x, p.y, x, y, p.z)) return false;
+    this.say('you', `Attack ${this.lookActor(foe).replace(/^(a|an|the) /, '')}`);
+    if (!this.combat.hostile(foe) && !foe.inParty && foe.objN !== OBJ.LORD_BRITISH) this.karma = Math.max(0, this.karma - 5);
+    this.combat.attack(p, foe);
+    this.endTurn();
+    return true;
   }
 
   // ---- looking ----
@@ -816,7 +859,7 @@ export class Game implements ConvWorld {
       z = o.z - 1;
     }
     if (z < 0 || z > 5) return;
-    this.teleport(x, y, z);
+    this.relocate(x, y, z);
     this.say('sys', down ? 'Down the party goes.' : 'Up the party goes.');
   }
 

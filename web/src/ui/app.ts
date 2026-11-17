@@ -11,7 +11,7 @@ import { OBJ } from '../game/u6tables.ts';
 import { MapView } from './mapview.ts';
 import { haveIcons } from './theme.ts';
 
-type Mode = 'look' | 'talk' | 'use' | 'get' | null;
+type Mode = 'look' | 'talk' | 'use' | 'get' | 'attack' | null;
 type Pane = 'log' | 'party';
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', text = ''): HTMLElementTagNameMap[K] => {
@@ -55,7 +55,7 @@ export class App {
   private pane: Pane = 'log';
   private wasTalking = false;
   private mode: Mode = null;
-  private walk: { x: number; y: number; then: Mode | 'walk' } | null = null;
+  private walk: { x: number; y: number; then: Mode | 'walk'; foe?: Actor } | null = null;
   private walkTimer = 0;
   private seenLog = 0;
   private sheet: HTMLElement | null = null;
@@ -157,10 +157,11 @@ export class App {
       const a = g.actors.at(sq.x, sq.y, p.z);
       const o = g.objects.get(sq.x, sq.y, p.z);
       const door = g.objects.list(sq.x, sq.y, p.z)?.some((d) => g.objects.isDoor(d) && g.objects.isShut(d));
-      if (a && !a.inParty) then = 'talk';
+      if (a && !a.inParty) then = g.combat.hostile(a) ? 'attack' : 'talk';
       else if (door || (o && USABLE.has(o.objN) && !g.map.isPassable(sq.x, sq.y, p.z)) || (o && (o.objN === OBJ.LADDER || o.objN === OBJ.CAVE || o.objN === OBJ.HOLE))) then = 'use';
     }
-    this.walk = { ...sq, then };
+    const foe = then === 'attack' ? g.actors.at(sq.x, sq.y, p.z) ?? undefined : undefined;
+    this.walk = { ...sq, then, foe };
     this.step();
   }
 
@@ -176,7 +177,23 @@ export class App {
     const p = g.player;
     const beside = w.then !== 'walk';
     const near = Math.abs(w.x - p.x) <= 1 && Math.abs(w.y - p.y) <= 1;
-    if (beside && near) {
+    // A foe moves: follow them.
+    if (w.foe) {
+      if (!w.foe.alive || !w.foe.visible || w.foe.objN === 0 || w.foe.z !== g.player.z) {
+        this.walk = null;
+        this.mark();
+        return;
+      }
+      w.x = w.foe.x;
+      w.y = w.foe.y;
+    }
+    // An attack from wherever the weapon reaches.
+    if (w.then === 'attack' && g.attackAt(w.x, w.y)) {
+      this.walk = null;
+      this.mark();
+      return;
+    }
+    if (beside && near && w.then !== 'attack') {
       this.walk = null;
       this.mark();
       if (w.then === 'talk') g.talk(w.x, w.y);
@@ -208,7 +225,7 @@ export class App {
     const w = this.walk;
     this.view.marks = [];
     if (w && path) {
-      const color = w.then === 'talk' ? '#7fb8ff' : w.then === 'walk' ? '#ffd24a' : '#ffffff';
+      const color = w.then === 'talk' ? '#7fb8ff' : w.then === 'attack' ? '#ff4a3a' : w.then === 'walk' ? '#ffd24a' : '#ffffff';
       let { x, y } = this.game.player;
       for (const [dx, dy] of path.slice(0, -1)) {
         x += dx;
@@ -234,7 +251,7 @@ export class App {
       this.walk = null;
       g.move(d[0], d[1]);
     } else if (e.key === ' ') g.pass();
-    else if ('ltug'.includes(e.key)) this.setMode(({ l: 'look', t: 'talk', u: 'use', g: 'get' } as const)[e.key as 'l']);
+    else if ('ltuga'.includes(e.key)) this.setMode(({ l: 'look', t: 'talk', u: 'use', g: 'get', a: 'attack' } as const)[e.key as 'l']);
   }
 
   private setMode(m: Mode): void {
@@ -365,6 +382,7 @@ export class App {
       const m = (label: string, mode: Mode, tile: number): HTMLButtonElement =>
         icon(btn(label, () => this.setMode(this.mode === mode ? null : mode), this.mode === mode ? 'on' : ''), tile);
       bar.append(
+        m('Attack', 'attack', 400),
         m('Look', 'look', 403), m('Talk', 'talk', 402), m('Use', 'use', 407), m('Get', 'get', 404),
         icon(btn('Pass', () => g.pass()), 408), icon(btn('Notes', () => this.journal()), 409),
       );

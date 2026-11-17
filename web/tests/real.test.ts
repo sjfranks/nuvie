@@ -45,6 +45,24 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     expect(h.objects.all().length).toBe(g.objects.all().length);
   });
 
+  it.runIf(folder === 'ultima6')('hatches the opening gargoyles, and fights to the death', () => {
+    const g = new Game(load());
+    const gargoyles = g.actors.list.filter((a) => a.id >= 203 && a.objN === 363);
+    expect(gargoyles.length).toBe(3);
+    expect(gargoyles.every((a) => g.combat.hostile(a))).toBe(true);
+    // A troll beside the party is fought until it falls, and leaves gold.
+    const p = g.player;
+    const troll = g.combat.spawn(371, p.x + 2, p.y, p.z, 0, 8)!;
+    g.log = [];
+    for (let i = 0; i < 200 && troll.objN !== 0; i++) {
+      for (const a of g.actors.list) if (a.objN === 363) a.hp = 0; // the gargoyles keep out of it
+      if (!g.attackAt(troll.x, troll.y)) g.pass();
+    }
+    const text = g.log.map((l) => l.text).join('\n');
+    expect(text).toContain('Troll killed!');
+    expect(g.party.length).toBe(4);
+  });
+
   it('holds a conversation with everyone who has one, without the interpreter failing', () => {
     const g = new Game(load());
     let talked = 0;

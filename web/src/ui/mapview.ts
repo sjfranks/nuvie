@@ -318,10 +318,16 @@ export class MapView {
     this.drawObjs(false, false);
     this.drawActors();
     this.drawObjs(false, true);
+    const blows = this.drawFlashes();
     const out = new Uint32Array(this.image!.data.buffer);
     for (let i = 0; i < this.buf.length; i++) out[i] = this.pal32[this.buf[i]];
     this.ctx.putImageData(this.image!, 0, 0);
     const z = g.player.z;
+    // Where there is no hit tile (the demo), a blow is a red burst.
+    this.ctx.fillStyle = '#e02818';
+    for (const [vx, vy] of blows) {
+      for (const [ox, oy, w, h] of [[7, 2, 2, 12], [2, 7, 12, 2], [4, 4, 2, 2], [10, 4, 2, 2], [4, 10, 2, 2], [10, 10, 2, 2]]) this.ctx.fillRect(vx * 16 + ox, vy * 16 + oy, w, h);
+    }
     for (const m of this.marks) {
       const vx = wrap(m.x - this.curX, z);
       const vy = wrap(m.y - this.curY, z);
@@ -432,6 +438,40 @@ export class MapView {
       c.fillStyle = `rgba(255,150,60,${glow * 0.09})`;
       c.fillRect(0, 0, W, H);
     }
+  }
+
+  /** Shots in flight and blows landing (combat.ts), drawn into the picture; returns blows with no tile to show them. */
+  private drawFlashes(): [number, number][] {
+    const g = this.game;
+    const z = g.player.z;
+    const now = performance.now();
+    const bare: [number, number][] = [];
+    for (const f of g.combat.flashes) {
+      if (f.z !== z || f.until < now) continue;
+      const left = (f.until - now) / 450;
+      const vx = wrap(f.x - this.curX, z);
+      const vy = wrap(f.y - this.curY, z);
+      if (f.shot && left > 0.5) {
+        // In flight: from the shooter towards the target.
+        const t = (1 - left) / 0.5;
+        const fx = wrap(f.shot.fromX - this.curX, z);
+        const fy = wrap(f.shot.fromY - this.curY, z);
+        const sx = fx < this.cols ? fx : vx;
+        const sy = fy < this.rows ? fy : vy;
+        this.blit(g.tiles.get(f.shot.tile), Math.round((sx + (vx - sx) * t) * 16), Math.round((sy + (vy - sy) * t) * 16));
+        continue;
+      }
+      if (f.kind !== 'hit' || vx >= this.cols || vy >= this.rows) continue;
+      if (g.kind === 'u6' && this.haveHitTile()) this.blit(g.tiles.get(257), vx * 16, vy * 16);
+      else bare.push([vx, vy]);
+    }
+    return bare;
+  }
+
+  private hitTile: boolean | null = null;
+  private haveHitTile(): boolean {
+    this.hitTile ??= this.game.tiles.original(257).data.some((c) => c !== 0 && c !== 0xff);
+    return this.hitTile;
   }
 
   /** The map square under a point of the canvas (CSS pixels from its corner). */

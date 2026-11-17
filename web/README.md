@@ -35,6 +35,9 @@ Sunset and sunrise glow orange.
 - **Tap to walk**: a tap walks there, round what is in the way, the way marked as it goes. A tap on a person walks up
   and talks; on a door, ladder, sign or chest, walks up and uses it. Walking into a shut door opens it. Tap the party
   to pass a turn or pick up what is underfoot.
+- **Fighting**: tap a foe to walk up and attack it - from as far as the weapon reaches, a bow from across a room -
+  or choose **Attack** and tap. The rest of the party fights by itself; blows land with the game's own hit
+  sparks, and arrows and thrown weapons fly. Monsters hatch from the game's eggs as the party travels.
 - **Look, Talk, Use, Get**: choose one (the game's own icons), then tap where. **Pass** lets a turn go by; the
   last button opens the journal.
 - **Talking**: the speaker's face shows over the map (which shrinks to give the words room), and the foot becomes a
@@ -58,6 +61,7 @@ Ported from the C++ (each file's header names its source):
 | `src/game/actors.ts`, `u6tables.ts` | `actors/Actor*.cpp`, `U6ActorTypes.h`, `U6objects.h` (`npm run tables` regenerates) |
 | `src/game/converse.ts` | `Converse.cpp`, `ConverseInterpret.cpp` |
 | `src/game/game.ts` | parts of `Game.cpp`, `Event.cpp`, `Player.cpp`, `Party.cpp`, `SaveGame.cpp`, `usecode/U6UseCode.cpp` |
+| `src/game/combat.ts`, `u6combat.ts` | `data/scripts/u6/actor.lua` (attack, hit, damage, death, targets, monster set-up; `npm run tables` regenerates), `EggManager.cpp`, the temporary actors of `ActorManager.cpp` |
 | `src/ui/mapview.ts` | `MapWindow.cpp` (drawing order, line of sight, wall reshaping), `GamePalette.cpp` |
 
 Working: loading a new game or an original saved game; the map, objects, animated tiles and cycling colours; line
@@ -70,10 +74,16 @@ people, schedules, conversations, faces (`mdfaces.lzc`, `faces.lzc`), palette, a
 (`system.lzc`), with Martian Dreams' doors. They have no parchment picture, so they take the plain frame. Their Lua
 usecode (most of what using things does in them) and the scenes behind their faces are not ported.
 
-Not ported yet: combat, magic, Nuvie's Lua scripts (which hold most of both), eggs and monster spawning, vehicles
-and horses, moongates, sound and music, the intro and ending, most other usecode, and creatures made of several
+**Combat** follows Ultima VI's rules as Nuvie's Lua has them: the hit roll (dexterity, or strength for clubs and
+maces, against the foe's dexterity), weapon damage less a roll against readied armour, half damage for the creatures
+that take it, poison, experience for evil foes slain, bodies that hold what was carried, ammunition, missile walls,
+and death - the Avatar wakes in Lord British's castle with the fallen raised. Simplified: each fighter acts once a
+turn (not by movement points), monsters that cast fight bare-handed, and thrown weapons are not lost.
+
+Not ported yet: magic, most of Nuvie's other Lua scripts, vehicles and horses, moongates, sound and music, the intro and ending, most other usecode, and creatures made of several
 parts (they draw as one tile). `tests/real.test.ts` runs on your copies put in
 `web/gamedata/ultima6/`, `savage/` and `martian/` (git-ignored): for each it loads a new game, saves and restores
-it, and talks with everyone who has a conversation - 199 in Ultima VI, 68 in Savage Empire, 99 in Martian Dreams.
+it, talks with everyone who has a conversation, and (Ultima VI) hatches the opening gargoyles and fights a troll to
+the death - 199 in Ultima VI, 68 in Savage Empire, 99 in Martian Dreams.
 
 Licensed as Nuvie is: GPL 2 or later.
