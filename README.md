@@ -170,3 +170,8 @@ Everyone on freenode #nuvie
 
 And of course Lord British along with all the talented people at Origin.
 
+
+TypeScript port for phones and browsers
+---------------------------------------
+
+A TypeScript port of the engine, with a touch interface for a phone held upright, is in [web/](web/README.md).

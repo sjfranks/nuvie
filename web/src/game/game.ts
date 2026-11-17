@@ -10,7 +10,7 @@ import { Actor, Actors, STATUS_IN_PARTY, WT } from './actors.ts';
 import { Converse, ConverseLib, checkKeywords, type ConvAsk, type ConvWorld } from './converse.ts';
 import { invCount, invDelete, invFind, invNew, invWeight } from './inventory.ts';
 import { Journal, type JournalData } from './journal.ts';
-import { GameMap, mapWidth, wrap } from './map.ts';
+import { GameMap, wrap } from './map.ts';
 import { Obj, Objects, STATUS_OK_TO_TAKE, type Loc } from './objects.ts';
 import { Tiles } from './tiles.ts';
 import { OBJ } from './u6tables.ts';
@@ -635,6 +635,7 @@ export class Game implements ConvWorld {
       } else if (e.type === 'portrait') this.speaker = { actor: e.actor, name: e.name };
       else if (e.type === 'pause') {
         // A stop with nothing after it but the question needs no tap.
+        this.said += ' ';
         if (this.pending.some((n) => n.type === 'text' && n.text.trim())) {
           this.paused = true;
           break;
@@ -992,8 +993,4 @@ export class Game implements ConvWorld {
     this.log = s.log;
   }
 
-  /** The squares across the map a level has. */
-  width(): number {
-    return mapWidth(this.player.z);
-  }
 }

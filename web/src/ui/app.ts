@@ -1,0 +1,491 @@
+/**
+ * app.ts - the game on a phone: the map across the top, taking taps; under it one pane that shows the log or the
+ * party, with tabs to choose; and at the foot the commands - or, while someone is talking, the things to say.
+ * Held sideways, the map stands at the left and the rest beside it.
+ */
+import type { Actor } from '../game/actors.ts';
+import { Game, type SaveState } from '../game/game.ts';
+import { invWeight } from '../game/inventory.ts';
+import type { Obj } from '../game/objects.ts';
+import { OBJ } from '../game/u6tables.ts';
+import { MapView } from './mapview.ts';
+
+type Mode = 'look' | 'talk' | 'use' | 'get' | null;
+type Pane = 'log' | 'party';
+
+const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', text = ''): HTMLElementTagNameMap[K] => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text) e.textContent = text;
+  return e;
+};
+const btn = (label: string, on: () => void, cls = ''): HTMLButtonElement => {
+  const b = el('button', cls, label);
+  b.type = 'button';
+  b.addEventListener('click', on);
+  return b;
+};
+const esc = (s: string): string => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]!);
+
+/** Things a tap uses rather than walks onto. */
+const USABLE: ReadonlySet<number> = new Set([
+  OBJ.OAKEN_DOOR, OBJ.WINDOWED_DOOR, OBJ.CEDAR_DOOR, OBJ.STEEL_DOOR, OBJ.LADDER, OBJ.CAVE, OBJ.HOLE, OBJ.SIGN,
+  OBJ.SIGN_ARROW, OBJ.GRAVE, OBJ.CHEST, OBJ.BARREL, OBJ.CRATE, OBJ.DRAWER, OBJ.BOOK, OBJ.SCROLL,
+]);
+
+export interface AppHooks {
+  save(state: SaveState): void;
+  /** Back to the first screen; `forget` drops the saved game. */
+  leave(forget: boolean): void;
+}
+
+export class App {
+  private readonly view: MapView;
+  private readonly root = el('div', 'play');
+  private readonly status = el('div', 'status');
+  private readonly modeTag = el('div', 'mode');
+  private readonly body = el('div', 'panebody');
+  private readonly foot = el('div');
+  private readonly tabLog: HTMLButtonElement;
+  private readonly tabParty: HTMLButtonElement;
+  private pane: Pane = 'log';
+  private mode: Mode = null;
+  private walk: { x: number; y: number; then: Mode | 'walk' } | null = null;
+  private walkTimer = 0;
+  private seenLog = 0;
+  private sheet: HTMLElement | null = null;
+  private saveTimer = 0;
+  private footKey = '';
+  private readonly timers: number[] = [];
+
+  constructor(
+    host: HTMLElement,
+    readonly game: Game,
+    private readonly hooks: AppHooks,
+  ) {
+    const wrap = el('div', 'viewwrap');
+    const canvas = el('canvas', 'view');
+    this.view = new MapView(game, canvas);
+    this.modeTag.hidden = true;
+    wrap.append(canvas, this.status, this.modeTag);
+    const pane = el('div', 'pane');
+    const tabs = el('div', 'tabs');
+    this.tabLog = btn('Log', () => this.setPane('log'));
+    this.tabParty = btn('Party', () => this.setPane('party'));
+    tabs.append(this.tabLog, this.tabParty, btn('☰', () => this.menu()));
+    pane.append(this.body, tabs);
+    this.root.append(wrap, pane, this.foot);
+    host.replaceChildren(this.root);
+
+    canvas.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      const r = canvas.getBoundingClientRect();
+      this.tap(this.view.squareAt(e.clientX - r.left, e.clientY - r.top));
+    });
+    const onKey = (e: KeyboardEvent): void => this.key(e);
+    const onSize = (): void => this.layout();
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('resize', onSize);
+    this.dispose = () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', onSize);
+      this.timers.forEach(clearInterval);
+      clearTimeout(this.walkTimer);
+      clearTimeout(this.saveTimer);
+      this.sheet?.remove();
+    };
+    game.onChange = () => this.changed();
+    this.timers.push(window.setInterval(() => {
+      this.view.tick();
+      this.view.render();
+    }, 150));
+    this.layout();
+    this.changed();
+  }
+
+  dispose: () => void;
+
+  /** As many squares across as keeps each a comfortable size for a finger. */
+  private layout(): void {
+    const w = this.view.canvas.getBoundingClientRect().width || 352;
+    let n = Math.floor(w / 34);
+    if (n % 2 === 0) n--;
+    n = Math.max(9, Math.min(15, n));
+    if (n !== this.view.cols) this.view.resize(n, n);
+    this.view.render();
+  }
+
+  // ---- what a tap on the map means ----
+
+  private tap(sq: { x: number; y: number }): void {
+    const g = this.game;
+    if (g.converse) return;
+    clearTimeout(this.walkTimer);
+    const p = g.player;
+    const mode = this.mode;
+    this.setMode(null);
+    if (mode === 'look') {
+      this.walk = null;
+      if (this.view.visible(sq.x, sq.y)) g.look(sq.x, sq.y);
+      return;
+    }
+    if (!this.view.visible(sq.x, sq.y)) return;
+    if (sq.x === p.x && sq.y === p.y && !mode) {
+      // The party itself: what is underfoot, or a turn passed.
+      const o = g.objects.get(p.x, p.y, p.z);
+      if (o && USABLE.has(o.objN)) g.use(p.x, p.y);
+      else if (o) g.get(p.x, p.y);
+      else g.pass();
+      return;
+    }
+    let then: Mode | 'walk' = mode ?? 'walk';
+    if (!mode) {
+      const a = g.actors.at(sq.x, sq.y, p.z);
+      const o = g.objects.get(sq.x, sq.y, p.z);
+      const door = g.objects.list(sq.x, sq.y, p.z)?.some((d) => g.objects.isDoor(d) && d.frameN > 3);
+      if (a && !a.inParty) then = 'talk';
+      else if (door || (o && USABLE.has(o.objN) && !g.map.isPassable(sq.x, sq.y, p.z)) || (o && (o.objN === OBJ.LADDER || o.objN === OBJ.CAVE || o.objN === OBJ.HOLE))) then = 'use';
+    }
+    this.walk = { ...sq, then };
+    this.step();
+  }
+
+  /** One step of the way to what was tapped; at the end of it, what the tap was for. */
+  private step(): void {
+    const g = this.game;
+    const w = this.walk;
+    if (!w || g.converse) {
+      this.walk = null;
+      this.mark();
+      return;
+    }
+    const p = g.player;
+    const beside = w.then !== 'walk';
+    const near = Math.abs(w.x - p.x) <= 1 && Math.abs(w.y - p.y) <= 1;
+    if (beside && near) {
+      this.walk = null;
+      this.mark();
+      if (w.then === 'talk') g.talk(w.x, w.y);
+      else if (w.then === 'use') g.use(w.x, w.y);
+      else if (w.then === 'get') g.get(w.x, w.y);
+      return;
+    }
+    const path = g.pathTo(w.x, w.y, beside);
+    if (!path || path.length === 0) {
+      this.walk = null;
+      this.mark();
+      if (!path) {
+        g.say('sys', 'No way there.');
+        this.changed();
+      }
+      return;
+    }
+    this.mark(path);
+    if (!g.move(path[0][0], path[0][1])) {
+      this.walk = null;
+      this.mark();
+      return;
+    }
+    this.walkTimer = window.setTimeout(() => this.step(), 130);
+  }
+
+  /** Mark the way and its end over the map. */
+  private mark(path?: [number, number][]): void {
+    const w = this.walk;
+    this.view.marks = [];
+    if (w && path) {
+      const color = w.then === 'talk' ? '#7fb8ff' : w.then === 'walk' ? '#ffd24a' : '#ffffff';
+      let { x, y } = this.game.player;
+      for (const [dx, dy] of path.slice(0, -1)) {
+        x += dx;
+        y += dy;
+        this.view.marks.push({ x, y, color, kind: 'dot' });
+      }
+      this.view.marks.push({ x: w.x, y: w.y, color, kind: 'box' });
+    }
+    this.view.render();
+  }
+
+  private key(e: KeyboardEvent): void {
+    if (this.sheet || (e.target as HTMLElement).tagName === 'INPUT') return;
+    const g = this.game;
+    const dirs: Record<string, [number, number]> = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] };
+    if (g.converse) {
+      if (e.key === 'Enter' || e.key === ' ') g.continueTalk();
+      return;
+    }
+    const d = dirs[e.key];
+    if (d) {
+      e.preventDefault();
+      this.walk = null;
+      g.move(d[0], d[1]);
+    } else if (e.key === ' ') g.pass();
+    else if ('ltug'.includes(e.key)) this.setMode(({ l: 'look', t: 'talk', u: 'use', g: 'get' } as const)[e.key as 'l']);
+  }
+
+  private setMode(m: Mode): void {
+    this.mode = m;
+    this.modeTag.hidden = !m;
+    if (m) this.modeTag.textContent = `${m[0].toUpperCase() + m.slice(1)}: tap where`;
+    this.footKey = '';
+    this.drawFoot();
+  }
+
+  private setPane(p: Pane): void {
+    this.pane = p;
+    this.changed();
+  }
+
+  // ---- drawing everything but the map ----
+
+  private changed(): void {
+    const g = this.game;
+    this.view.render();
+    this.status.replaceChildren(el('span', '', `${g.date()}  ${g.time()}`), el('span', '', `${g.gold()} gold`));
+    // While someone talks, or a container stands open, the pane shows the log whatever was chosen.
+    const pane: Pane = g.converse ? 'log' : this.pane;
+    this.tabLog.classList.toggle('on', pane === 'log');
+    this.tabParty.classList.toggle('on', pane === 'party');
+    if (pane === 'log') this.seenLog = g.log.length;
+    this.tabLog.classList.toggle('news', pane !== 'log' && g.log.length > this.seenLog);
+    if (pane === 'log') this.drawLog();
+    else this.drawParty();
+    this.drawFoot();
+    clearTimeout(this.saveTimer);
+    this.saveTimer = window.setTimeout(() => !g.converse && this.hooks.save(g.save()), 1500);
+  }
+
+  private face(a: Actor): HTMLCanvasElement {
+    const p = this.game.portrait(a);
+    return p ? this.view.portraitImage(p) : this.view.tileImage(this.game.objects.objToTile[a.objN] + 8);
+  }
+
+  private drawLog(): void {
+    const g = this.game;
+    const log = el('div', 'log');
+    if (g.converse && g.speaker) {
+      const a = g.actors.get(g.speaker.actor);
+      const head = el('div', 'speaker');
+      if (a) head.append(this.face(a));
+      head.append(el('b', '', g.speaker.name));
+      log.append(head);
+    }
+    for (const line of g.log.slice(-60)) {
+      const p = el('p', line.kind);
+      const text = line.text.replace(/^\n+|\n+$/g, '');
+      if (!text) continue;
+      p.innerHTML = line.kind === 'npc' ? esc(text).replace(/@([A-Za-z']+)/g, '<span class="kw">$1</span>') : esc(text);
+      log.append(p);
+    }
+    const c = g.openContainer;
+    if (c && !g.converse) {
+      for (const o of c.container ?? []) {
+        const row = this.itemRow(o);
+        row.append(btn('Take', () => g.get(0, 0, o)));
+        log.append(row);
+      }
+    }
+    this.body.replaceChildren(log);
+    this.body.scrollTop = this.body.scrollHeight;
+  }
+
+  private itemRow(o: Obj, sub = false): HTMLElement {
+    const g = this.game;
+    const row = el('div', sub ? 'item sub' : 'item');
+    const name = el('div');
+    name.append(el('div', '', g.objects.look(o) + (o.loc === 'readied' ? ' (readied)' : '')), el('div', 'small', `${g.objects.weightOf(o).toFixed(1)} stones`));
+    row.append(this.view.tileImage(g.objects.tileNum(o)), name);
+    return row;
+  }
+
+  private drawParty(): void {
+    const g = this.game;
+    const list = el('div');
+    for (const m of g.party) {
+      const a = m.actor;
+      const row = el('div', 'member');
+      const mid = el('div');
+      const bar = el('div', 'bar');
+      const fill = el('i');
+      fill.style.width = `${Math.max(0, Math.min(100, (a.hp / Math.max(1, a.maxHp)) * 100))}%`;
+      bar.append(fill);
+      mid.append(el('div', 'name', m.name), bar);
+      row.append(this.view.tileImage(g.objects.objToTile[a.objN] + 8), mid, el('div', 'small', `${a.hp}/${a.maxHp} hp · lvl ${a.level}`));
+      row.addEventListener('click', () => this.character(m.actor, m.name));
+      list.append(row);
+    }
+    list.append(el('p', 'small', 'Tap a member for their numbers and what they carry.'));
+    this.body.replaceChildren(list);
+  }
+
+  private drawFoot(): void {
+    const g = this.game;
+    const ask = g.asking();
+    const opts = ask ? g.sayOptions() : [];
+    // Rebuilt only when what it offers changes, so a text being typed is not lost.
+    const key = g.converse ? `say:${g.paused}:${ask?.type}:${opts.map((o) => o.say).join()}:${g.log.length}` : `cmd:${this.mode}`;
+    if (key === this.footKey) return;
+    this.footKey = key;
+    if (!g.converse) {
+      const bar = el('div', 'bar-cmds');
+      const m = (label: string, mode: Mode): HTMLButtonElement => btn(label, () => this.setMode(this.mode === mode ? null : mode), this.mode === mode ? 'on' : '');
+      bar.append(m('Look', 'look'), m('Talk', 'talk'), m('Use', 'use'), m('Get', 'get'), btn('Pass', () => g.pass()), btn('Journal', () => this.journal()));
+      this.foot.replaceChildren(bar);
+      return;
+    }
+    const say = el('div', 'say');
+    if (g.paused) say.append(btn('Continue ▾', () => g.continueTalk(), 'primary'));
+    else if (ask) {
+      const list = el('div', 'opts');
+      for (const o of opts) list.append(btn(o.label, () => g.reply(o.say), opts.length <= 2 || o.say === 'bye' ? 'wide' : ''));
+      if (opts.length) say.append(list);
+      if (ask.type !== 'char') {
+        const form = el('form');
+        const input = el('input');
+        input.placeholder = ask.type === 'number' ? 'A number…' : 'Say something else…';
+        input.inputMode = ask.type === 'number' ? 'numeric' : 'text';
+        input.autocapitalize = 'off';
+        input.autocomplete = 'off';
+        form.append(input, btn('Say', () => {}, 'primary'));
+        (form.lastChild as HTMLButtonElement).type = 'submit';
+        form.addEventListener('submit', (e) => {
+          e.preventDefault();
+          if (input.value.trim() || ask.type !== 'keyword') g.reply(input.value);
+        });
+        say.append(form);
+      }
+    }
+    this.foot.replaceChildren(say);
+  }
+
+  // ---- sheets ----
+
+  private open(title: string, fill: (body: HTMLElement) => void): void {
+    this.sheet?.remove();
+    const sheet = el('div', 'sheet');
+    const box = el('div');
+    const head = el('header');
+    const body = el('div', 'body');
+    head.append(el('h2', '', title), btn('✕', () => this.close()));
+    box.append(head, body);
+    sheet.append(box);
+    sheet.addEventListener('click', (e) => e.target === sheet && this.close());
+    fill(body);
+    document.body.append(sheet);
+    this.sheet = sheet;
+  }
+
+  private close(): void {
+    this.sheet?.remove();
+    this.sheet = null;
+    this.changed();
+  }
+
+  private character(a: Actor, name: string): void {
+    const g = this.game;
+    this.open(name, (body) => {
+      const draw = (picked: Obj | null): void => {
+        body.replaceChildren();
+        const top = el('div', 'member');
+        const mid = el('div');
+        mid.append(el('div', 'name', g.lookActor(a)), el('div', 'small', `Level ${a.level} · ${a.exp} experience`));
+        top.append(this.face(a), mid, el('div'));
+        const stats = el('div', 'stats');
+        for (const [k, v] of [['Strength', a.strength], ['Dexterity', a.dex], ['Intelligence', a.intelligence], ['Health', `${a.hp}/${a.maxHp}`], ['Magic', a.magic], ['Carrying', `${invWeight(g.objects, a.id).toFixed(1)}/${a.maxWeight}`]] as const) {
+          const d = el('div');
+          d.append(el('b', '', String(v)), el('span', 'small', k));
+          stats.append(d);
+        }
+        body.append(top, stats);
+        const inv = g.objects.inventories[a.id];
+        if (inv.length === 0) body.append(el('p', 'small', 'Carrying nothing.'));
+        const add = (o: Obj, sub: boolean): void => {
+          const row = this.itemRow(o, sub);
+          row.addEventListener('click', () => draw(picked === o ? null : o));
+          body.append(row);
+          if (picked === o) {
+            const acts = el('div', 'row');
+            const done = (f: () => void) => (): void => {
+              f();
+              draw(null);
+            };
+            acts.append(btn('Use', done(() => g.useObj(o))), btn('Drop', done(() => g.drop(o))));
+            for (const m of g.party) if (m.actor !== a) acts.append(btn(`Give to ${m.name}`, done(() => g.give(o, m.actor))));
+            body.append(acts);
+          }
+          if (o.container) for (const c of o.container) add(c, true);
+        };
+        for (const o of inv) add(o, false);
+      };
+      draw(null);
+    });
+  }
+
+  private journal(): void {
+    const g = this.game;
+    this.open('Journal', (body) => {
+      const draw = (tab: 'people' | 'read', person = -1): void => {
+        body.replaceChildren();
+        const seg = el('div', 'seg');
+        seg.append(btn('People', () => draw('people'), tab === 'people' ? 'on' : ''), btn('Read', () => draw('read'), tab === 'read' ? 'on' : ''));
+        body.append(seg);
+        const j = g.journal.data;
+        if (tab === 'read') {
+          if (j.readings.length === 0) body.append(el('p', 'small', 'Signs and books read are kept here.'));
+          for (const r of [...j.readings].reverse()) {
+            const n = el('div', 'note');
+            n.append(el('div', 'small', `${r.what} · ${r.where} · ${r.date}`), el('q', '', r.text));
+            body.append(n);
+          }
+          return;
+        }
+        const p = j.people.find((p) => p.actor === person);
+        if (!p) {
+          if (j.people.length === 0) body.append(el('p', 'small', 'Those spoken with are kept here, with what they said.'));
+          for (const q of [...j.people].reverse()) {
+            const row = el('div', 'member');
+            const mid = el('div');
+            mid.append(el('div', 'name', q.name || q.desc), el('div', 'small', `${q.name ? q.desc + ' · ' : ''}${q.where} · met ${q.met}`));
+            const a = g.actors.get(q.actor);
+            row.append(a ? this.view.tileImage(g.objects.objToTile[a.objN] + 8) : el('div'), mid, el('div', 'small', `${q.notes.length} ›`));
+            row.addEventListener('click', () => draw('people', q.actor));
+            body.append(row);
+          }
+          return;
+        }
+        body.append(btn('‹ Everyone', () => draw('people')), el('h3', '', p.name || p.desc), el('div', 'small', `${p.desc} · ${p.where} · met ${p.met}`));
+        if (p.topics.length) {
+          const chips = el('div', 'chips');
+          for (const t of p.topics) chips.append(el('span', '', t));
+          body.append(el('div', 'small', 'Words they answer to:'), chips);
+        }
+        for (const n of p.notes) {
+          const d = el('div', 'note');
+          d.append(el('div', 'asked', `${n.asked} · ${n.date}`), el('q', '', n.said));
+          body.append(d);
+        }
+      };
+      draw('people');
+    });
+  }
+
+  private menu(): void {
+    const g = this.game;
+    this.open('Nuvie Web', (body) => {
+      const item = (label: string, f: () => void, cls = ''): void => {
+        const row = el('div', 'row');
+        row.append(btn(label, f, cls));
+        body.append(row);
+      };
+      item('Journal', () => this.journal());
+      item('Save now', () => {
+        this.hooks.save(g.save());
+        g.say('sys', 'Saved.');
+        this.close();
+      });
+      item('Start this world afresh', () => confirm('Start again from the beginning? The saved game is lost.') && this.hooks.leave(true));
+      item('Change game files', () => this.hooks.leave(false));
+      body.append(el('p', 'small', 'The game saves itself as you play, in this browser. A TypeScript port of the Nuvie engine (GPL); it plays your own copy of the game and ships none of it.'));
+    });
+  }
+}

@@ -68,7 +68,7 @@ describe('the demo world', () => {
     expect(g.move(0, -1)).toBe(true);
     expect(g.player.y).toBe(318);
     // A way planned through a shut door is found, and a wall is not walked through.
-    expect(g.pathTo(336, 316)).not.toBeNull();
+    expect(g.pathTo(328, 316)).not.toBeNull();
     expect(g.pathTo(307, 313)).toBeNull();
   });
 
