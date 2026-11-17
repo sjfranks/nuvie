@@ -555,7 +555,7 @@ export class App {
     if (g.won && !this.sheet) this.ending();
     if (g.peer) {
       g.peer = false;
-      this.open('Peer', (body) => {
+      this.open(g.kind === 'u6' ? 'Peer' : 'Map', (body) => {
         const map = this.view.overhead(128);
         map.className = 'overhead';
         body.append(map, el('p', 'small', `The land about, from above: ${g.where()}.`));
@@ -705,7 +705,11 @@ export class App {
         icon(btn(label, () => this.setMode(this.mode === mode ? null : mode), this.mode === mode ? 'on' : ''), tile);
       bar.append(
         m('Attack', 'attack', 400),
-        icon(btn('Cast', () => this.spellbook()), 401),
+        // Martian Dreams and Savage Empire have no spells: the land about, seen from above, instead.
+        g.kind === 'u6' ? icon(btn('Cast', () => this.spellbook()), 401) : btn('Map', () => {
+          g.peer = true;
+          this.changed();
+        }),
         m('Look', 'look', 403), m('Talk', 'talk', 402), m('Use', 'use', 407), m('Get', 'get', 404),
         icon(btn('Rest', () => this.restSheet()), 408), icon(btn('Notes', () => this.journal()), 409),
       );
