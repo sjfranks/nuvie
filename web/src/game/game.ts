@@ -1785,6 +1785,9 @@ export class Game implements ConvWorld {
       a.exp = 600;
       a.hp = h.str * 2 + 4 * 24;
       a.setDirection(a.direction);
+    } else {
+      // update_objlist_for_new_game_se: health twice the strength and the wits.
+      a.hp = h.str * 2 + h.int;
     }
     a.hp = Math.min(a.hp, a.maxHp) || a.maxHp;
     this.onChange();

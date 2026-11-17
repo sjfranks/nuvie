@@ -12,6 +12,7 @@ import { USED_IN_PLACE } from '../game/usecode.ts';
 import { MD_IN_PLACE } from '../game/mdusecode.ts';
 import { REAGENTS, reagentCounts, reagentNames, words, type Spell } from '../game/magic.ts';
 import { Gypsy } from './gypsy.ts';
+import { ASK_NAME, INTRO, Intanya, QUESTIONS as QUESTIONS_SE, SE_ENDING } from './intanya.ts';
 import { interview, type Hero, type Step } from './freud.ts';
 import { MapView } from './mapview.ts';
 import { haveIcons } from './theme.ts';
@@ -182,6 +183,7 @@ export class App {
     this.changed();
     if (game.fresh && game.kind === 'u6') this.creation();
     if (game.fresh && game.kind === 'md') this.freud();
+    if (game.fresh && game.kind === 'se') this.intanya();
   }
 
   // ---- a new Avatar (intro.lua's create_character) ----
@@ -276,6 +278,58 @@ export class App {
       });
     };
     show(it.next(''));
+  }
+
+  /** Savage Empire's new Avatar: Intanya the shaman's questions (intro.lua's create_new_character). */
+  private intanya(): void {
+    const g = this.game;
+    const shaman = new Intanya((lo, hi) => lo + g.random(hi - lo + 1));
+    let name = 'Avatar';
+    const page = (text: string, next: () => void): void => {
+      this.open('Intanya', (body) => {
+        body.append(el('p', '', text));
+        const row = el('div', 'row');
+        row.append(btn('Continue', next, 'primary'));
+        body.append(row);
+      });
+    };
+    const question = (): void => {
+      if (shaman.done) {
+        const [str, dex, int] = shaman.stats;
+        g.createHero({ name, female: false, face: 0, str, dex, int });
+        return page('Intanya\'s potion burns, then soothes. Your strength returns... and the Valley of Eodon awaits.', () => this.close());
+      }
+      this.open(`Intanya asks (${shaman.asked + 1} of 3)`, (body) => {
+        const t = QUESTIONS_SE[shaman.q];
+        const m = t.match(/^(.*?)(?:Will you|Do you) \(a\) (.*?),? or \(b\) (.*)$/);
+        body.append(el('p', '', m ? `${m[1]}` : t));
+        const list = el('div', 'answers');
+        list.append(btn(`(a) ${m ? m[2] : 'A'}`, () => (shaman.answer(true), question())), btn(`(b) ${m ? m[3] : 'B'}`, () => (shaman.answer(false), question())));
+        body.append(list);
+      });
+    };
+    const askName = (): void => {
+      this.open('Intanya', (body) => {
+        body.append(el('p', '', ASK_NAME));
+        const form = el('form');
+        form.className = 'row';
+        const input = el('input');
+        input.maxLength = 13;
+        input.placeholder = 'Your name';
+        const ok = btn('Answer', () => {}, 'primary');
+        ok.type = 'submit';
+        form.append(input, ok);
+        form.addEventListener('submit', (e) => {
+          e.preventDefault();
+          if (!input.value.trim()) return;
+          name = input.value.trim();
+          question();
+        });
+        body.append(form);
+        setTimeout(() => input.focus(), 50);
+      });
+    };
+    page(INTRO[0], () => page(INTRO[1], () => page(INTRO[2], askName)));
   }
 
   private gypsy(name: string, female: boolean, face: number): void {
@@ -1019,7 +1073,7 @@ export class App {
   /** The game is won: ending.lua's scenes, as pages of its words. */
   private ending(): void {
     const g = this.game;
-    if (g.kind === 'md') return this.mdEnding();
+    if (g.kind !== 'u6') return this.mdEnding();
     const name = g.playerName();
     const pages = [
       'Tremors shake the shrine as the Vortex Cube draws the Codex into the Ethereal Void. A glowing portal springs from the floor!',
@@ -1076,10 +1130,10 @@ export class App {
   /** Martian Dreams' ending (ending.lua): its lines from scenetxt.lzc, a page each. */
   private mdEnding(): void {
     const g = this.game;
-    const pages = g.sceneText('scenetxt.lzc', 3).filter((l) => l.trim());
+    const pages = g.kind === 'se' ? SE_ENDING : g.sceneText('scenetxt.lzc', 3).filter((l) => l.trim());
     const page = (i: number): void => {
       this.open(i < pages.length ? 'Home' : 'The end', (body) => {
-        body.append(el('p', '', i < pages.length ? pages[i] : `Well done, ${g.playerName()}. Thou mayest go on exploring Mars.`));
+        body.append(el('p', '', i < pages.length ? pages[i] : `Well done, ${g.playerName()}. Thou mayest go on exploring ${g.kind === 'se' ? 'the Valley of Eodon' : 'Mars'}.`));
         const row = el('div', 'row');
         row.append(btn(i < pages.length ? 'Continue' : 'Close', () => {
           if (i < pages.length) {

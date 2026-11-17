@@ -134,7 +134,9 @@ Olympus Mons and the dream machine's door, the monster footprints, the end, waki
 with Freud's interview in the capsule (intro.lua's create_character): a name, father or mother, and the questions
 whose answers set strength, dexterity and intelligence. Not yet: the dream stages Nuvie left unfinished.
 
-Savage Empire's usecode.lua has only a little in use, and that is ported: corn from a corn stalk, clay with a digging
+A new game of Savage Empire begins in Intanya's hut (intro.lua's create_new_character): a name, then three of the
+shaman's six questions, each answer adding to strength, dexterity or intelligence and choosing the next; its ending's
+words are ready should the game be won. Savage Empire's usecode.lua has only a little in use, and that is ported: corn from a corn stalk, clay with a digging
 stick, and a soft pot shaped from clay.
 
 **Combat** follows Ultima VI's rules as Nuvie's Lua has them: the hit roll (dexterity, or strength for clubs and
