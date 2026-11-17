@@ -103,8 +103,8 @@ tap water to sail, and land beside the boat to go ashore. Ships keep to open wat
 Tap a roaming horse to ride it, and the rider to get down.
 
 Not ported yet: the remaining spells, most of Nuvie's other Lua scripts, balloons, the blue moongates of the
-moons, sound and music, the intro and ending, most other usecode, and the largest creatures (dragons, hydras, the
-silver serpent, which draw as one tile).
+moons, sound and music, the intro and ending, most other usecode, and the silver serpent's long body (it draws as
+one tile).
 
 `tests/real.test.ts` runs on your copies put in `web/gamedata/ultima6/`, `savage/` and `martian/` (git-ignored).
 For each it loads a new game, saves and restores it, and talks with everyone who has a conversation (199 people in

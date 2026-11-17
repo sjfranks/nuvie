@@ -313,7 +313,7 @@ export class MapView {
         const bx = wrap(part.x - this.curX, z);
         const by = wrap(part.y - this.curY, z);
         if (bx <= this.cols && by <= this.rows) {
-          const bt = g.tiles.get(g.objects.objToTile[a.objN] + part.frame);
+          const bt = g.tiles.get(g.objects.objToTile[part.objN ?? a.objN] + part.frame);
           this.drawTile(bt, bx, by, false);
           this.drawTile(bt, bx, by, true);
         }

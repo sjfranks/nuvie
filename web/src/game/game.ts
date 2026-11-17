@@ -6,7 +6,7 @@
 import type { GameFiles } from '../files/gamefiles.ts';
 import { Lib } from '../files/lib.ts';
 import { lzwDecompress, lzwFile } from '../files/lzw.ts';
-import { Actor, Actors, SHIP, SPLIT, STATUS_IN_PARTY, WT } from './actors.ts';
+import { Actor, Actors, HYDRA, HYDRA_BODY, MANY_SQUARES, SHIP, STATUS_IN_PARTY, WT } from './actors.ts';
 import { Converse, ConverseLib, checkKeywords, type ConvAsk, type ConvWorld } from './converse.ts';
 import { Combat } from './combat.ts';
 import { Magic, type Spell } from './magic.ts';
@@ -245,14 +245,15 @@ export class Game implements ConvWorld {
     return objlist;
   }
 
-  /** The back halves of two-square creatures are drawn with them (Actor.back), so their objects leave the map. */
+  /** The other squares of large creatures are drawn with them (Actor.parts), so their objects leave the map. */
   private gatherBackHalves(): void {
     for (const a of this.actors.list) {
-      if (!SPLIT.has(a.objN) || !a.visible) continue;
+      if (!MANY_SQUARES.has(a.objN) || a.objN === SHIP || !a.visible) continue;
+      const kind = a.objN === HYDRA ? HYDRA_BODY : a.objN;
       for (let dy = -1; dy <= 1; dy++) {
         for (let dx = -1; dx <= 1; dx++) {
           for (const o of [...(this.objects.list(a.x + dx, a.y + dy, a.z) ?? [])]) {
-            if (o.objN === a.objN && (o.quality === a.id || o.quality === 0)) this.objects.unlink(o);
+            if (o.objN === kind && (o.quality === a.id || o.quality === 0)) this.objects.unlink(o);
           }
         }
       }

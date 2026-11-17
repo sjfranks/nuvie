@@ -41,6 +41,12 @@ for (const r of ACTOR_TYPES) {
 /** Creatures two squares long, their back half a square behind them (U6Actor::init_splitactor). */
 export const SPLIT: ReadonlySet<number> = new Set([426, 427, 428, 429, 430, 431]);
 export const SHIP = 412;
+export const DRAGON = 411;
+export const HYDRA = 374;
+/** The hydra's tentacles are another kind of object (OBJ_U6_HYDRA_BODY). */
+export const HYDRA_BODY = 425;
+/** Every kind that fills more than its own square. */
+export const MANY_SQUARES: ReadonlySet<number> = new Set([...SPLIT, SHIP, DRAGON, HYDRA]);
 
 const DEFAULT_TYPE: ActorType = { framesPerDir: 0, tilesPerDir: 0, tilesPerFrame: 1, tileStart: 0 };
 
@@ -120,7 +126,7 @@ export class Actor {
    * The squares an actor fills beyond its own, with the frame drawn on each: a two-square creature's back half
    * (U6Actor::init_splitactor), a ship's bow and stern (set_direction_of_surrounding_ship_objs).
    */
-  parts(): { x: number; y: number; frame: number }[] {
+  parts(): { x: number; y: number; frame: number; objN?: number }[] {
     if (this.kind !== 'u6') return [];
     const w = this.z === 0 ? 1023 : 255;
     const t = TYPES.get(this.objN) ?? DEFAULT_TYPE;
@@ -131,6 +137,21 @@ export class Actor {
         { x: (this.x + fx) & w, y: (this.y + fy) & w, frame: step },
         { x: (this.x - fx) & w, y: (this.y - fy) & w, frame: 16 + step },
       ];
+    }
+    if (this.objN === DRAGON) {
+      // Head before, tail behind, a wing to each side (set_direction_of_surrounding_dragon_objs).
+      const [lx, ly] = [fy, -fx];
+      return [
+        { x: (this.x + fx) & w, y: (this.y + fy) & w, frame: 8 + step },
+        { x: (this.x - fx) & w, y: (this.y - fy) & w, frame: 16 + step },
+        { x: (this.x + lx) & w, y: (this.y + ly) & w, frame: 24 + step },
+        { x: (this.x - lx) & w, y: (this.y - ly) & w, frame: 32 + step },
+      ];
+    }
+    if (this.objN === HYDRA) {
+      // Eight tentacles round the body, from the north clockwise (U6Actor::init_hydra).
+      const ring = [[0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1]];
+      return ring.map(([dx, dy], i) => ({ x: (this.x + dx) & w, y: (this.y + dy) & w, frame: i * 4, objN: HYDRA_BODY }));
     }
     if (!SPLIT.has(this.objN)) return [];
     // A "mutant" (the Pushme Pullyu) has a second front where the back would be.
@@ -256,7 +277,7 @@ export class Actors {
     for (const a of this.list) {
       if (a.z !== z || !a.visible || !a.alive || a.objN === 0) continue;
       if (a.x === x && a.y === y) return a;
-      if (!behind && (SPLIT.has(a.objN) || a.objN === SHIP)) {
+      if (!behind && MANY_SQUARES.has(a.objN)) {
         if (a.parts().some((b) => b.x === x && b.y === y)) behind = a;
       }
     }
