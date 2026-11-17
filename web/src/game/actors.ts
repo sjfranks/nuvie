@@ -1,0 +1,202 @@
+/**
+ * actors.ts - everyone in the world: where they are, what they look like, their numbers and their day's schedule
+ * (Nuvie's actors/Actor.cpp, ActorManager.cpp and U6Actor.cpp).
+ */
+import type { GameFiles } from '../files/gamefiles.ts';
+import { ACTOR_TYPES } from './u6tables.ts';
+
+export const NUM_ACTORS = 256;
+export const STATUS_DEAD = 0x10;
+export const STATUS_IN_PARTY = 0x80;
+export const STATUS_POISONED = 0x08;
+export const STATUS_ASLEEP = 0x04;
+
+export const WT = {
+  MOTIONLESS: 0x00, IN_PARTY: 0x01, PLAYER: 0x02, ANIMAL_WANDER: 0x0c, IMMOBILE: 0x0e, GUARD_EW: 0x0f, GUARD_NS: 0x10,
+  WALK_TO_LOCATION: 0x86, FACE_NORTH: 0x87, FACE_EAST: 0x88, FACE_SOUTH: 0x89, FACE_WEST: 0x8a, WALK_NS: 0x8b,
+  WALK_EW: 0x8c, WANDER: 0x8f, WORK: 0x90, SLEEP: 0x91,
+} as const;
+
+export interface Schedule {
+  hour: number;
+  dayOfWeek: number;
+  worktype: number;
+  x: number;
+  y: number;
+  z: number;
+}
+
+interface ActorType {
+  framesPerDir: number;
+  tilesPerDir: number;
+  tilesPerFrame: number;
+  tileStart: number;
+}
+
+const TYPES = new Map<number, ActorType>();
+for (const r of ACTOR_TYPES) {
+  if (!TYPES.has(r[0] as number)) TYPES.set(r[0] as number, { framesPerDir: r[1] as number, tilesPerDir: r[2] as number, tilesPerFrame: r[3] as number, tileStart: r[4] as number });
+}
+const DEFAULT_TYPE: ActorType = { framesPerDir: 0, tilesPerDir: 0, tilesPerFrame: 1, tileStart: 0 };
+
+export class Actor {
+  x = 0;
+  y = 0;
+  z = 0;
+  objN = 0;
+  frameN = 0;
+  /** 0 north, 1 east, 2 south, 3 west */
+  direction = 0;
+  objFlags = 0;
+  statusFlags = 0;
+  talkFlags = 0;
+  movementFlags = 0;
+  strength = 0;
+  dex = 0;
+  intelligence = 0;
+  exp = 0;
+  hp = 0;
+  level = 0;
+  magic = 0;
+  combatMode = 0;
+  worktype = 0;
+  moves = 0;
+  visible = true;
+  sched: Schedule[] = [];
+  schedPos = -1;
+  /** Where the schedule last sent them. */
+  dest: { x: number; y: number; z: number } | null = null;
+  private walkFrame = 0;
+  private walkInc = 1;
+
+  constructor(readonly id: number) {}
+
+  get alive(): boolean {
+    return !(this.statusFlags & STATUS_DEAD);
+  }
+  get inParty(): boolean {
+    return !!(this.statusFlags & STATUS_IN_PARTY);
+  }
+  get met(): boolean {
+    return !!(this.talkFlags & 1);
+  }
+  get maxHp(): number {
+    return this.level * 30;
+  }
+  /** Stones they can carry. */
+  get maxWeight(): number {
+    return this.strength * 2;
+  }
+
+  /** Turn to face `d`, taking the next step of the walk. */
+  setDirection(d: number): void {
+    if (d < 0 || d > 3 || !this.alive) return;
+    const t = TYPES.get(this.objN) ?? DEFAULT_TYPE;
+    const frames = t.framesPerDir || 4;
+    if (this.walkFrame === 0) this.walkInc = 1;
+    else if (this.walkFrame === frames - 1) this.walkInc = -1;
+    this.walkFrame = (this.walkFrame + this.walkInc + frames) % frames;
+    this.direction = d;
+    this.frameN = t.tileStart + d * t.tilesPerDir + this.walkFrame * t.tilesPerFrame + t.tilesPerFrame - 1;
+  }
+
+  /** Which of the day's schedule entries holds at `hour`. */
+  schedulePos(hour: number): number {
+    const s = this.sched;
+    if (s.length === 0) return -1;
+    let i = 0;
+    for (; i < s.length; i++) {
+      if (s[i].hour > hour) return i !== 0 ? i - 1 : s.length - 1;
+    }
+    return i - 1;
+  }
+}
+
+export class Actors {
+  readonly list: Actor[] = [];
+
+  constructor(files: GameFiles, objlist: Uint8Array) {
+    for (let i = 0; i < NUM_ACTORS; i++) this.list.push(new Actor(i));
+    this.load(objlist);
+    const sched = files.get('schedule');
+    if (sched) this.loadSchedules(sched);
+  }
+
+  get(n: number): Actor | undefined {
+    return this.list[n];
+  }
+
+  load(ol: Uint8Array): void {
+    const r1 = (o: number): number => ol[o] ?? 0;
+    for (let i = 0; i < NUM_ACTORS; i++) {
+      const a = this.list[i];
+      const p = 0x100 + i * 3;
+      a.x = r1(p) | ((r1(p + 1) & 0x3) << 8);
+      a.y = (r1(p + 1) >> 2) | ((r1(p + 2) & 0xf) << 6);
+      a.z = r1(p + 2) >> 4;
+      const q = 0x400 + i * 2;
+      a.objN = r1(q) | ((r1(q + 1) & 0x3) << 8);
+      a.frameN = r1(q + 1) >> 2;
+      a.direction = (a.frameN >> 2) & 3;
+      a.visible = a.objN !== 0;
+      if (a.objN === 0) a.x = a.y = a.z = 0;
+      a.objFlags = r1(i);
+      a.statusFlags = r1(0x800 + i);
+      a.strength = r1(0x900 + i);
+      a.dex = r1(0xa00 + i);
+      a.intelligence = r1(0xb00 + i);
+      a.exp = r1(0xc00 + i * 2) | (r1(0xc01 + i * 2) << 8);
+      a.hp = r1(0xe00 + i);
+      a.level = r1(0xff1 + i);
+      a.worktype = r1(0x11f1 + i);
+      a.combatMode = r1(0x12f1 + i);
+      a.magic = r1(0x13f1 + i);
+      a.moves = r1(0x14f1 + i);
+      a.talkFlags = r1(0x17f1 + i);
+      a.movementFlags = r1(0x19f1 + i);
+    }
+    // Actor 0 is the party's vehicle, and nothing unless the party is aboard one.
+    const v = this.list[0];
+    if (v.worktype !== WT.PLAYER) {
+      v.objN = 0;
+      v.x = v.y = v.z = 0;
+      v.visible = false;
+    }
+  }
+
+  private loadSchedules(f: Uint8Array): void {
+    const r2 = (o: number): number => f[o] | (f[o + 1] << 8);
+    const total = r2(NUM_ACTORS * 2);
+    const base = NUM_ACTORS * 2 + 2;
+    for (let i = 0; i < NUM_ACTORS; i++) {
+      const off = r2(i * 2);
+      let n = 0;
+      if (off <= total - 1) {
+        const nextOff = i === NUM_ACTORS - 1 ? total : r2(i * 2 + 2);
+        n = (nextOff > total - 1 ? total : nextOff) - off;
+      }
+      const a = this.list[i];
+      a.sched = [];
+      for (let k = 0; k < n; k++) {
+        const p = base + (off + k) * 5;
+        if (p + 5 > f.length) break;
+        a.sched.push({
+          hour: f[p] & 0x1f,
+          dayOfWeek: f[p] >> 5,
+          worktype: f[p + 1],
+          x: f[p + 2] | ((f[p + 3] & 0x3) << 8),
+          y: (f[p + 3] >> 2) | ((f[p + 4] & 0xf) << 6),
+          z: f[p + 4] >> 4,
+        });
+      }
+    }
+  }
+
+  /** The living, visible actor standing on a square. */
+  at(x: number, y: number, z: number): Actor | null {
+    for (const a of this.list) {
+      if (a.x === x && a.y === y && a.z === z && a.visible && a.alive && a.objN !== 0) return a;
+    }
+    return null;
+  }
+}
