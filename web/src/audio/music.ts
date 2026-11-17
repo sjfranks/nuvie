@@ -14,6 +14,7 @@ const GROUPS: Record<string, string[]> = {
   boat: ['hornpipe.m'],
   gargoyle: ['gargoyle.m'],
   dungeon: ['dungeon.m'],
+  end: ['end.m'],
 };
 const KEPT = 'nuvie.music';
 
@@ -26,6 +27,8 @@ export class Music {
   private gain: GainNode | null = null;
   private starting: Promise<void> | null = null;
   enabled: boolean;
+  /** A song the moment calls for over the land's own (the ending's). */
+  theme: string | null = null;
 
   constructor(private readonly game: Game) {
     let on = true;
@@ -85,6 +88,7 @@ export class Music {
   /** The group the moment calls for (Party::update_music). */
   private wanted(): string {
     const g = this.game;
+    if (this.theme) return this.theme;
     if (g.vehicle) return 'boat';
     if (g.combat.fighting) return 'combat';
     const z = g.player.z;

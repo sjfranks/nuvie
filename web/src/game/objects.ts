@@ -118,7 +118,7 @@ export class Objects {
           (parent.container ??= []).unshift(o);
           o.parentObj = parent;
         }
-      } else this.add(o);
+      } else this.add(o, true); // each at the bottom of its square, as ObjManager::add_obj does when loading
     }
     return p - start;
   }

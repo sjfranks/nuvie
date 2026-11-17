@@ -5,15 +5,17 @@
  * spawn_egg, ActorManager.cpp create_temp_actor and the clean-up of temporary actors).
  *
  * Simplified where the original's detail would not show on a phone: every actor in a fight acts once a turn rather
- * than by movement points; monsters that cast spells fight with their hands; thrown weapons are not lost.
+ * than by movement points; thrown weapons are not lost.
  */
 import type { Actor } from './actors.ts';
-import { STATUS_DEAD, STATUS_IN_PARTY } from './actors.ts';
+import { SILVER_SERPENT, STATUS_DEAD, STATUS_IN_PARTY } from './actors.ts';
 import type { Game } from './game.ts';
 import { carried, invCount, invDelete } from './inventory.ts';
 import { wrap } from './map.ts';
 import { STATUS_OK_TO_TAKE, STATUS_TEMPORARY, type Obj } from './objects.ts';
-import { ARMOUR, MONSTERS, PROJECTILE, WEAPON_DMG, WEAPON_RANGE } from './u6combat.ts';
+import { ARMOUR, MONSTERS, PROJECTILE, WEAPON_DMG, WEAPON_RANGE, type MonsterType } from './u6combat.ts';
+import { EGG } from './kind.ts';
+import { MD_AMMO, MD_ARMOUR, MD_MONSTERS, MD_PROJECTILE, MD_STATS, MD_WEAPON_DMG, MD_WEAPON_RANGE, mdBit } from './mdse.ts';
 import { ACTOR_TYPES, OBJ } from './u6tables.ts';
 
 export const ALIGN = { DEFAULT: 0, NEUTRAL: 1, EVIL: 2, GOOD: 3, CHAOTIC: 4 } as const;
@@ -27,6 +29,11 @@ const FIGHTING: ReadonlySet<number> = new Set([
 ]);
 /** Actors from here on are made as they are needed (Ultima 6's temp_actor_offset). */
 const TEMP_FROM = 203;
+/** actor_immune_to_dmg: Martian Dreams' creatures and people no blow can hurt. */
+const MD_IMMUNE_OBJ = new Set([381, 390, 391, 358, 382]);
+const MD_IMMUNE_ID = new Set([0x5c, 0x5d, 0x59, 0x5a, 0x54, 0x52, 0x6d, 0x68, 0x67, 0x69, 0x77, 0x78, 0x40, 0x3c]);
+/** A spell held as a weapon: a monster's, or a staff's (obj 336). */
+const CHARGE = 336;
 const BLOOD = 338;
 const ARROW = 55;
 const BOLT = 56;
@@ -103,7 +110,32 @@ export class Combat {
   private block = '';
   private eggs: Obj[] | null = null;
 
-  constructor(private readonly g: Game) {}
+  /** The game's own numbers: Ultima VI's tables, or Martian Dreams' (mdse.ts). */
+  private readonly t: {
+    monsters: Map<number, MonsterType>;
+    dmg: Map<number, number>;
+    range: Map<number, number>;
+    shot: Map<number, number>;
+    armour: Map<number, number>;
+  };
+
+  constructor(private readonly g: Game) {
+    this.t = g.kind === 'md'
+      ? { monsters: MD_MONSTERS, dmg: MD_WEAPON_DMG, range: MD_WEAPON_RANGE, shot: MD_PROJECTILE, armour: MD_ARMOUR }
+      : g.kind === 'u6'
+        ? { monsters: MONSTERS, dmg: WEAPON_DMG, range: WEAPON_RANGE, shot: PROJECTILE, armour: ARMOUR }
+        : { monsters: new Map(), dmg: new Map(), range: new Map(), shot: new Map(), armour: new Map() };
+  }
+
+  /** The first actor number kept for creatures that come and go (ActorManager's temp_actor_offset). */
+  private get tempFrom(): number {
+    return this.g.kind === 'u6' ? TEMP_FROM : 224;
+  }
+
+  /** A creature's base numbers in this game. */
+  monster(objN: number): MonsterType | undefined {
+    return this.t.monsters.get(objN);
+  }
 
   private rand(lo: number, hi: number): number {
     return lo + this.g.random(hi - lo + 1);
@@ -149,6 +181,8 @@ export class Combat {
   /** Whether an actor means the party harm now. */
   hostile(a: Actor): boolean {
     if (!this.standing(a) || a.inParty || !FIGHTING.has(a.worktype)) return false;
+    // 0x9b is Martian Dreams' coker at work, not a foe.
+    if (this.g.kind === 'md' && a.worktype === WT.ATTACK_PARTY) return false;
     return this.g.party.some((m) => this.canTarget(a, m.actor));
   }
 
@@ -188,7 +222,7 @@ export class Combat {
   }
 
   private dmgOf(objN: number): number | undefined {
-    return WEAPON_DMG.get(objN) ?? MONSTERS.get(objN)?.dmg;
+    return this.t.dmg.get(objN) ?? this.t.monsters.get(objN)?.dmg;
   }
 
   /** The hardest-hitting thing an actor has that reaches (actor_get_weapon); party members use what they have readied. */
@@ -197,10 +231,15 @@ export class Combat {
     let best: Weapon = { objN: a.objN, obj: null };
     let max = 0;
     for (const o of carried(this.g.objects, a.id)) {
-      if (a.inParty && o.loc !== 'readied') continue;
       if (o.parentObj) continue;
-      const dmg = WEAPON_DMG.get(o.objN);
-      if (dmg !== undefined && dmg > max && (WEAPON_RANGE.get(o.objN) ?? 1) >= reach && !this.outOfAmmo(a, o.objN)) {
+      // A spell the creature knows (a charge), now and then, the less often the higher the spell (actor_get_weapon).
+      if (o.objN === CHARGE) {
+        if (this.g.stormTurns === 0 && this.rand(0, 3) === 0 && this.rand(0, o.quality) < 16) return { objN: CHARGE, obj: o };
+        continue;
+      }
+      if (a.inParty && o.loc !== 'readied') continue;
+      const dmg = this.t.dmg.get(o.objN);
+      if (dmg !== undefined && dmg > max && (this.t.range.get(o.objN) ?? 1) >= reach && !this.outOfAmmo(a, o.objN, o)) {
         max = dmg;
         best = { objN: o.objN, obj: o };
       }
@@ -213,12 +252,19 @@ export class Combat {
     let r = 1;
     for (const o of carried(this.g.objects, a.id)) {
       if (a.inParty && o.loc !== 'readied') continue;
-      if (WEAPON_DMG.has(o.objN) && !this.outOfAmmo(a, o.objN)) r = Math.max(r, WEAPON_RANGE.get(o.objN) ?? 1);
+      if (this.t.dmg.has(o.objN) && !this.outOfAmmo(a, o.objN, o)) r = Math.max(r, this.t.range.get(o.objN) ?? 1);
     }
     return r;
   }
 
-  private outOfAmmo(a: Actor, objN: number): boolean {
+  private outOfAmmo(a: Actor, objN: number, o?: Obj | null): boolean {
+    if (this.g.kind === 'md') {
+      const ammo = MD_AMMO.get(objN);
+      if (ammo === undefined) return false;
+      if (ammo === 0) return !!o && o.qty === 0;
+      return invCount(this.g.objects, a.id, ammo) === 0;
+    }
+    if (this.g.kind !== 'u6') return false;
     if (objN === 41 || objN === 54) return invCount(this.g.objects, a.id, ARROW) === 0;
     if (objN === 42 || objN === 50) return invCount(this.g.objects, a.id, BOLT) === 0;
     return false;
@@ -226,7 +272,7 @@ export class Combat {
 
   private ac(a: Actor): number {
     let ac = 0;
-    for (const o of this.g.objects.inventories[a.id] ?? []) if (o.loc === 'readied') ac += ARMOUR.get(o.objN) ?? 0;
+    for (const o of this.g.objects.inventories[a.id] ?? []) if (o.loc === 'readied') ac += this.t.armour.get(o.objN) ?? 0;
     if (a.objFlags & CURSED) ac -= 3;
     if (a.statusFlags & PROTECTED) ac += 3;
     return ac;
@@ -234,8 +280,8 @@ export class Combat {
 
   /** actor_combat_hit_check: dexterity (or strength, for a club) against the foe's dexterity. */
   private hits(att: Actor, foe: Actor, w: Weapon): boolean {
-    if (w.objN === 48) return true; // the glass sword
-    const useStr = w.obj ? [4, 34, 39, 44].includes(w.objN) : MONSTERS.get(att.objN)?.useStr === 1;
+    if (w.objN === 48 && this.g.kind === 'u6') return true; // the glass sword
+    const useStr = w.obj ? this.g.kind === 'u6' && [4, 34, 39, 44].includes(w.objN) : this.t.monsters.get(att.objN)?.useStr === 1;
     const role = useStr ? adj(att, att.strength) : adj(att, att.dex);
     const foeDex = foe.statusFlags & (ASLEEP | PARALYZED) || this.timeStop > 0 ? 1 : adj(foe, foe.dex);
     return Math.floor((foeDex + 30 - role) / 2) < this.rand(1, 30);
@@ -269,33 +315,77 @@ export class Combat {
   /** One actor attacks another (actor_attack). Returns false where the foe is out of reach. */
   attack(att: Actor, foe: Actor): boolean {
     const w = this.weapon(att, foe.x, foe.y);
-    if (this.range(att, foe.x, foe.y) > (WEAPON_RANGE.get(w.objN) ?? 1)) return false;
+    if (this.range(att, foe.x, foe.y) > (this.t.range.get(w.objN) ?? 1)) return false;
     att.setDirection(Math.abs(foe.x - att.x) <= Math.abs(foe.y - att.y) ? (foe.y >= att.y ? 2 : 0) : foe.x >= att.x ? 1 : 3);
+    if (w.objN === CHARGE && w.obj) {
+      if (w.obj.quality === 0x81) return this.wispTeleport(att);
+      this.g.magic.castAs(att, w.obj.quality, foe.x, foe.y);
+      return true;
+    }
     const far = Math.abs(foe.x - att.x) > 1 || Math.abs(foe.y - att.y) > 1;
-    const ranged = w.objN !== 40 && w.objN !== 47 && (far || PROJECTILE.has(w.objN));
+    const md = this.g.kind === 'md';
+    const ranged = md ? far || this.t.shot.has(w.objN) : w.objN !== 40 && w.objN !== 47 && (far || this.t.shot.has(w.objN));
     let hit = this.hits(att, foe, w);
     if (ranged) {
       if (!this.clearLine(att.x, att.y, foe.x, foe.y, att.z)) hit = false;
-      if (w.objN === 41 || w.objN === 54) invDelete(this.g.objects, att.id, ARROW, 1, 0);
-      if (w.objN === 42 || w.objN === 50) invDelete(this.g.objects, att.id, BOLT, 1, 0);
+      if (md) {
+        // A round from the pack, or a charge from a ray gun or sprayer (fire_range_based_weapon).
+        const ammo = MD_AMMO.get(w.objN);
+        if (ammo) invDelete(this.g.objects, att.id, ammo, 1, 0);
+        else if (ammo === 0 && w.obj) w.obj.qty = Math.max(0, w.obj.qty - 1);
+      } else {
+        if (w.objN === 41 || w.objN === 54) invDelete(this.g.objects, att.id, ARROW, 1, 0);
+        if (w.objN === 42 || w.objN === 50) invDelete(this.g.objects, att.id, BOLT, 1, 0);
+      }
     }
     if (!ranged && Math.max(Math.abs(att.x - this.g.player.x), Math.abs(att.y - this.g.player.y)) < 6) this.g.sfx('swing');
-    const shot = ranged && PROJECTILE.has(w.objN) ? { tile: PROJECTILE.get(w.objN)!, fromX: att.x, fromY: att.y } : undefined;
+    const shot = ranged && this.t.shot.has(w.objN) ? { tile: this.t.shot.get(w.objN)!, fromX: att.x, fromY: att.y } : undefined;
     if (!hit) {
       this.flash(foe.x, foe.y, foe.z, 'miss', shot);
       if (att === this.g.player || foe === this.g.player || att.inParty) this.g.say('sys', `${this.cap(this.name(att))} misses.`);
       return true;
     }
+    if (md && this.mdSpecial(att, foe, w)) return true;
     let dmg = this.dmgOf(w.objN) ?? 1;
     // Some can only be half hurt, but for the glass sword, the triple crossbow and the magic bow.
-    if (MONSTERS.get(foe.objN)?.halfDmg === 1 && w.objN !== 48 && w.objN !== 50 && w.objN !== 54) dmg = Math.floor((dmg + 1) / 2);
+    if (this.t.monsters.get(foe.objN)?.halfDmg === 1 && w.objN !== 48 && w.objN !== 50 && w.objN !== 54) dmg = Math.floor((dmg + 1) / 2);
     this.flash(foe.x, foe.y, foe.z, 'hit', shot);
     this.takeHit(att, foe, dmg);
-    if (w.objN === 48 && w.obj) {
+    if (w.objN === 48 && w.obj && !md) {
       this.g.say('sys', 'Thy sword hath shattered!');
       this.g.objects.unlink(w.obj);
     }
     return true;
+  }
+
+  /**
+   * Martian Dreams' weapons that do other than wound (attack_target_with_weapon): the freeze ray holds fast what it
+   * can, Cupid's bow charms, the heat ray does nothing to what heat cannot hurt. True where the blow is dealt with.
+   */
+  private mdSpecial(att: Actor, foe: Actor, w: Weapon): boolean {
+    const g = this.g;
+    const who = this.cap(this.name(foe));
+    const t = MD_STATS.get(foe.objN);
+    if (w.objN === 241) {
+      if (t && (mdBit(t, 14) || mdBit(t, 7))) {
+        foe.statusFlags |= PARALYZED;
+        g.say('sys', `${who} is paralyzed.`);
+        this.flash(foe.x, foe.y, foe.z, 'hit');
+      } else g.say('sys', 'It has no effect.');
+      return true;
+    }
+    if (w.objN === 40) {
+      if (alignment(foe) !== ALIGN.GOOD) {
+        this.charm(foe, ALIGN.GOOD);
+        g.say('sys', `${who} is charmed.`);
+      }
+      return true;
+    }
+    if (w.objN === 240 && mdBit(t, 3)) {
+      g.say('sys', 'It has no effect.');
+      return true;
+    }
+    return false;
   }
 
   /** actor_take_hit: a roll up to the weapon's damage, less a roll up to the defender's armour. */
@@ -303,13 +393,25 @@ export class Combat {
     let dmg = max === -1 ? 1 : max > 1 && max !== 255 ? this.rand(1, max) : max;
     const ac = this.ac(def);
     if (dmg !== 255 && ac > 0) dmg -= this.rand(1, ac);
+    // Martian Dreams' creatures that take double harm (actor_hit's stat bit 4), and those nothing harms.
+    if (this.g.kind === 'md' && dmg > 0) {
+      if (MD_IMMUNE_OBJ.has(def.objN) || MD_IMMUNE_ID.has(def.id)) {
+        this.g.say('sys', 'It has no effect.');
+        return;
+      }
+      if (mdBit(MD_STATS.get(def.objN), 4)) dmg *= 2;
+    }
     const who = this.cap(this.name(def));
     if (dmg > 0) this.g.sfx('hit');
     if (dmg > 0) def.statusFlags &= ~0x04;
     if (dmg > 0) att.exp += this.hit(def, dmg);
     else this.g.say('sys', `${who} grazed.`);
     if (def.hp > 0 || dmg <= 0) {
-      if (MONSTERS.get(att.objN)?.poison === 1 && this.g.random(4) === 0 && !(def.statusFlags & 0x08)) {
+      if (this.g.kind === 'md' && dmg > 0 && mdBit(MD_STATS.get(att.objN), 2) && this.g.random(4) === 0) {
+        def.statusFlags |= PARALYZED;
+        this.g.say('sys', `${who} is paralyzed!`);
+      }
+      if (this.t.monsters.get(att.objN)?.poison === 1 && this.g.random(4) === 0 && !(def.statusFlags & 0x08)) {
         def.statusFlags |= 0x08;
         this.g.say('sys', `${this.cap(this.name(def))} poisoned!`);
       }
@@ -338,6 +440,72 @@ export class Combat {
     } else if (def.id !== 1) this.g.say('sys', `${who} killed!`);
   }
 
+  /**
+   * actor_map_dmg / actor_tile_dmg: what the square an actor stands on does to it - swamp and poison fields poison,
+   * fire burns, traps, spikes and force fields cut, webs hold, sleep fields put to sleep. Once a turn.
+   */
+  mapDamage(a: Actor): void {
+    const g = this.g;
+    if (g.kind !== 'u6') return;
+    if (!a.alive || !a.visible || !a.objN || a.id === 0) return;
+    const base = this.t.monsters.get(a.objN);
+    if (base?.flies === 1 || a.statusFlags & PROTECTED) return;
+    if (a.inParty && g.vehicle) return;
+    let t = g.map.tile(a.x, a.y, a.z);
+    if (!t.damages) {
+      const objs = g.objects.list(a.x, a.y, a.z) ?? [];
+      let found = null;
+      for (let i = objs.length - 1; i >= 0 && !found; i--) {
+        const o = objs[i];
+        if (o.status & 0x10 && o.objN !== 173) continue; // invisible, but traps still bite
+        const ot = g.objects.tileOf(o);
+        if (ot.damages) found = ot;
+      }
+      if (!found) return;
+      t = found;
+    }
+    const n = t.num;
+    const name = this.cap(this.name(a));
+    if (n === 564) {
+      if (a.objN !== 0x169 && adj(a, a.strength) < this.rand(1, 30)) {
+        a.statusFlags |= PARALYZED;
+        g.say('sys', `${name} is stuck in a web!`);
+      }
+    } else if ((n >= 2 && n <= 5) || n === 1165) {
+      const boots = g.objects.inventories[a.id].some((o) => o.loc === 'readied' && o.objN === 28);
+      if ((!boots || n === 1165) && base?.poisonImmune !== 1 && !(a.statusFlags & POISONED)) {
+        a.statusFlags |= POISONED;
+        g.say('sys', `${name} poisoned!`);
+        this.flash(a.x, a.y, a.z, 'hit');
+      }
+    } else if ((n >= 220 && n <= 223) || [890, 1124, 1125, 1130, 1131, 1164, 1193].includes(n)) {
+      let dmg = n === 1164 ? this.rand(1, 30) : this.rand(1, 8);
+      if (base?.fireDouble === 1) dmg *= 2;
+      this.mapHit(a, dmg);
+    } else if (n === 732 || n === 1010) {
+      this.mapHit(a, this.rand(1, 30));
+      if (n === 732) for (const o of g.objects.list(a.x, a.y, a.z) ?? []) if (o.objN === 173) o.status &= ~0x10;
+    } else if (n >= 1458 && n <= 1463) {
+      if (a.objN !== 0x16e) this.mapHit(a, this.rand(1, 8));
+    } else if (n === 562 || n === 731) {
+      this.mapHit(a, this.rand(1, 8));
+    } else if (n === 1167) {
+      if (base?.sleepImmune !== 1 && !(a.statusFlags & ASLEEP)) {
+        a.statusFlags |= ASLEEP;
+        g.say('sys', `${name} falls asleep.`);
+      }
+    }
+  }
+
+  private mapHit(a: Actor, dmg: number): void {
+    const who = this.cap(this.name(a));
+    this.flash(a.x, a.y, a.z, 'hit');
+    this.g.sfx('hit');
+    this.hit(a, dmg);
+    if (a.hp > 0) this.hitMessage(a);
+    else if (a.id !== 1) this.g.say('sys', `${who} killed!`);
+  }
+
   /** actor_hit: the damage itself. Returns the experience it earns. */
   private hit(def: Actor, dmg: number): number {
     // The party's boat takes blows to its hull, but is not sunk here.
@@ -358,7 +526,7 @@ export class Combat {
     if (def.inParty) this.g.karma = Math.max(0, this.g.karma - 5);
     def.hp = 0;
     let exp = 0;
-    const base = MONSTERS.get(def.objN);
+    const base = this.t.monsters.get(def.objN);
     if (isEvil(alignment(def)) && base) exp = Math.floor((base.str + base.dex + base.int + base.hp + base.dmg + base.exp) / 4);
     this.die(def);
     return exp;
@@ -376,7 +544,7 @@ export class Combat {
   /** actor_dead and U6Actor::die: blood, a body holding what they carried, and gone. */
   private die(a: Actor): void {
     const g = this.g;
-    const base = MONSTERS.get(a.objN);
+    const base = this.t.monsters.get(a.objN);
     if (base?.blood === 1) {
       const b = g.objects.create(BLOOD, 1, 0);
       b.frameN = g.random(3);
@@ -388,13 +556,14 @@ export class Combat {
       this.avatarDeath();
       return;
     }
-    const [deadObj, deadFrame] = DEAD.get(a.objN) ?? [0, 0];
+    const [deadObj, deadFrame] = (g.kind === 'u6' ? DEAD.get(a.objN) : undefined) ?? [0, 0];
+    for (const k of (g.objects.inventories[a.id] ?? []).filter((o) => o.objN === CHARGE)) g.objects.unlink(k);
     const inv = [...(g.objects.inventories[a.id] ?? [])];
     let into: Obj | null = null;
     if (deadObj !== 0 && deadObj !== BLOOD) {
       const body = g.objects.create(deadObj, 0, a.id);
       body.frameN = deadFrame === 255 ? a.frameN : deadFrame;
-      body.status = STATUS_OK_TO_TAKE | (a.id >= TEMP_FROM ? STATUS_TEMPORARY : 0);
+      body.status = STATUS_OK_TO_TAKE | (a.id >= this.tempFrom ? STATUS_TEMPORARY : 0);
       [body.x, body.y, body.z] = [a.x, a.y, a.z];
       body.container ??= [];
       g.objects.add(body);
@@ -416,12 +585,13 @@ export class Combat {
     a.statusFlags = (a.statusFlags | STATUS_DEAD) & ~STATUS_IN_PARTY;
     a.visible = false;
     a.worktype = WT.NOTHING;
-    if (a.id >= TEMP_FROM) this.free(a);
+    if (a.id >= this.tempFrom) this.free(a);
   }
 
   /** actor_avatar_death: darkness, KAL LOR, and the party wakes healed in Lord British's castle. */
   private avatarDeath(): void {
     const g = this.g;
+    if (g.kind === 'md') return this.unconscious();
     g.say('sys', 'An unending darkness engulfs thee...');
     g.sfx('death');
     setTimeout(() => g.sfx('kallor'), 2400);
@@ -438,8 +608,48 @@ export class Combat {
       m.actor.hp = m.actor.maxHp;
       m.actor.statusFlags &= ~(STATUS_DEAD | 0x08);
     }
-    for (const a of g.actors.list) if (a.id < TEMP_FROM && a.worktype === WT.ATTACK_PARTY) a.worktype = WT.WALK_TO_LOCATION;
+    for (const a of g.actors.list) if (a.id < this.tempFrom && a.worktype === WT.ATTACK_PARTY) a.worktype = WT.WALK_TO_LOCATION;
     g.relocate(0x133, 0x160, 0);
+  }
+
+  /**
+   * Martian Dreams' Avatar is not killed but falls unconscious (avatar_falls_unconscious), and wakes, healed with the
+   * party's fallen, at the space capsule - or the Olympus mine once that is the party's home - at seven the next morning.
+   */
+  private unconscious(): void {
+    const g = this.g;
+    if (g.mdUse.dream) {
+      // Killed in a dream: back to the last teleporter, or awake (party_update).
+      const d = g.mdUse.dream;
+      if (d.back) {
+        g.player.hp = g.player.maxHp;
+        g.player.statusFlags &= ~(STATUS_DEAD | 0x08);
+        g.player.visible = true;
+        g.relocate(d.back[0], d.back[1], g.player.z);
+        g.say('sys', 'You feel your dream consciousness returning.');
+      } else g.mdUse.wake(true);
+      return;
+    }
+    g.say('sys', 'Overcome by your wounds, you fall unconscious!');
+    g.sfx('death');
+    const mine = (g.actors.get(0x46)?.talkFlags ?? 0) & (1 << 3);
+    for (const a of this.fallen) {
+      a.statusFlags &= ~STATUS_DEAD;
+      a.visible = true;
+      g.partyAdd(a);
+    }
+    this.fallen = [];
+    for (const m of g.party) {
+      m.actor.hp = m.actor.maxHp;
+      m.actor.statusFlags &= ~(STATUS_DEAD | 0x08 | PARALYZED);
+    }
+    for (const a of g.actors.list) if (a.id < this.tempFrom && a.worktype === WT.ATTACK_PARTY) a.worktype = WT.WALK_TO_LOCATION;
+    const c = g.clock;
+    const hours = c.hour < 7 ? 6 - c.hour : 24 - (c.hour + 1) + 7;
+    g.advance(hours * 60 + (60 - c.minute) + this.rand(0, 59));
+    if (mine) g.relocate(0xa4, 0xc3, 4);
+    else g.relocate(0x19d, 0x278, 0);
+    g.say('sys', `You awaken back at ${mine ? 'the Olympus mine' : 'the space capsule'}, feeling restored.`);
   }
 
   private free(a: Actor): void {
@@ -458,8 +668,15 @@ export class Combat {
     const g = this.g;
     x = wrap(x, a.z);
     y = wrap(y, a.z);
-    if (g.actors.at(x, y, a.z)) return false;
-    const mt = MOVETYPE.get(a.objN) ?? 1;
+    const there = g.actors.at(x, y, a.z);
+    if (there && there !== a) return false;
+    // A silver serpent goes straight, never back over its own neck (check_move_silver_serpent).
+    if (a.objN === SILVER_SERPENT) {
+      if (x !== a.x && y !== a.y) return false;
+      const neck = a.parts()[0];
+      if (neck && neck.x === x && neck.y === y) return false;
+    }
+    const mt = (g.kind === 'u6' ? MOVETYPE.get(a.objN) : undefined) ?? 1;
     if (mt === MOVETYPE_WATER_LOW || mt === MOVETYPE_WATER_HIGH) return g.map.isWater(x, y, a.z);
     if (mt === MOVETYPE_AIR_LOW || mt === MOVETYPE_AIR_HIGH) return g.map.isPassable(x, y, a.z) || g.map.isWater(x, y, a.z);
     return g.map.isPassable(x, y, a.z);
@@ -493,7 +710,7 @@ export class Combat {
   /** Everyone in a fight near the party acts once (actor_update_all, much simplified). */
   round(): void {
     const g = this.g;
-    if (g.kind !== 'u6') return;
+    if (g.kind === 'se') return; // Nuvie has no Savage Empire fighting to port
     const p = g.player;
     for (const a of g.actors.list) {
       if (a.z === p.z && a.objN !== 0 && a.alive && Math.max(Math.abs(a.x - p.x), Math.abs(a.y - p.y)) <= 16) this.updateFlags(a);
@@ -606,7 +823,7 @@ export class Combat {
       return;
     }
     const w = this.weapon(a, t.x, t.y);
-    if (this.range(a, t.x, t.y) <= (WEAPON_RANGE.get(w.objN) ?? 1) && this.clearLine(a.x, a.y, t.x, t.y, a.z)) {
+    if (this.range(a, t.x, t.y) <= (this.t.range.get(w.objN) ?? 1) && this.clearLine(a.x, a.y, t.x, t.y, a.z)) {
       this.attack(a, t);
       return;
     }
@@ -618,7 +835,7 @@ export class Combat {
 
   /** Every egg in the world (found once). */
   private allEggs(): Obj[] {
-    this.eggs ??= this.g.objects.all().filter((o) => o.objN === OBJ.EGG);
+    this.eggs ??= this.g.objects.all().filter((o) => o.objN === EGG[this.g.kind]);
     return this.eggs;
   }
 
@@ -629,14 +846,14 @@ export class Combat {
    */
   update(teleport = false): void {
     const g = this.g;
-    if (g.kind !== 'u6') return;
+    if (g.kind === 'se') return;
     const p = g.player;
     const block = `${p.x >> 3},${p.y >> 3},${p.z}`;
     if (block === this.block && !teleport) return;
     const levelChanged = this.block !== '' && this.block.split(',')[2] !== String(p.z);
     this.block = block;
     for (const a of g.actors.list) {
-      if (a.id < TEMP_FROM || a.objN === 0 || a.inParty) continue;
+      if (a.id < this.tempFrom || a.objN === 0 || a.inParty) continue;
       if (a.z !== p.z || (!levelChanged && (Math.abs(a.x - p.x) > 19 || Math.abs(a.y - p.y) > 19))) this.free(a);
     }
     for (const egg of this.allEggs()) {
@@ -661,9 +878,9 @@ export class Combat {
     if ((when === 'day' && !day) || (when === 'night' && day)) return;
     if (!egg.container || !(egg.qty === 100 || chance <= egg.qty)) return;
     for (const embryo of egg.container) {
-      const qty = embryo.objN === OBJ.SILVER_SERPENT ? 1 : Math.max(1, embryo.qty);
+      const qty = embryo.objN === OBJ.SILVER_SERPENT && g.kind === 'u6' ? 1 : Math.max(1, embryo.qty);
       for (let i = 0; i < qty; i++) {
-        if (embryo.objN >= OBJ.GIANT_RAT || embryo.objN === OBJ.CHEST || embryo.quality !== 0) {
+        if ((g.kind === 'u6' && (embryo.objN >= OBJ.GIANT_RAT || embryo.objN === OBJ.CHEST)) || embryo.quality !== 0) {
           const occupied = !!g.actors.at(egg.x, egg.y, egg.z);
           const spot = occupied ? this.toss(egg.x, egg.y, egg.z) : { x: egg.x, y: egg.y };
           if (!spot) break;
@@ -692,11 +909,11 @@ export class Combat {
   /** Make a monster (create_temp_actor, actor_init): its numbers, its alignment, what it carries. */
   spawn(objN: number, x: number, y: number, z: number, align: number, worktype: number): Actor | null {
     const g = this.g;
-    const a = g.actors.list.find((t) => t.id >= TEMP_FROM && t.objN === 0);
+    const a = g.actors.list.find((t) => t.id >= this.tempFrom && t.objN === 0);
     if (!a) return null;
     for (const o of [...g.objects.inventories[a.id]]) g.objects.unlink(o);
     Object.assign(a, { objN, frameN: 0, x, y, z, objFlags: 0, statusFlags: 0, talkFlags: 0, movementFlags: 0, visible: true, sched: [], schedPos: -1, dest: null });
-    const base = MONSTERS.get(objN);
+    const base = this.t.monsters.get(objN);
     if (base) {
       a.strength = randomise(g, base.str);
       a.dex = randomise(g, base.dex);
@@ -724,9 +941,28 @@ export class Combat {
     return kept;
   }
 
-  /** actor_init's weapons, armour and treasure. */
+  /** A wisp's own magic: it vanishes and comes again beside the party (toss_actor). */
+  private wispTeleport(a: Actor): boolean {
+    const p = this.g.player;
+    for (let i = 0; i < 16; i++) {
+      const x = p.x + this.rand(-3, 3);
+      const y = p.y + this.rand(-3, 3);
+      if (!this.g.canStand(x, y, p.z)) continue;
+      [a.x, a.y, a.z] = [x, y, p.z];
+      this.g.say('sys', 'Wisp teleports!');
+      return true;
+    }
+    return true;
+  }
+
+  /** actor_init's spells, weapons, armour and treasure. */
   private equip(a: Actor, base: (typeof MONSTERS extends Map<number, infer T> ? T : never)): void {
     const g = this.g;
+    for (const v of base.spells) {
+      const k = g.objects.create(CHARGE, 1, v);
+      k.status |= 0x38;
+      g.objects.toInventory(k, a.id);
+    }
     const w = base.weapons[0];
     if (w !== undefined) {
       this.give(a, w, w >= 36 && w <= 38 ? this.rand(6, 12) : 0, true);

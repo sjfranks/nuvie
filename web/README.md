@@ -34,6 +34,14 @@ Kal Lor, the death dirge, the tremor and the hail; Menu turns them off and on.
 deeper underground, with smooth pools of light round the party, and warm firelight from lamps, braziers and torches.
 Sunset and sunrise glow orange.
 
+## A new Avatar
+
+A new game of Ultima VI begins as the original's does, in the gypsy's wagon (intro.lua's create_character): a name,
+man or woman, one of six faces, and then the gypsy's questions of the eight virtues - four pairs, the winners in two
+pairs, then the last two - each answer adding to strength, dexterity or intelligence. The Avatar starts at level 3
+with magic twice their intelligence (SaveGame::update_objlist_for_new_game_u6). Close the sheet to keep the
+default Avatar. The animated intro itself (the lounge, the stones, the moongate) is not ported.
+
 ## The screen
 
 - **Upright**: the map fills the width at the top and takes the taps; under it one pane, the **Log** or the
@@ -54,8 +62,13 @@ Sunset and sunrise glow orange.
 - **Talking**: the speaker's face shows over the map (which shrinks to give the words room), and the foot becomes a
   menu of what can be said: Name and
   Job, the words this person has dropped (shown in gold in what they say), Bye - or Yes and No where that is the
-  question - with a box to type anything else. Where the speaker stops, **Continue** goes on.
-- **Party**: tap a member for their numbers and what they carry; tap a thing to use it, drop it or hand it on.
+  question - with a box to type anything else. The words a speaker answers to are marked in what they say: tap one
+  to ask about it. Where the speaker stops, **Continue** goes on; the last words of a conversation stay to be read
+  until the player goes on.
+- **Party**: tap a member for their sheet: the original's paper doll, with a ring for each place a thing is worn or
+  held and what is there; their numbers; and what they carry, each bag or chest folded until opened with its +.
+  Tap a thing (on the doll or in the list) to ready, use, drop or hand it on.
+- **Containers** in the world - chests, barrels, bodies - open over the game, each thing to take, or all of it.
 - **Journal**: everyone spoken with, what each said to each thing asked, the words they answer to, and every sign
   and book read.
 - The game saves itself as you play. A keyboard works too: arrows walk, space passes, L/T/U/G choose a command.
@@ -83,24 +96,85 @@ dropping and giving; saving.
 
 **Martian Dreams and The Savage Empire** load too, from the same screen (the game is told by its files): their map,
 people, schedules, conversations, faces (`mdfaces.lzc`, `faces.lzc`), palette, and their own 8-pixel font
-(`system.lzc`), with Martian Dreams' doors. They have no parchment picture, so they take the plain frame. Their Lua
-usecode (most of what using things does in them) and the scenes behind their faces are not ported.
+(`system.lzc`), with Martian Dreams' doors. They have no parchment picture, so they take the plain frame. Things are
+worn and held by each game's own table (obj_get_readiable_location, by tile).
+
+Martian Dreams fights too, with its own numbers (data/scripts/md): its creatures' strength, dexterity, wits, health,
+damage and nature (actor_tbl), its weapons' damage and reach (combat.lua) and its clothes' armour; guns use their
+rounds, ray guns and sprayers their charges; the freeze ray holds fast, Cupid's bow charms, the heat ray does nothing
+to what heat cannot hurt; some creatures take double harm, some paralyse, some cannot be hurt at all; eggs hatch its
+creatures. Nuvie's own Martian Dreams AI is mostly unwritten, so creatures fight as Ultima VI's do. A fallen party
+wakes at the space capsule (or the Olympus mine) the next morning. Savage Empire's creature table in Nuvie is a
+placeholder, so it has no fighting.
+
+Using things in Martian Dreams follows its usecode.lua, with its own words (lang/en/game.lua): the four kinds of
+berry and the red berry's battle frenzy, the sextant, crates and trunks (nailed, locked, opened and searched), pry
+bars and hammers on crates, gates, levers that work the doors they name, switch bars and turntables, lamp oil and
+potash on rusted doors, the oxium bin and hammering geodes, books, notes, scrolls and the affidavit (mdtext.lzc),
+instruments, the spittoon, the pool table, spray guns and their paint or weed killer, dreamstuff, radium for the power
+unit and the ray guns, the heartstone, the hand mirror, the hatch, ruby slippers and things readied by using them.
+Things used on something ask where ("On -"). The tent (and the Rest button, with a tent carried) camps as use_tent does: flat
+ground, no foes or others near, no one dizzy with berries; rest until sunrise or sunset or some hours, heal once in
+six, and dream of the obelisks of book, heart and sword to gain a level and a point of wits, dexterity or strength.
+A shovel digs dirt and ice into holes and piles, fills holes, and loads ore, rocks and
+coal into wheelbarrows and rail cars and out again ("On -", then "To -"); coal in the furnace starts the power (the
+steam, furnaces and lamps). Walking into a wheelbarrow, rail car or drill pushes it ahead (move_obj): barrows and
+drills turn the way they go, rail cars keep to their track. The drill bores into the rock, ore or coal it faces and
+leaves the spoil beside it; while the power runs, the mine's conveyor carries what lies on it east each turn until it
+stops. Stairs and mine and cave mouths take the party where
+map_entrance_tbl says (a rail car at a mine's mouth goes through too), the alien pods once they work; with the
+power on, the mine's doors open for whoever comes near (update_objects_around_party). The dream machine works as
+usecode.lua and dreamworld.lua have it: fit the headgear, power it with radium, sit in it and work its panel, and the
+Avatar dreams alone - empty-handed, the party waiting - from teleporter to teleporter through the dream's stages (Your
+Mother, the minotaur's pitcher shop); a dream quest done (Lowell's mirror, Twain's manuscript, Melies' door) or a
+nightmare ends it, and the Avatar wakes at eight with the party and their things. A companion in the seat dreams
+until dawn. The ruby slippers, clicked thrice, offer the way home, and the
+ending's words follow (scenetxt.lzc); conversations run talk.lua's scripts - fixing the panels, opening the gates at
+Olympus Mons and the dream machine's door, the monster footprints, the end, waking from a dream. A new game begins
+with Freud's interview in the capsule (intro.lua's create_character): a name, father or mother, and the questions
+whose answers set strength, dexterity and intelligence. Not yet: the dream stages Nuvie left unfinished.
+
+Savage Empire's usecode.lua has only a little in use, and that is ported: corn from a corn stalk, clay with a digging
+stick, and a soft pot shaped from clay.
 
 **Combat** follows Ultima VI's rules as Nuvie's Lua has them: the hit roll (dexterity, or strength for clubs and
 maces, against the foe's dexterity), weapon damage less a roll against readied armour, half damage for the creatures
 that take it, poison, experience for evil foes slain, bodies that hold what was carried, ammunition, missile walls,
 and death - the Avatar wakes in Lord British's castle with the fallen raised. Simplified: each fighter acts once a
-turn (not by movement points), monsters that cast fight bare-handed, and thrown weapons are not lost.
+turn (not by movement points), and thrown weapons are not lost. Monsters that know spells (mages, liches, dragons,
+wisps, gazers and the like) carry them as charges and now and then cast one instead of striking, as actor.lua has it.
 
 **Magic** has Magic.cpp's checks - a readied spellbook holding the spell, a level and magic points as high as its
-circle, a reagent of each kind - and magic points come back each hour. 55 of the 80 spells are ported from their Lua:
-the healing, harming and killing spells, the winds and storms, sleep, poison, paralysis, charm, curse, protection,
-invisibility, fear and confusion, Light, Infravision, X-ray and Peer (the land seen from above), locking and
-unlocking, Vanish and Reappear, Conjure, Insect Swarm and Summon, Time Stop, Tremor, Help and Resurrect. The rest
-(fields, Gate Travel, Wizard Eye, Enchant, Clone, Armageddon and the like) cost their reagents but say they are not
-yet ported. Their effects wear off as in the original, poison bites now and then, and the charmed fight for the
-party. Torches can be lit and held, and Light and torches widen the party's
-light at night.
+circle, a reagent of each kind - and magic points come back each hour. All 80 spells are ported from their Lua: the
+healing, harming and killing spells, the winds and storms, sleep, poison, paralysis, charm, curse, protection,
+invisibility, fear and confusion, Light, Infravision, X-ray, Peer and Wizard Eye (the land seen from above), locking
+and unlocking, trapping and untrapping, Detect Magic and Detect Trap, Telekinesis, Vanish and Reappear, Conjure,
+Insect Swarm, Summon, Animate and Clone, the fire, poison, sleep and energy fields and Dispel Field, Web, Replicate,
+Pickpocket and Enchant (choose from a list), Seance (cast on a body), Gate Travel (choose a phase of the moons),
+Negate Magic, Eclipse, Wind Change, Slime, Time Stop, Tremor, Help, Resurrect and Armageddon. Their effects wear off
+as in the original, poison bites now and then, and the charmed fight for the party. Torches can be lit and held, and
+Light and torches widen the party's light at night.
+
+**Harmful ground** (actor_map_dmg): once a turn, whoever stands in a swamp (without swamp boots) or a poison field is
+poisoned, fire and fire fields burn, traps, spikes and force fields cut, sleep fields put to sleep, and webs hold -
+unless they fly, are protected, or are aboard.
+
+**Using things** follows Nuvie's U6UseCode.cpp: doors, ladders and containers; levers and switches that raise and
+drop the portcullises and fields of their doorways; cranks that lower and raise drawbridges; keys and lock picks
+(tap the door or chest; a pick may break); candles, candelabras, braziers, fireplaces and campfires; bells and pull
+chains; wells and cows filling buckets, churns making butter, hives filling honey jars; fishing poles, shovels and
+picks; potions (tap who drinks); all the food and drink; the sextant, clocks and sundials, mirrors, the peer gem,
+instruments, fans and the rubber ducky. A tap on a lever, crank, fire, bell or well uses it where it stands.
+The quest items work too: a rune with its shrine's mantra (typed) lifts the force field before the shrine; a
+moonstone buried in grass or earth raises its moongate there; the quest barrier stops the party until the Avatar
+has the quest; the gargish vocabulary teaches gargish; the vortex cube, at the Codex with both lenses and all eight
+moonstones, ends the game: ending.lua's scenes told in its own words over the ending music, and how long the
+quest took. The crystal ball shows a far place, a spellbook opens the spell list, cannons fire down
+the way they face, and a lit powder keg blows up after a few turns (doors, kegs and anyone near).
+
+**Rest** (the moon button): pass a turn, or camp 1-8 hours - not in towns, near foes or others, or on horseback.
+Each member eats a meal if the party has food, and those fed heal, once in twelve hours. On a ship the crew mends
+the hull instead.
 
 **The Orb of the Moons** works as in Ultima VI once Lord British has told of it: use it from the Avatar's sheet,
 tap a square near the party, and a red moongate opens there that leads where that square says; step in. Blue
@@ -110,8 +184,18 @@ moongates stand at the eight moonstones while either moon is in the sky, and lea
 tap water to sail, and land beside the boat to go ashore. Ships keep to open water and must have room to turn.
 Tap a roaming horse to ride it, and the rider to get down.
 
-Not ported yet: the remaining spells, most of Nuvie's other Lua scripts, balloons, music for Martian Dreams and Savage Empire, the intro and ending, most other usecode, and the silver serpent's long body (it draws as
-one tile).
+**The balloon**: with the balloon plans, a mammoth silk bag, a balloon basket, a cauldron and a rope, use the plans
+to make a balloon; use it to lay it out and fill it, and tap it to board. Aloft, the balloon goes where the wind
+blows - any tap, or a pass, lets it drift a square - over land, water and walls alike. Tap the party to come down
+beside it. The wind (shown by the clock while aboard) changes every half hour or so, as Weather.cpp has it; a fan
+turns it a step round, and Wind Change sets it.
+
+Great creatures take more than one square: ships, dragons (head, wings and tail), hydras (eight tentacles), the
+two-square beasts, and the silver serpent, whose long body follows its head square by square and never turns back
+over its neck (U6Actor's surrounding objects).
+
+Not ported yet: the animated intro and ending pictures; Martian Dreams' and Savage Empire's music (Nuvie has none),
+the rest of their usecode, and Savage Empire's fighting (Nuvie has none to port).
 
 `tests/real.test.ts` runs on your copies put in `web/gamedata/ultima6/`, `savage/` and `martian/` (git-ignored).
 For each it loads a new game, saves and restores it, and talks with everyone who has a conversation (199 people in

@@ -288,8 +288,10 @@ export class MapView {
   private drawObjs(lower: boolean, top: boolean): void {
     const g = this.game;
     const z = g.player.z;
-    for (let vy = 0; vy <= this.rows; vy++) {
-      for (let vx = 0; vx <= this.cols; vx++) {
+    // From the bottom right to the top left, as MapWindow::drawObjSuperBlock does: a thing two squares wide or tall is
+    // based at its bottom right, so what stands on its other squares (a candle on a table) is drawn after it.
+    for (let vy = this.rows + 1; vy >= 0; vy--) {
+      for (let vx = this.cols + 1; vx >= 0; vx--) {
         const l = g.objects.list(wrap(this.curX + vx, z), wrap(this.curY + vy, z), z);
         if (l) for (const o of l) this.drawObj(o, vx, vy, lower, top);
       }
@@ -372,6 +374,7 @@ export class MapView {
     if (z !== 0 && z !== 5) return 0.9;
     const t = g.clock.hour + g.clock.minute / 60;
     const NIGHT = 0.8;
+    if (g.eclipseTurns > 0) return NIGHT;
     if (t >= 6 && t < 19) return 0;
     if (t >= 19 && t < 21) return ((t - 19) / 2) * NIGHT;
     if (t >= 4 && t < 6) return ((6 - t) / 2) * NIGHT;
@@ -533,9 +536,9 @@ export class MapView {
   }
 
   /** The land round the party seen from above, a pixel a square (Peer): its ground, the party a white mark. */
-  overhead(size = 128): HTMLCanvasElement {
+  overhead(size = 128, at?: { x: number; y: number; z: number }): HTMLCanvasElement {
     const g = this.game;
-    const p = g.player;
+    const p = at ?? g.player;
     const avg = this.averages();
     const c = document.createElement('canvas');
     c.width = c.height = size;

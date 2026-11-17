@@ -11,14 +11,16 @@
   --burn: #b4500c;
   --gold: #e8a030;
   --night: #000;
-  --fs: 16px;
-  --lh: 20px;
+  --fs: 12px;
+  --lh: 16px;
   --tap: 48px;
   --edge: 20px;
   --font: ui-monospace, 'Courier New', monospace;
   color-scheme: light;
 }
 :root.game-font { --font: 'NuvieGame', ui-monospace, monospace; }
+/* Large text (Menu), the game's letters at twice their size. */
+:root.big-text { --fs: 16px; --lh: 20px; }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { margin: 0; height: 100%; background: var(--night); color: var(--ink); overflow: hidden; overscroll-behavior: none; }
 body, button, input { font-family: var(--font); font-size: var(--fs); line-height: var(--lh); font-weight: normal; }
@@ -69,7 +71,7 @@ button:disabled { opacity: .45; }
 .log .you { color: #000; }
 .log .you::before { content: '>'; }
 .log .read { border-left: 4px double var(--burn); padding-left: 8px; }
-.log .kw { color: var(--key); }
+.log .kw { color: var(--key); text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; }
 
 .speaker { position: sticky; top: -2px; z-index: 1; background: var(--parch); display: flex; align-items: flex-end; gap: 10px; padding-bottom: 6px; margin-bottom: 8px; border-bottom: 2px solid var(--burn); }
 .speaker canvas { width: 56px; height: 64px; image-rendering: pixelated; border: 2px solid #000; background: #000; }
@@ -139,3 +141,21 @@ button:disabled { opacity: .45; }
 }
 
 .overhead { display: block; width: 100%; max-width: 512px; aspect-ratio: 1; image-rendering: pixelated; border: 2px solid #000; margin: 0 auto; }
+
+.doll { display: block; width: 192px; height: 192px; margin: 6px auto 4px; image-rendering: pixelated; }
+.fold { min-height: 32px; min-width: 40px; padding: 0 6px; }
+
+form.row input { flex: 1; min-width: 0; min-height: 44px; border: 2px solid #000; border-radius: 3px; background: var(--parch); color: var(--ink); padding: 0 8px; user-select: text; -webkit-user-select: text; }
+.choices { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.choices button { min-height: 40px; }
+
+.faces { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 10px; }
+.faces .pickface { padding: 3px; min-height: 0; }
+.faces .pickface canvas { width: 100%; image-rendering: pixelated; display: block; }
+.faces .pickface.on, .row button.on { outline: 3px solid var(--key); outline-offset: -3px; }
+label.field { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
+label.field input { min-height: 40px; border: 2px solid #000; border-radius: 3px; background: var(--parch); color: var(--ink); padding: 0 8px; font: inherit; }
+.answers { display: flex; flex-direction: column; gap: 6px; }
+.answers button { text-align: left; padding: 8px; min-height: 44px; white-space: normal; }
+.sheet p.speech { color: var(--key); }
+.answers.row { flex-direction: row; }

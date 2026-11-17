@@ -8,7 +8,11 @@ import { Game, type SaveState } from '../game/game.ts';
 import { invWeight } from '../game/inventory.ts';
 import type { Obj } from '../game/objects.ts';
 import { OBJ } from '../game/u6tables.ts';
+import { USED_IN_PLACE } from '../game/usecode.ts';
+import { MD_IN_PLACE } from '../game/mdusecode.ts';
 import { REAGENTS, reagentCounts, reagentNames, words, type Spell } from '../game/magic.ts';
+import { Gypsy } from './gypsy.ts';
+import { interview, type Hero, type Step } from './freud.ts';
 import { MapView } from './mapview.ts';
 import { haveIcons } from './theme.ts';
 import { Music } from '../audio/music.ts';
@@ -34,7 +38,7 @@ const esc = (s: string): string => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '
 /** Things a tap uses rather than walks onto. */
 const USABLE: ReadonlySet<number> = new Set([
   OBJ.OAKEN_DOOR, OBJ.WINDOWED_DOOR, OBJ.CEDAR_DOOR, OBJ.STEEL_DOOR, OBJ.LADDER, OBJ.CAVE, OBJ.HOLE, OBJ.SIGN,
-  OBJ.SIGN_ARROW, OBJ.GRAVE, OBJ.CHEST, OBJ.BARREL, OBJ.CRATE, OBJ.DRAWER, OBJ.BOOK, OBJ.SCROLL, 412, 414, 415,
+  OBJ.SIGN_ARROW, OBJ.GRAVE, OBJ.CHEST, OBJ.BARREL, OBJ.CRATE, OBJ.DRAWER, OBJ.BOOK, OBJ.SCROLL, 412, 414, 415, 420, 423,
 ]);
 
 export interface AppHooks {
@@ -59,6 +63,13 @@ export class App {
   /** A spell chosen in the book, waiting for where. */
   private pending: { caster: Actor; spell: Spell } | null = null;
   private wasTalking = false;
+  /** Whether the log follows its newest line (until the player scrolls back). */
+  private stick = true;
+  private logLength = 0;
+  /** Where in the log the conversation now going began. */
+  private talkFrom = 0;
+  /** The container whose contents are open over the game. */
+  private shownContainer: Obj | null = null;
   private readonly music: Music;
   private readonly sfx: Sfx;
   private mode: Mode = null;
@@ -96,6 +107,11 @@ export class App {
     side.append(divider, pane, this.foot);
     this.root.append(wrap, side);
     host.replaceChildren(this.root);
+    this.body.addEventListener('scroll', () => {
+      this.stick = this.body.scrollTop + this.body.clientHeight >= this.body.scrollHeight - 6;
+    });
+    // The pane changes size (a conversation shrinks the map): the newest line stays in view.
+    new ResizeObserver(() => this.toBottom()).observe(this.body);
 
     // A tap acts (tap()); a finger held down walks the party towards it while it stays, sliding to steer.
     const at = (e: PointerEvent): { x: number; y: number } => {
@@ -164,6 +180,154 @@ export class App {
     }, 150));
     this.layout();
     this.changed();
+    if (game.fresh && game.kind === 'u6') this.creation();
+    if (game.fresh && game.kind === 'md') this.freud();
+  }
+
+  // ---- a new Avatar (intro.lua's create_character) ----
+
+  private creation(): void {
+    const g = this.game;
+    let name = '';
+    let female = false;
+    let face = 0;
+    this.open('A new Avatar', (body) => {
+      body.append(el('p', '', 'In a gypsy\'s wagon at a country fair, a woman with a crystal looks up as thou enterest.'));
+      const input = el('input');
+      input.maxLength = 13;
+      input.placeholder = 'Avatar';
+      input.autocomplete = 'off';
+      input.addEventListener('input', () => (name = input.value));
+      const named = el('label', 'field');
+      named.append(el('span', '', 'By what name shalt thou be called?'), input);
+      const sex = el('div', 'row');
+      const faces = el('div', 'faces');
+      const drawFaces = (): void => {
+        faces.replaceChildren();
+        for (let i = 0; i < 6; i++) {
+          const shape = g.avatarFace((female ? 0 : 6) + i);
+          if (!shape) continue;
+          const b = btn('', () => {
+            face = i;
+            drawFaces();
+          }, i === face ? 'pickface on' : 'pickface');
+          b.setAttribute('aria-label', `Face ${i + 1}`);
+          b.append(this.view.portraitImage(shape));
+          faces.append(b);
+        }
+      };
+      const male = btn('Male', () => {
+        female = false;
+        male.classList.add('on');
+        fem.classList.remove('on');
+        drawFaces();
+      }, 'on');
+      const fem = btn('Female', () => {
+        female = true;
+        fem.classList.add('on');
+        male.classList.remove('on');
+        drawFaces();
+      });
+      sex.append(male, fem);
+      drawFaces();
+      body.append(named, el('p', 'small', 'Art thou a man or a woman?'), sex, el('p', 'small', 'Which face is thine?'), faces);
+      const go = el('div', 'row');
+      go.append(btn('Sit before the gypsy', () => this.gypsy(name, female, face), 'primary'));
+      body.append(go);
+    });
+  }
+
+  /** Martian Dreams' new Avatar: Freud's interview aboard the capsule (intro.lua's create_character). */
+  private freud(): void {
+    const g = this.game;
+    const lines = g.sceneText('scenetxt.lzc', 5);
+    if (lines.length < 60) return;
+    const it = interview(lines, (lo, hi) => lo + g.random(hi - lo + 1));
+    const show = (r: IteratorResult<Step, Hero>): void => {
+      if (r.done) {
+        g.createHero({ ...r.value, face: 0 });
+        this.close();
+        return;
+      }
+      const step = r.value;
+      this.open('Sigmund Freud', (body) => {
+        body.append(el('p', step.freud ? 'speech' : '', step.text));
+        const row = el('div', step.ask === 'go' ? 'row' : 'answers');
+        if (step.ask === 'name') {
+          const form = el('form');
+          form.className = 'row';
+          const input = el('input');
+          input.maxLength = 13;
+          input.placeholder = 'Your name';
+          const ok = btn('Answer', () => {}, 'primary');
+          ok.type = 'submit';
+          form.append(input, ok);
+          form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            if (input.value.trim()) show(it.next(input.value));
+          });
+          body.append(form);
+          setTimeout(() => input.focus(), 50);
+          return;
+        }
+        if (step.ask === 'go') row.append(btn('Continue', () => show(it.next('')), 'primary'));
+        else for (const k of step.ask === 'ab' ? ['a', 'b'] : ['a', 'b', 'c']) row.append(btn(k.toUpperCase(), () => show(it.next(k))));
+        body.append(row);
+      });
+    };
+    show(it.next(''));
+  }
+
+  private gypsy(name: string, female: boolean, face: number): void {
+    const who = name.trim() || 'Avatar';
+    const contest = new Gypsy();
+    const ask = (): void => {
+      if (contest.done) return finish();
+      const q = contest.question();
+      this.open(`The gypsy asks (${contest.asked + 1} of 7)`, (body) => {
+        body.append(el('p', '', `"${q.text}`));
+        const pick = (w: 'a' | 'b'): void => {
+          contest.answer(w);
+          this.sfx.play('success');
+          ask();
+        };
+        const list = el('div', 'answers');
+        list.append(btn(`A) ${q.a}`, () => pick('a')), btn(`B) ${q.b}`, () => pick('b')));
+        body.append(list);
+      });
+    };
+    const finish = (): void => {
+      this.open('The gypsy', (body) => {
+        body.append(
+          el('p', '', `"The path of the Avatar lies beneath thy feet, worthy ${who}," the gypsy intones. With a mysterious smile, she passes you the flask of shimmering liquids. "Drink of these waters and go forth among our people, who shall receive thee in joy!"`),
+          el('p', 'small', `Strength ${contest.str}, dexterity ${contest.dex}, intelligence ${contest.int}.`),
+        );
+        const row = el('div', 'row');
+        row.append(btn('Drink', () => {
+          this.game.createHero({ name: who, female, face, str: contest.str, dex: contest.dex, int: contest.int });
+          this.open('Britannia', (b) => {
+            b.append(
+              el('p', '', 'As you drink from the flask, vertigo overwhelms you. A soothing mist obscures the gypsy\'s face, and you sink without fear into an untroubled sleep.'),
+              el('p', '', 'You wake in a different time, upon another world\'s shore. Though the Avatar\'s quests bring you both triumph and tragedy, never do you stray from the path of the Eight Virtues.'),
+              el('p', '', 'Finally, tempered by your struggles against the enemies of Virtue, you are proven ready to answer the epic challenge of Ultima VI!'),
+            );
+            const r = el('div', 'row');
+            r.append(btn('Begin', () => this.close(), 'primary'));
+            b.append(r);
+          });
+        }, 'primary'));
+        body.append(row);
+      });
+    };
+    this.open('The gypsy', (body) => {
+      body.append(
+        el('p', '', '"At last thou hast come to fulfill thy destiny," the gypsy says. She smiles, as if in great relief. "Sit before me now, and I shall pour the light of Virtue into the shadows of thy future."'),
+        el('p', '', 'On a wooden table eight bottles stand, a rainbow of bubbling liquids. "Behold the Virtues of the Avatar," the woman says. "Let us begin the casting!"'),
+      );
+      const row = el('div', 'row');
+      row.append(btn('Begin', ask, 'primary'));
+      body.append(row);
+    });
   }
 
   dispose: () => void;
@@ -232,6 +396,11 @@ export class App {
       const door = g.objects.list(sq.x, sq.y, p.z)?.some((d) => g.objects.isDoor(d) && g.objects.isShut(d));
       if (a && !a.inParty) then = g.combat.hostile(a) ? 'attack' : a.objN === 430 && a.id >= 203 ? 'use' : 'talk';
       else if (door || (o && USABLE.has(o.objN) && !g.map.isPassable(sq.x, sq.y, p.z)) || (o && (o.objN === OBJ.LADDER || o.objN === OBJ.CAVE || o.objN === OBJ.HOLE))) then = 'use';
+      // Levers, cranks, fires, bells, wells and the like are used where they stand.
+      else if (g.kind === 'u6' && (g.objects.list(sq.x, sq.y, p.z) ?? []).some((n) => USED_IN_PLACE.has(n.objN) && !(n.status & 0x02))) then = 'use';
+      else if (g.kind === 'md' && (g.objects.list(sq.x, sq.y, p.z) ?? []).some((n) => MD_IN_PLACE.has(n.objN) && !(n.status & 0x02))) then = 'use';
+      else if (g.kind === 'se' && (g.objects.list(sq.x, sq.y, p.z) ?? []).some((n) => n.objN === 61)) then = 'use'; // a corn stalk
+      else if (a && a.objN === 428 && g.kind === 'u6') then = 'use';
     }
     const foe = then === 'attack' ? g.actors.at(sq.x, sq.y, p.z) ?? undefined : undefined;
     this.walk = { ...sq, then, foe };
@@ -367,9 +536,26 @@ export class App {
   private changed(): void {
     const g = this.game;
     this.music?.update();
+    if (g.openContainer && g.openContainer !== this.shownContainer && !g.converse) this.containerSheet(g.openContainer);
+    if (g.askText && !this.sheet) this.textSheet();
+    if (g.askChoice && !this.sheet) this.choiceSheet();
+    if (g.openBook) {
+      g.openBook = false;
+      this.spellbook();
+    }
+    if (g.scry) {
+      const at = g.scry;
+      g.scry = null;
+      this.open('Crystal ball', (body) => {
+        const map = this.view.overhead(128, at);
+        map.className = 'overhead';
+        body.append(map, el('p', 'small', 'A place far off, as the crystal ball shows it.'));
+      });
+    }
+    if (g.won && !this.sheet) this.ending();
     if (g.peer) {
       g.peer = false;
-      this.open('Peer', (body) => {
+      this.open(g.kind === 'u6' ? 'Peer' : 'Map', (body) => {
         const map = this.view.overhead(128);
         map.className = 'overhead';
         body.append(map, el('p', 'small', `The land about, from above: ${g.where()}.`));
@@ -382,6 +568,12 @@ export class App {
     }
     this.view.render();
     this.status.textContent = `${String(g.clock.hour).padStart(2, '0')}:${String(g.clock.minute).padStart(2, '0')}`;
+    // Afloat or aloft, the wind matters: shown as the way it blows from.
+    if (g.vehicle) {
+      const [dx, dy] = g.wind;
+      const from = (dy > 0 ? 'N' : dy < 0 ? 'S' : '') + (dx > 0 ? 'W' : dx < 0 ? 'E' : '');
+      this.status.textContent += ` ${from ? `Wind ${from}` : 'Calm'}`;
+    }
     // While someone talks, or a container stands open, the pane shows the log whatever was chosen.
     const pane: Pane = g.converse ? 'log' : this.pane;
     this.face.hidden = !(g.converse && g.speaker);
@@ -395,6 +587,7 @@ export class App {
     }
     if (this.root.classList.toggle('talking', !!g.converse) !== this.wasTalking) {
       this.wasTalking = !this.wasTalking;
+      if (this.wasTalking) this.talkFrom = Math.max(0, g.log.length - 3);
       requestAnimationFrame(() => this.layout());
     }
     this.tabLog.classList.toggle('on', pane === 'log');
@@ -416,23 +609,43 @@ export class App {
   private drawLog(): void {
     const g = this.game;
     const log = el('div', 'log');
-    for (const line of g.log.slice(-60)) {
+    // In a conversation, the words its speaker answers to are marked, and a tap asks about them.
+    const c = g.converse;
+    const keys = c ? g.lib.keywords(g.lib.scriptNum(c.npc)).filter((k) => k !== '*' && k.length > 1) : [];
+    const fits = (w: string): boolean => {
+      const lw = w.toLowerCase().replace(/'s$/, '');
+      return lw.length >= 3 && keys.some((k) => k.length >= Math.min(4, lw.length) && lw.slice(0, k.length) === k);
+    };
+    g.log.slice(-60).forEach((line, i, shown) => {
       const p = el('p', line.kind);
       const text = line.text.replace(/^\n+|\n+$/g, '');
-      if (!text) continue;
-      p.innerHTML = line.kind === 'npc' ? esc(text).replace(/@([A-Za-z']+)/g, '<span class="kw">$1</span>') : esc(text);
+      if (!text) return;
+      const current = c && g.log.length - shown.length + i >= this.talkFrom;
+      if (line.kind === 'npc') {
+        p.innerHTML = esc(text).replace(/(@?)([A-Za-z]+(?:'[A-Za-z]+)*)/g, (m, at: string, w: string) =>
+          at || (current && fits(w)) ? `<span class="kw" data-say="${w.toLowerCase().replace(/'s$/, '')}">${w}</span>` : m,
+        );
+      } else p.textContent = text;
       log.append(p);
-    }
-    const c = g.openContainer;
-    if (c && !g.converse) {
-      for (const o of c.container ?? []) {
-        const row = this.itemRow(o);
-        row.append(btn('Take', () => g.get(0, 0, o)));
-        log.append(row);
-      }
-    }
+    });
+    log.addEventListener('click', (e) => {
+      const say = (e.target as HTMLElement).dataset?.say;
+      if (say && g.asking()?.type === 'keyword') g.reply(say);
+    });
+    const grew = g.log.length !== this.logLength;
+    this.logLength = g.log.length;
     this.body.replaceChildren(log);
+    if (grew) this.stick = true;
+    this.toBottom();
+  }
+
+  /** Keep the newest lines in view, unless the player has scrolled back to read. */
+  private toBottom(): void {
+    if (!this.stick) return;
     this.body.scrollTop = this.body.scrollHeight;
+    requestAnimationFrame(() => {
+      if (this.stick) this.body.scrollTop = this.body.scrollHeight;
+    });
   }
 
   private itemRow(o: Obj, sub = false): HTMLElement {
@@ -492,9 +705,13 @@ export class App {
         icon(btn(label, () => this.setMode(this.mode === mode ? null : mode), this.mode === mode ? 'on' : ''), tile);
       bar.append(
         m('Attack', 'attack', 400),
-        icon(btn('Cast', () => this.spellbook()), 401),
+        // Martian Dreams and Savage Empire have no spells: the land about, seen from above, instead.
+        g.kind === 'u6' ? icon(btn('Cast', () => this.spellbook()), 401) : btn('Map', () => {
+          g.peer = true;
+          this.changed();
+        }),
         m('Look', 'look', 403), m('Talk', 'talk', 402), m('Use', 'use', 407), m('Get', 'get', 404),
-        icon(btn('Pass', () => g.pass()), 408), icon(btn('Notes', () => this.journal()), 409),
+        icon(btn('Rest', () => this.restSheet()), 408), icon(btn('Notes', () => this.journal()), 409),
       );
       this.foot.replaceChildren(bar);
       return;
@@ -528,6 +745,9 @@ export class App {
 
   private open(title: string, fill: (body: HTMLElement) => void): void {
     this.sheet?.remove();
+    const f = this.onClose;
+    this.onClose = null;
+    f?.();
     const sheet = el('div', 'sheet');
     const box = el('div', 'paper');
     const head = el('header');
@@ -541,14 +761,113 @@ export class App {
     this.sheet = sheet;
   }
 
+  /** Run once when the sheet now open closes. */
+  private onClose: (() => void) | null = null;
+
   private close(): void {
     this.sheet?.remove();
     this.sheet = null;
+    const f = this.onClose;
+    this.onClose = null;
+    f?.();
     this.changed();
+  }
+
+  /**
+   * The paper doll (DollWidget, the original look): the body from the game's own tiles (368 to 371), and round it a
+   * ring for each place a thing is worn or held - head, neck, body, both arms, both hands for rings, feet - with what
+   * is readied there. A ring held by a two-handed weapon is barred. Tapping a place picks what is there.
+   */
+  private doll(a: Actor, pick: (o: Obj) => void): HTMLCanvasElement | null {
+    const g = this.game;
+    if (g.kind !== 'u6' || !haveIcons) return null;
+    const S = 16;
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    c.className = 'doll';
+    const ctx = c.getContext('2d')!;
+    const put = (tile: number, x: number, y: number): void => ctx.drawImage(this.view.tileImage(tile), x, y);
+    for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) put(368 + i * 2 + j, S + j * S, S + i * S);
+    // Where each place is (DollWidget::display_doll).
+    const at: Record<string, [number, number]> = {
+      head: [24, 0], neck: [0, 8], body: [48, 8], arm: [0, 24], arm2: [48, 24], hand: [0, 40], hand2: [48, 40], foot: [24, 48],
+    };
+    const worn: Record<string, Obj | 'barred'> = {};
+    for (const o of g.objects.inventories[a.id] ?? []) {
+      if (o.loc !== 'readied') continue;
+      const slot = g.readySlot(o);
+      if (slot === 0) worn.head = o;
+      else if (slot === 1) worn.neck = o;
+      else if (slot === 2) worn.body = o;
+      else if (slot === 7) worn.foot = o;
+      else if (slot === 4) {
+        worn.arm = o;
+        worn.arm2 = 'barred';
+      } else if (slot === 3) {
+        if (!worn.arm) worn.arm = o;
+        else worn.arm2 = o;
+      } else if (slot === 5) {
+        if (!worn.hand) worn.hand = o;
+        else worn.hand2 = o;
+      }
+    }
+    for (const [k, [x, y]] of Object.entries(at)) {
+      const w = worn[k];
+      if (w === 'barred') put(389, x, y);
+      else if (w) put(g.objects.tileNum(w), x, y);
+      else put(410, x, y);
+    }
+    c.addEventListener('click', (e) => {
+      const r = c.getBoundingClientRect();
+      const x = ((e.clientX - r.left) / r.width) * 64;
+      const y = ((e.clientY - r.top) / r.height) * 64;
+      for (const [k, [sx, sy]] of Object.entries(at)) {
+        const w = worn[k];
+        if (x >= sx && x < sx + S && y >= sy && y < sy + S && w && w !== 'barred') pick(w);
+      }
+    });
+    return c;
+  }
+
+  /** What a container in the world holds, over the game, each thing to take or all of it. */
+  private containerSheet(c: Obj): void {
+    const g = this.game;
+    this.shownContainer = c;
+    const title = g.objects.look(c).replace(/^(a|an|the) /, '');
+    this.open(title[0].toUpperCase() + title.slice(1), (body) => {
+      const draw = (): void => {
+        body.replaceChildren();
+        const inside = c.container ?? [];
+        if (!inside.length) {
+          body.append(el('p', '', 'Empty.'));
+          return;
+        }
+        for (const o of [...inside]) {
+          const row = this.itemRow(o);
+          row.append(btn('Take', () => {
+            g.get(0, 0, o);
+            draw();
+          }));
+          body.append(row);
+        }
+        const all = el('div', 'row');
+        all.append(btn('Take all', () => {
+          for (const o of [...inside]) g.get(0, 0, o);
+          draw();
+        }, 'primary'));
+        body.append(all);
+      };
+      draw();
+    });
+    this.onClose = () => {
+      g.openContainer = null;
+      this.shownContainer = null;
+    };
   }
 
   private character(a: Actor, name: string): void {
     const g = this.game;
+    const expanded = new Set<Obj>();
     this.open(name, (body) => {
       const draw = (picked: Obj | null): void => {
         body.replaceChildren();
@@ -562,12 +881,27 @@ export class App {
           d.append(el('b', '', String(v)), el('span', 'small', k));
           stats.append(d);
         }
-        body.append(top, stats);
+        body.append(top);
+        const doll = this.doll(a, (o) => draw(picked === o ? null : o));
+        if (doll) body.append(doll);
+        body.append(stats);
         const inv = g.objects.inventories[a.id];
         if (inv.length === 0) body.append(el('p', 'small', 'Carrying nothing.'));
-        const add = (o: Obj, sub: boolean): void => {
-          const row = this.itemRow(o, sub);
+        const add = (o: Obj, depth: number): void => {
+          const row = this.itemRow(o, depth > 0);
+          if (depth > 1) row.style.marginLeft = `${depth * 24}px`;
           row.addEventListener('click', () => draw(picked === o ? null : o));
+          // A container is shut until opened here.
+          if (o.container?.length) {
+            const open = expanded.has(o);
+            const t = btn(open ? '-' : `+${o.container.length}`, () => {
+              if (open) expanded.delete(o);
+              else expanded.add(o);
+              draw(picked);
+            }, 'fold');
+            t.addEventListener('click', (e) => e.stopPropagation());
+            row.append(t);
+          }
           body.append(row);
           if (picked === o) {
             const acts = el('div', 'row');
@@ -581,12 +915,185 @@ export class App {
             for (const m of g.party) if (m.actor !== a) acts.append(btn(`Give to ${m.name}`, done(() => g.give(o, m.actor))));
             body.append(acts);
           }
-          if (o.container) for (const c of o.container) add(c, true);
+          if (o.container && expanded.has(o)) for (const c of o.container) add(c, depth + 1);
         };
-        for (const o of inv) add(o, false);
+        for (const o of inv) add(o, 0);
       };
       draw(null);
     });
+  }
+
+  /** Pass a turn, or rest some hours (the original asks how many). */
+  private restSheet(): void {
+    const g = this.game;
+    this.open('Rest', (body) => {
+      const row = el('div', 'row');
+      row.append(btn('Pass a turn', () => {
+        this.close();
+        g.pass();
+      }));
+      body.append(row);
+      if (g.kind === 'md') {
+        // Martian Dreams camps in a tent (use_tent).
+        const tent = g.party.map((m) => g.objects.inventories[m.actor.id].find((o) => o.objN === 106)).find(Boolean);
+        body.append(el('p', 'small', tent ? 'Pitch the tent and sleep, away from foes and others.' : 'The party has no tent to sleep in.'));
+        if (tent) {
+          const r = el('div', 'row');
+          r.append(btn('Pitch the tent', () => {
+            this.close();
+            g.mdUse.tent(null);
+            this.changed();
+          }, 'primary'));
+          body.append(r);
+        }
+        return;
+      }
+      body.append(el('p', 'small', 'Camp and sleep - away from towns, foes and others. Those with food heal, once in twelve hours.'));
+      const hours = el('div', 'row');
+      for (const h of [1, 2, 4, 8]) {
+        hours.append(btn(`${h} hour${h > 1 ? 's' : ''}`, () => {
+          this.close();
+          g.rest(h);
+        }));
+      }
+      body.append(hours);
+    });
+  }
+
+  /** The game asks for words: a mantra, a bearing. */
+  private textSheet(): void {
+    const g = this.game;
+    const ask = g.askText;
+    if (!ask) return;
+    this.open(ask.label.replace(/:$/, ''), (body) => {
+      const form = el('form');
+      form.className = 'row';
+      const input = el('input');
+      input.autocapitalize = 'characters';
+      input.autocomplete = 'off';
+      input.placeholder = ask.label;
+      const ok = btn('Say', () => {}, 'primary');
+      ok.type = 'submit';
+      form.append(input, ok);
+      form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        this.onClose = null;
+        this.sheet?.remove();
+        this.sheet = null;
+        g.say('you', input.value);
+        ask.then(input.value);
+        this.changed();
+      });
+      body.append(form);
+      setTimeout(() => input.focus(), 50);
+    });
+    this.onClose = () => {
+      if (g.askText === ask) g.askText = null;
+    };
+  }
+
+  /** The game asks for one of a list. */
+  private choiceSheet(): void {
+    const g = this.game;
+    const ask = g.askChoice;
+    if (!ask) return;
+    this.open(ask.label, (body) => {
+      const list = el('div', 'choices');
+      ask.options.forEach((name, i) => {
+        list.append(btn(name, () => {
+          this.onClose = null;
+          this.sheet?.remove();
+          this.sheet = null;
+          g.say('you', name);
+          ask.then(i);
+          this.changed();
+        }));
+      });
+      body.append(list);
+    });
+    this.onClose = () => {
+      if (g.askChoice === ask) g.askChoice = null;
+    };
+  }
+
+  /** The game is won: ending.lua's scenes, as pages of its words. */
+  private ending(): void {
+    const g = this.game;
+    if (g.kind === 'md') return this.mdEnding();
+    const name = g.playerName();
+    const pages = [
+      'Tremors shake the shrine as the Vortex Cube draws the Codex into the Ethereal Void. A glowing portal springs from the floor!',
+      'From its crimson depths Lord British emerges, trailed by the mage Nystul. Anguish and disbelief prevail on the royal seer\'s face, but Lord British directs his stony gaze at you and speaks as if to a wayward child.',
+      '"Thou didst have just cause to burgle our Codex, I trust," His Majesty says. "But for Virtue\'s sake... WHAT HAST THOU DONE WITH IT?"',
+      'You pick up the concave lens and pass it to the King. "Was the book ever truly ours, Your Majesty? Was it written for Britannia alone? Thou dost no longer hold the Codex, but is its wisdom indeed lost? Look into the Vortex, and let the Codex answer for itself!"',
+      'As Lord British holds the glass before the wall, the Codex of Ultimate Wisdom wavers into view against a myriad of swimming stars! Yet the book remains closed.',
+      'And waves of heat shimmer in the air, heralding the birth of another red gate!',
+      'King Draxinusom of the Gargoyles strides forward, flanked by a small army of wingless attendants. Like Lord British, he seems to suppress his rage only through a heroic effort of will. His scaly hand grasps your shoulder, and your Amulet of Submission grows very warm. "Thy time hath come, Thief," he says.',
+      'Quickly you reach down to seize the convex lens... and you press it into the hand of the towering Gargoyle king, meeting his sunken eyes. "Join my Lord in his search for peace, I beg thee."',
+      'At your urging, King Draxinusom reluctantly raises his lens to catch the light. As Lord British holds up his own lens, every eye in the room, human and Gargoyle alike, fixes upon the image of the Codex which shines upon the wall.',
+      'The ancient book opens. Both kings gaze upon its pages in spellbound silence, as the eloquence of Ultimate Wisdom is revealed in the tongues of each lord\'s domain. You, too, can read the answers the Codex gives...',
+      '...and when its wisdom is gleaned, when Lord British and King Draxinusom turn to each other as friends, hating no longer, fearing no more, you know that your mission in Britannia has ended at last.',
+    ];
+    // How long the quest took (ending.lua: a year of 365 days, a month of 30, from 4 July 161).
+    const c = g.clock;
+    const time = Math.max(0, c.year * 365 + c.month * 30 + c.day - (161 * 365 + 7 * 30 + 4));
+    const years = Math.floor(time / 365);
+    const months = Math.floor((time - years * 365) / 30);
+    const days = time - years * 365 - months * 30;
+    const count = (n: number, w: string): string => `${n} ${w}${n === 1 ? '' : 's'}`;
+    const spent = [years && count(years, 'year'), months && count(months, 'month'), (days || (!years && !months)) && count(days, 'day')].filter(Boolean) as string[];
+    const took = spent.length > 1 ? `${spent.slice(0, -1).join(', ')} and ${spent.at(-1)}` : spent[0];
+    this.music.theme = 'end';
+    this.music.update();
+    const page = (i: number): void => {
+      this.open(i < pages.length ? 'The Codex' : 'Congratulations', (body) => {
+        if (i < pages.length) body.append(el('p', '', pages[i]));
+        else {
+          body.append(
+            el('p', '', `Thou hast completed Ultima VI: The False Prophet, in ${took}.`),
+            el('p', '', `Well done, ${name}.`),
+            el('p', 'small', 'Thou mayest go on in Britannia as long as thou wilt.'),
+          );
+        }
+        const row = el('div', 'row');
+        row.append(btn(i < pages.length ? 'Continue' : 'Close', () => {
+          if (i < pages.length) {
+            this.onClose = null; // the next page, not the end of it
+            page(i + 1);
+          } else this.close();
+        }, 'primary'));
+        body.append(row);
+      });
+      this.onClose = () => {
+        g.won = false;
+        this.music.theme = null;
+        this.music.update();
+      };
+    };
+    page(0);
+  }
+
+  /** Martian Dreams' ending (ending.lua): its lines from scenetxt.lzc, a page each. */
+  private mdEnding(): void {
+    const g = this.game;
+    const pages = g.sceneText('scenetxt.lzc', 3).filter((l) => l.trim());
+    const page = (i: number): void => {
+      this.open(i < pages.length ? 'Home' : 'The end', (body) => {
+        body.append(el('p', '', i < pages.length ? pages[i] : `Well done, ${g.playerName()}. Thou mayest go on exploring Mars.`));
+        const row = el('div', 'row');
+        row.append(btn(i < pages.length ? 'Continue' : 'Close', () => {
+          if (i < pages.length) {
+            this.onClose = null;
+            page(i + 1);
+          } else this.close();
+        }, 'primary'));
+        body.append(row);
+      });
+      this.onClose = () => {
+        g.won = false;
+      };
+    };
+    page(0);
   }
 
   /** The spellbook: who casts, their magic and reagents, and the spells in their book by circle. */
@@ -702,6 +1209,17 @@ export class App {
         body.append(row);
       };
       item('Journal', () => this.journal());
+      const big = document.documentElement.classList.contains('big-text');
+      item(big ? 'Text: large' : 'Text: small', () => {
+        document.documentElement.classList.toggle('big-text', !big);
+        try {
+          localStorage.setItem('nuvie.text', big ? 'small' : 'large');
+        } catch {
+          // Not kept.
+        }
+        this.close();
+        this.layout();
+      });
       item(this.sfx.enabled ? 'Sounds: on' : 'Sounds: off', () => {
         this.sfx.enabled = !this.sfx.enabled;
         try {

@@ -8,6 +8,11 @@ import { App } from './ui/app.ts';
 import { installTheme } from './ui/theme.ts';
 
 const host = document.getElementById('app')!;
+try {
+  if (localStorage.getItem('nuvie.text') === 'large') document.documentElement.classList.add('big-text');
+} catch {
+  // Small text.
+}
 let app: App | null = null;
 
 type Kind = 'demo' | 'game';
@@ -50,7 +55,7 @@ function intro(error = ''): void {
     <label class="pick">Choose files or a .zip<input id="files" type="file" multiple /></label>
     <button id="demo" type="button">Try the demo world</button>
     <p class="err" id="err"></p>
-    <p class="small">The demo is a small island made for this port, to try the controls with. Ultima 6 is the game supported so far: walking, looking, talking, doors, ladders, containers and reading work; combat and magic are not ported yet.</p>`;
+    <p class="small">The demo is a small island made for this port, to try the controls with. Ultima 6 plays from the gypsy's questions to the Codex: talking, combat, magic, boats, the balloon and the quests. Savage Empire and Martian Dreams can be explored and talked through; their combat is not ported yet.</p>`;
   host.replaceChildren(box);
   const err = box.querySelector<HTMLElement>('#err')!;
   err.textContent = error;
