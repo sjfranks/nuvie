@@ -5,6 +5,7 @@ import { buildDemo } from './demo/demo.ts';
 import { kvDelete, kvGet, kvSet, readPicked, type GameFiles } from './files/gamefiles.ts';
 import { Game, type SaveState } from './game/game.ts';
 import { App } from './ui/app.ts';
+import { installTheme } from './ui/theme.ts';
 
 const host = document.getElementById('app')!;
 let app: App | null = null;
@@ -24,6 +25,7 @@ async function start(files: GameFiles, kind: Kind, fresh = false): Promise<void>
     game = new Game(files);
   }
   app?.dispose();
+  await installTheme(files);
   app = new App(host, game, {
     save: (s) => void kvSet(saveKey, s).catch(() => {}),
     leave: (forget) => {
@@ -39,7 +41,7 @@ async function start(files: GameFiles, kind: Kind, fresh = false): Promise<void>
 
 function intro(error = ''): void {
   const box = document.createElement('div');
-  box.className = 'intro';
+  box.className = 'intro paper';
   box.innerHTML = `
     <h1>Nuvie Web</h1>
     <p>The Nuvie engine, ported to TypeScript for a phone held upright (or sideways): the map above, the log and the party below, and conversations by menu, with a journal of what was said.</p>

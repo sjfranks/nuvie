@@ -528,3 +528,7 @@ export const ACTOR_TYPES: readonly (readonly (number | string)[])[] = [
   [91, '{0'],
   [0, '{0'],
 ];
+
+/** What stacks in Savage Empire and Martian Dreams (ObjManager::is_stackable). */
+export const STACKABLE_SE: readonly number[] = [10, 26, 27, 36, 41, 44, 45, 47, 48, 54, 55, 56, 69, 70, 72, 73, 74, 93, 102, 103, 104, 105, 108, 109, 110, 115, 120, 123, 129, 130, 132, 133, 134, 137, 139, 140, 180, 191, 192, 204, 206, 208, 210, 211, 214, 240];
+export const STACKABLE_MD: readonly number[] = [57, 58, 59, 60, 63, 64, 91, 93, 92, 107, 131, 73, 74, 75, 77, 331, 24, 132];

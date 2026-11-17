@@ -1,6 +1,7 @@
 # Nuvie Web
 
-A TypeScript port of the Nuvie engine, for a phone held upright (or sideways) and for any browser. Like Nuvie, it
+A TypeScript port of the Nuvie engine - Ultima VI, Martian Dreams and The Savage Empire - for a phone held upright
+(or sideways) and for any browser. Like Nuvie, it
 plays **your own copy** of the game and ships none of it: on the first screen, choose the game's folder, its files or
 a .zip, and they are kept in the browser (IndexedDB) and never leave the device.
 
@@ -15,6 +16,17 @@ npm test         # the engine's tests, on the demo world
 npm run build    # a static site in dist/
 ```
 
+## The look
+
+With your copy of the game the interface takes its look from the game's own files at run time: its 8-pixel typeface
+(`u6.ch`, made into a font) at one size throughout, its parchment and burnt edge (`paper.bmp`, cut into frames for the
+map, the pane and every sheet), its scroll's ink and red keywords, and its command icons on the buttons. None of it
+is in this repository; the demo world uses the same colours with a plain frame.
+
+**Night** is a modern take, not the original's black that closes in square by square: a soft blue dusk over the map,
+deeper underground, with smooth pools of light round the party, and warm firelight from lamps, braziers and torches.
+Sunset and sunrise glow orange.
+
 ## The screen
 
 - **Upright**: the map fills the width at the top and takes the taps; under it one pane, the **Log** or the
@@ -23,8 +35,10 @@ npm run build    # a static site in dist/
 - **Tap to walk**: a tap walks there, round what is in the way, the way marked as it goes. A tap on a person walks up
   and talks; on a door, ladder, sign or chest, walks up and uses it. Walking into a shut door opens it. Tap the party
   to pass a turn or pick up what is underfoot.
-- **Look, Talk, Use, Get**: choose one, then tap where. **Pass** lets a turn go by.
-- **Talking**: the speaker's face and name head the log, and the foot becomes a menu of what can be said: Name and
+- **Look, Talk, Use, Get**: choose one (the game's own icons), then tap where. **Pass** lets a turn go by; the
+  last button opens the journal.
+- **Talking**: the speaker's face shows over the map (which shrinks to give the words room), and the foot becomes a
+  menu of what can be said: Name and
   Job, the words this person has dropped (shown in gold in what they say), Bye - or Yes and No where that is the
   question - with a box to type anything else. Where the speaker stops, **Continue** goes on.
 - **Party**: tap a member for their numbers and what they carry; tap a thing to use it, drop it or hand it on.
@@ -51,10 +65,15 @@ of sight; walking with a party following; schedules (people go about their day);
 interpreter; doors, keys, ladders, caves, secret doors, passthroughs, containers, signs and books, food; getting,
 dropping and giving; saving.
 
+**Martian Dreams and The Savage Empire** load too, from the same screen (the game is told by its files): their map,
+people, schedules, conversations, faces (`mdfaces.lzc`, `faces.lzc`), palette, and their own 8-pixel font
+(`system.lzc`), with Martian Dreams' doors. They have no parchment picture, so they take the plain frame. Their Lua
+usecode (most of what using things does in them) and the scenes behind their faces are not ported.
+
 Not ported yet: combat, magic, Nuvie's Lua scripts (which hold most of both), eggs and monster spawning, vehicles
-and horses, moongates, lighting and night, sound and music, the intro and ending, most other usecode, creatures
-made of several parts (they draw as one tile), and Martian Dreams and Savage Empire. Only the demo world has been
-run here: no copy of Ultima 6 was at hand while this was written, so playing the real game is untested and will
-want fixes.
+and horses, moongates, sound and music, the intro and ending, most other usecode, and creatures made of several
+parts (they draw as one tile). `tests/real.test.ts` runs on your copies put in
+`web/gamedata/ultima6/`, `savage/` and `martian/` (git-ignored): for each it loads a new game, saves and restores
+it, and talks with everyone who has a conversation - 199 in Ultima VI, 68 in Savage Empire, 99 in Martian Dreams.
 
 Licensed as Nuvie is: GPL 2 or later.

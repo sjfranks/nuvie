@@ -2,7 +2,9 @@
  * tiles.ts - the game's 2048 tiles: their pixels, flags, animation and names (Nuvie's TileManager.cpp and Look.cpp).
  */
 import type { GameFiles } from '../files/gamefiles.ts';
+import { Lib } from '../files/lib.ts';
 import { lzwFile } from '../files/lzw.ts';
+import type { Kind } from './kind.ts';
 
 export const NUM_TILES = 2048;
 
@@ -71,14 +73,16 @@ export class Tiles {
   private counter = 0;
   private readonly lookTbl: string[] = [];
 
-  constructor(files: GameFiles) {
+  constructor(files: GameFiles, readonly kind: Kind = 'u6') {
     const need = (n: string): Uint8Array => {
       const f = files.get(n);
       if (!f) throw new Error(`missing game file: ${n}`);
       return f;
     };
-    const maptiles = lzwFile(need('maptiles.vga'));
-    const masktype = lzwFile(need('masktype.vga'));
+    // Ultima 6 packs these whole; the other two keep each in a library of one.
+    const unpack = (n: string): Uint8Array => (kind === 'u6' ? lzwFile(need(n)) : new Lib(need(n), 4, true).item(0) ?? new Uint8Array(0));
+    const maptiles = unpack('maptiles.vga');
+    const masktype = unpack('masktype.vga');
     const objtiles = need('objtiles.vga');
     const data = new Uint8Array(maptiles.length + objtiles.length);
     data.set(maptiles);
@@ -108,9 +112,9 @@ export class Tiles {
     }
     this.loadAnimData(need('animdata'));
     this.loadFlags(need('tileflag'));
-    this.loadLook(lzwFile(need('look.lzd')));
+    this.loadLook(kind === 'u6' ? lzwFile(need('look.lzd')) : new Lib(need('look.lzc'), 4, true).item(0) ?? new Uint8Array(0));
     const mask = files.get('animmask.vga');
-    if (mask) this.loadAnimMask(lzwFile(mask));
+    if (mask && kind === 'u6') this.loadAnimMask(lzwFile(mask));
   }
 
   /** The tile shown for `n` just now. */
@@ -156,7 +160,11 @@ export class Tiles {
       this.animShift[i] = f[162 + i];
       // Cranks and chains (862, 1009, 1020) stand still until used.
       const t = this.animTile[i];
-      this.animLoop[i] = t === 862 || t === 1009 || t === 1020 ? 0 : -1;
+      const still =
+        this.kind === 'u6'
+          ? t === 862 || t === 1009 || t === 1020
+          : this.kind === 'md' && ((t >= 1 && t <= 4) || (t >= 16 && t <= 23) || (t >= 616 && t <= 627) || t === 1992 || t === 1993 || t === 1980 || t === 1981);
+      this.animLoop[i] = still ? 0 : -1;
     }
   }
 
@@ -208,7 +216,7 @@ export class Tiles {
       } else this.index[t] = this.index[this.animFirst[i] & 0x7ff];
     }
     this.counter = (this.counter + 1) & 0xffff;
-    this.index[861] = hour >= 5 && hour <= 20 ? 328 + ((hour - 5) >> 1) : 861;
+    if (this.kind === 'u6') this.index[861] = hour >= 5 && hour <= 20 ? 328 + ((hour - 5) >> 1) : 861;
   }
 
   /** A tile's name; `plural` picks between "loaf/loaves" forms ("\" plural, "/" singular in the file). */
@@ -235,7 +243,7 @@ export class Tiles {
   look(tileNum: number, qty: number, prefix = true): string {
     const { text, hasPlural } = this.describe(tileNum, qty > 1);
     if (!prefix) return text;
-    if (qty > 0 && hasPlural) return `${qty} ${text}`;
+    if (qty > 0 && (hasPlural || this.kind === 'se')) return `${qty} ${text}`;
     return ARTICLES[this.original(tileNum).article] + text;
   }
 }

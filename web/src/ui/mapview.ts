@@ -35,13 +35,17 @@ export class MapView {
   private readonly pal32 = new Uint32Array(256);
   private rotCounter = 0;
   private readonly ctx: CanvasRenderingContext2D;
+  /** Night and the dark underground, drawn over the map: smooth, not in the map's own pixels. */
+  readonly light = document.createElement('canvas');
+  /** Pixels of the light canvas to a square. */
+  private static readonly LP = 48;
 
   constructor(
     readonly game: Game,
     readonly canvas: HTMLCanvasElement,
   ) {
     this.ctx = canvas.getContext('2d')!;
-    const pal = game.files.get('u6pal');
+    const pal = game.files.get(game.paletteFile);
     if (pal) for (let i = 0; i < 768; i++) this.palette[i] = Math.min(255, (pal[i] << 2) | (pal[i] >> 4));
     this.buildPal();
     this.resize(11, 11);
@@ -57,6 +61,8 @@ export class MapView {
     this.canvas.width = cols * 16;
     this.canvas.height = rows * 16;
     this.image = this.ctx.createImageData(cols * 16, rows * 16);
+    this.light.width = cols * MapView.LP;
+    this.light.height = rows * MapView.LP;
   }
 
   private buildPal(): void {
@@ -304,7 +310,7 @@ export class MapView {
         const raw = this.tmp[(vy + BORDER) * this.tw + vx + BORDER];
         if (raw === 0) continue;
         const n = raw & 0x7fff;
-        if (n >= 16 && n < 48) this.blit(g.tiles.animBase(n), vx * 16, vy * 16);
+        if (g.kind === 'u6' && n >= 16 && n < 48) this.blit(g.tiles.animBase(n), vx * 16, vy * 16);
         this.blit(g.tiles.get(n), vx * 16, vy * 16);
       }
     }
@@ -327,6 +333,104 @@ export class MapView {
           this.ctx.fillRect(vx * 16 + ox, vy * 16 + oy, w, h);
         }
       }
+    }
+    this.renderLight();
+  }
+
+  /** How dark it is, 0 to 1: night out of doors, and always underground. */
+  darkness(): number {
+    const g = this.game;
+    const z = g.player.z;
+    if (z !== 0 && z !== 5) return 0.9;
+    const t = g.clock.hour + g.clock.minute / 60;
+    const NIGHT = 0.8;
+    if (t >= 6 && t < 19) return 0;
+    if (t >= 19 && t < 21) return ((t - 19) / 2) * NIGHT;
+    if (t >= 4 && t < 6) return ((6 - t) / 2) * NIGHT;
+    return NIGHT;
+  }
+
+  /** The glow of sunset and sunrise, 0 to 1. */
+  private glow(): number {
+    const g = this.game;
+    if (g.player.z !== 0 && g.player.z !== 5) return 0;
+    const t = g.clock.hour + g.clock.minute / 60;
+    const near = (h: number): number => Math.max(0, 1 - Math.abs(t - h) / 1.25);
+    return Math.max(near(19.5), near(5));
+  }
+
+  /**
+   * Night as a soft blue dusk over the map, with pools of light round the party and whatever burns: lamps, fires,
+   * torches. The pools are smooth gradients, cut out of the dark.
+   */
+  private renderLight(): void {
+    const c = this.light.getContext('2d')!;
+    const W = this.light.width;
+    const H = this.light.height;
+    const LP = MapView.LP;
+    c.globalCompositeOperation = 'source-over';
+    c.clearRect(0, 0, W, H);
+    const dark = this.darkness();
+    const glow = this.glow();
+    if (dark > 0.01) {
+      const g = this.game;
+      const z = g.player.z;
+      c.fillStyle = z !== 0 && z !== 5 ? `rgba(4,4,10,${dark})` : `rgba(8,14,48,${dark})`;
+      c.fillRect(0, 0, W, H);
+      c.globalCompositeOperation = 'destination-out';
+      const pool = (vx: number, vy: number, r: number, strength: number): void => {
+        const x = (vx + 0.5) * LP;
+        const y = (vy + 0.5) * LP;
+        const grad = c.createRadialGradient(x, y, 0, x, y, r * LP);
+        grad.addColorStop(0, `rgba(0,0,0,${strength})`);
+        grad.addColorStop(0.45, `rgba(0,0,0,${strength * 0.7})`);
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+        c.fillStyle = grad;
+        c.fillRect(x - r * LP, y - r * LP, r * LP * 2, r * LP * 2);
+      };
+      const RADIUS = [0, 2.4, 3.4, 4.8];
+      /** Where firelight falls, to be warmed once the dark is cut. */
+      const warm: [number, number, number][] = [];
+      for (let vy = -2; vy < this.rows + 2; vy++) {
+        for (let vx = -2; vx < this.cols + 2; vx++) {
+          const inView = vx >= 0 && vy >= 0 && vx < this.cols && vy < this.rows;
+          if (inView && !this.seen(vx, vy)) continue;
+          const x = wrap(this.curX + vx, z);
+          const y = wrap(this.curY + vy, z);
+          let level = inView ? g.tiles.get(this.tmp[(vy + BORDER) * this.tw + vx + BORDER] & 0x7fff).flags2 & 3 : 0;
+          const l = g.objects.list(x, y, z);
+          if (l) for (const o of l) if (!(o.status & STATUS_INVISIBLE)) level = Math.max(level, g.tiles.get(g.objects.tileNum(o)).flags2 & 3);
+          if (level) {
+            pool(vx, vy, RADIUS[level], 0.95);
+            warm.push([vx, vy, RADIUS[level]]);
+          }
+        }
+      }
+      // The party sees a little way by its own eyes, and further by a torch.
+      for (const m of g.party) {
+        const a = m.actor;
+        if (a.z !== z) continue;
+        const torch = g.objects.inventories[a.id].some((o) => o.objN === OBJ.TORCH && o.frameN === 1);
+        const vx = wrap(a.x - this.curX, z);
+        const vy = wrap(a.y - this.curY, z);
+        pool(vx, vy, torch ? 5 : a === g.player ? 2.6 : 1.6, torch ? 1 : 0.8);
+        if (torch) warm.push([vx, vy, 5]);
+      }
+      // Firelight is warm against the blue.
+      c.globalCompositeOperation = 'source-over';
+      for (const [vx, vy, r] of warm) {
+        const x = (vx + 0.5) * LP;
+        const y = (vy + 0.5) * LP;
+        const grad = c.createRadialGradient(x, y, 0, x, y, r * LP * 0.8);
+        grad.addColorStop(0, `rgba(255,170,70,${0.22 * dark})`);
+        grad.addColorStop(1, 'rgba(255,170,70,0)');
+        c.fillStyle = grad;
+        c.fillRect(x - r * LP, y - r * LP, r * LP * 2, r * LP * 2);
+      }
+    }
+    if (glow > 0.01) {
+      c.fillStyle = `rgba(255,150,60,${glow * 0.09})`;
+      c.fillRect(0, 0, W, H);
     }
   }
 
@@ -352,15 +456,16 @@ export class MapView {
     return c;
   }
 
-  /** A face (56 by 64) as a picture. */
-  portraitImage(data: Uint8Array): HTMLCanvasElement {
+  /** A face as a picture. */
+  portraitImage(face: { w: number; h: number; data: Uint8Array }): HTMLCanvasElement {
     const c = document.createElement('canvas');
-    c.width = 56;
-    c.height = 64;
+    c.width = face.w;
+    c.height = face.h;
     const ctx = c.getContext('2d')!;
-    const img = ctx.createImageData(56, 64);
+    const img = ctx.createImageData(face.w, face.h);
     const out = new Uint32Array(img.data.buffer);
-    for (let i = 0; i < 56 * 64; i++) out[i] = data[i] === 0xff ? 0 : this.pal32[data[i]];
+    const data = face.data;
+    for (let i = 0; i < face.w * face.h; i++) out[i] = data[i] === 0xff ? 0 : this.pal32[data[i]];
     ctx.putImageData(img, 0, 0);
     return c;
   }
