@@ -93,11 +93,41 @@ export class App {
     this.root.append(wrap, side);
     host.replaceChildren(this.root);
 
+    // A tap acts (tap()); a finger held down walks the party towards it while it stays, sliding to steer.
+    const at = (e: PointerEvent): { x: number; y: number } => {
+      const r = canvas.getBoundingClientRect();
+      return this.view.squareAt(e.clientX - r.left, e.clientY - r.top);
+    };
+    let down: { id: number; sq: { x: number; y: number }; holding: boolean; timer: number } | null = null;
     canvas.addEventListener('pointerdown', (e) => {
       e.preventDefault();
-      const r = canvas.getBoundingClientRect();
-      this.tap(this.view.squareAt(e.clientX - r.left, e.clientY - r.top));
+      canvas.setPointerCapture(e.pointerId);
+      const sq = at(e);
+      down = { id: e.pointerId, sq, holding: false, timer: 0 };
+      const d = down;
+      d.timer = window.setTimeout(() => {
+        // Held: walking, not a tap - unless a command waits on a square, or someone is talking.
+        if (down !== d || this.mode || this.game.converse) return;
+        d.holding = true;
+        this.hold(() => (down === d ? d.sq : null));
+      }, 280);
     });
+    canvas.addEventListener('pointermove', (e) => {
+      if (down && e.pointerId === down.id) down.sq = at(e);
+    });
+    const up = (e: PointerEvent): void => {
+      if (!down || e.pointerId !== down.id) return;
+      const d = down;
+      down = null;
+      clearTimeout(d.timer);
+      if (!d.holding && e.type === 'pointerup') this.tap(d.sq);
+      if (d.holding) {
+        this.walk = null;
+        this.mark();
+      }
+    };
+    canvas.addEventListener('pointerup', up);
+    canvas.addEventListener('pointercancel', up);
     const onKey = (e: KeyboardEvent): void => this.key(e);
     const onSize = (): void => this.layout();
     window.addEventListener('keydown', onKey);
@@ -189,6 +219,27 @@ export class App {
     const foe = then === 'attack' ? g.actors.at(sq.x, sq.y, p.z) ?? undefined : undefined;
     this.walk = { ...sq, then, foe };
     this.step();
+  }
+
+  /** Walk towards wherever the finger is, a step at a time, while `where` gives a square. */
+  private hold(where: () => { x: number; y: number } | null): void {
+    clearTimeout(this.walkTimer);
+    const g = this.game;
+    const sq = where();
+    if (!sq || g.converse) return;
+    const p = g.player;
+    if (sq.x !== p.x || sq.y !== p.y) {
+      // Held, the party walks into no one: talking and fighting are a tap's.
+      const path = g.pathTo(sq.x, sq.y) ?? g.pathTo(sq.x, sq.y, true);
+      if (path && path.length) {
+        this.walk = { ...sq, then: 'walk' };
+        this.mark(path);
+        const [dx, dy] = path[0];
+        const t = g.actors.at(p.x + dx, p.y + dy, p.z);
+        if (!t || t.inParty || (g.vehicle && t === g.vehicle)) g.move(dx, dy);
+      }
+    }
+    this.walkTimer = window.setTimeout(() => this.hold(where), 170);
   }
 
   /** One step of the way to what was tapped; at the end of it, what the tap was for. */

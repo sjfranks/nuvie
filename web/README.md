@@ -32,6 +32,8 @@ Sunset and sunrise glow orange.
 - **Upright**: the map fills the width at the top and takes the taps; under it one pane, the **Log** or the
   **Party**, with tabs beside it to choose (the Log tab is marked when there is news); at the foot, the commands.
 - **Sideways**: the map at the left, the pane and the commands beside it.
+- **Hold to walk**: hold a finger on the map and the party walks towards it, round walls, for as long as it stays
+  down; slide it to steer, lift it to stop. Held, the party walks into no one - talking and fighting are a tap's.
 - **Tap to walk**: a tap walks there, round what is in the way, the way marked as it goes. A tap on a person walks up
   and talks; on a door, ladder, sign or chest, walks up and uses it. Walking into a shut door opens it. Tap the party
   to pass a turn or pick up what is underfoot.
