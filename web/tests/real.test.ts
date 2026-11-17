@@ -179,6 +179,52 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     expect(g.moonstones.some(([x, y, z]) => p.x === x && p.y === y && p.z === z)).toBe(true);
   });
 
+  it.runIf(folder === 'ultima6')('works the castle gate: its lever lifts the portcullis, its crank lowers the drawbridge', () => {
+    const g = new Game(load());
+    for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
+    const lever = g.objects.list(303, 383, 0)!.find((o) => o.objN === 268)!;
+    const doorway = g.objects.all().find((o) => o.objN === 301 && o.z === 0 && o.quality === lever.quality)!;
+    const shut = (): boolean => (g.objects.list(doorway.x, doorway.y, 0) ?? []).some((o) => o.objN === 310);
+    const was = shut();
+    g.relocate(304, 383, 0);
+    g.use(303, 383);
+    expect(shut()).toBe(!was);
+    expect(g.log.at(-1)!.text).toContain('you hear a noise');
+    expect(g.map.isPassable(doorway.x, doorway.y, 0)).toBe(was);
+    g.use(303, 383);
+    expect(shut()).toBe(was);
+    // The crank beside it.
+    const crank = g.objects.list(303, 384, 0)!.find((o) => o.objN === 288)!;
+    const bridge = (): number => g.objects.all().filter((o) => o.objN === 269).length;
+    const before = bridge();
+    g.useObj(crank);
+    const msg = g.log.at(-1)!.text;
+    expect(msg).toMatch(/drawbridge/);
+    g.useObj(crank);
+    expect(bridge()).toBe(before);
+    console.log('crank:', msg, before, 'bridge pieces');
+  });
+
+  it.runIf(folder === 'ultima6')('uses one of every kind of thing it knows without fault', () => {
+    const g = new Game(load());
+    for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
+    const p = g.player;
+    const kinds = [268, 174, 288, 64, 63, 122, 145, 164, 206, 253, 236, 419, 233, 234, 181, 182, 264, 104, 103, 275, 93, 159, 235, 123, 153, 156, 157, 158, 296, 212, 169, 77, 96, 115, 128, 129, 131, 184];
+    for (const objN of kinds) {
+      const o = g.objects.create(objN, 1, 0);
+      [o.x, o.y, o.z] = [p.x + 1, p.y, p.z];
+      g.objects.add(o);
+      g.log = [];
+      expect(() => {
+        g.useObj(o);
+        if (g.askWhere) g.askWhere.then(p.x + 1, p.y);
+      }).not.toThrow();
+      expect(g.log.some((l) => l.text === 'Not usable.') ? objN : 0).toBe(0);
+      if (o.loc === 'map') g.objects.unlink(o);
+      g.peer = false;
+    }
+  });
+
   it.runIf(folder === 'ultima6')('opens a red moongate with the orb, and goes through it', () => {
     const g = new Game(load());
     for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });

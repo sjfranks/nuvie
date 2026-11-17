@@ -8,6 +8,7 @@ import { Game, type SaveState } from '../game/game.ts';
 import { invWeight } from '../game/inventory.ts';
 import type { Obj } from '../game/objects.ts';
 import { OBJ, READY_SLOT } from '../game/u6tables.ts';
+import { USED_IN_PLACE } from '../game/usecode.ts';
 import { REAGENTS, reagentCounts, reagentNames, words, type Spell } from '../game/magic.ts';
 import { MapView } from './mapview.ts';
 import { haveIcons } from './theme.ts';
@@ -244,6 +245,9 @@ export class App {
       const door = g.objects.list(sq.x, sq.y, p.z)?.some((d) => g.objects.isDoor(d) && g.objects.isShut(d));
       if (a && !a.inParty) then = g.combat.hostile(a) ? 'attack' : a.objN === 430 && a.id >= 203 ? 'use' : 'talk';
       else if (door || (o && USABLE.has(o.objN) && !g.map.isPassable(sq.x, sq.y, p.z)) || (o && (o.objN === OBJ.LADDER || o.objN === OBJ.CAVE || o.objN === OBJ.HOLE))) then = 'use';
+      // Levers, cranks, fires, bells, wells and the like are used where they stand.
+      else if (g.kind === 'u6' && (g.objects.list(sq.x, sq.y, p.z) ?? []).some((n) => USED_IN_PLACE.has(n.objN) && !(n.status & 0x02))) then = 'use';
+      else if (a && a.objN === 428 && g.kind === 'u6') then = 'use';
     }
     const foe = then === 'attack' ? g.actors.at(sq.x, sq.y, p.z) ?? undefined : undefined;
     this.walk = { ...sq, then, foe };

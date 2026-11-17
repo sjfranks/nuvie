@@ -107,6 +107,13 @@ yet ported. Their effects wear off as in the original, poison bites now and then
 party. Torches can be lit and held, and Light and torches widen the party's
 light at night.
 
+**Using things** follows Nuvie's U6UseCode.cpp: doors, ladders and containers; levers and switches that raise and
+drop the portcullises and fields of their doorways; cranks that lower and raise drawbridges; keys and lock picks
+(tap the door or chest; a pick may break); candles, candelabras, braziers, fireplaces and campfires; bells and pull
+chains; wells and cows filling buckets, churns making butter, hives filling honey jars; fishing poles, shovels and
+picks; potions (tap who drinks); all the food and drink; the sextant, clocks and sundials, mirrors, the peer gem,
+instruments, fans and the rubber ducky. A tap on a lever, crank, fire, bell or well uses it where it stands.
+
 **The Orb of the Moons** works as in Ultima VI once Lord British has told of it: use it from the Avatar's sheet,
 tap a square near the party, and a red moongate opens there that leads where that square says; step in. Blue
 moongates stand at the eight moonstones while either moon is in the sky, and lead where the moons' phases say.
@@ -115,7 +122,7 @@ moongates stand at the eight moonstones while either moon is in the sky, and lea
 tap water to sail, and land beside the boat to go ashore. Ships keep to open water and must have room to turn.
 Tap a roaming horse to ride it, and the rider to get down.
 
-Not ported yet: the remaining spells, most of Nuvie's other Lua scripts, balloons, music for Martian Dreams and Savage Empire, the intro and ending, most other usecode, and the silver serpent's long body (it draws as
+Not ported yet: the remaining spells, most of Nuvie's other Lua scripts, balloons, music for Martian Dreams and Savage Empire, the intro and ending, the remaining usecode (balloons, cannons, the vortex cube, runes and the like), and the silver serpent's long body (it draws as
 one tile).
 
 `tests/real.test.ts` runs on your copies put in `web/gamedata/ultima6/`, `savage/` and `martian/` (git-ignored).

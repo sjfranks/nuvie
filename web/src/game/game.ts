@@ -9,6 +9,7 @@ import { lzwDecompress, lzwFile } from '../files/lzw.ts';
 import { Actor, Actors, HYDRA, HYDRA_BODY, MANY_SQUARES, SHIP, STATUS_IN_PARTY, WT } from './actors.ts';
 import { Converse, ConverseLib, checkKeywords, type ConvAsk, type ConvWorld } from './converse.ts';
 import { Combat } from './combat.ts';
+import { UseCode, USED_IN_PLACE } from './usecode.ts';
 import { Magic, type Spell } from './magic.ts';
 import type { SfxId } from '../audio/sfx.ts';
 import { invCount, invDelete, invFind, invNew, invWeight } from './inventory.ts';
@@ -108,6 +109,7 @@ export class Game implements ConvWorld {
   readonly journal = new Journal();
   readonly combat: Combat;
   readonly magic: Magic;
+  readonly usecode: UseCode;
   /** Turns left of a Light spell's glow round the party. */
   lightTurns = 0;
   /** Turns left of Infravision: everyone is seen, even in the dark. */
@@ -195,6 +197,7 @@ export class Game implements ConvWorld {
     if (this.kind === 'u6' && !saved) this.gatherBackHalves();
     this.combat = new Combat(this);
     this.magic = new Magic(this);
+    this.usecode = new UseCode(this);
     if (saved) this.restore(saved);
     else this.say('sys', 'The world is loaded. Tap the map to walk.');
     this.combat.update(!saved);
@@ -492,6 +495,11 @@ export class Game implements ConvWorld {
     if (this.kind === 'u6') this.enterGate(nx, ny, p.z);
     this.endTurn();
     return true;
+  }
+
+  /** A turn goes by after something was done (the use code's). */
+  passTurn(): void {
+    this.endTurn();
   }
 
   /** Let a turn go by. */
@@ -976,9 +984,16 @@ export class Game implements ConvWorld {
       this.horse(steed);
       return;
     }
+    if (steed && steed.objN === 428 && this.kind === 'u6') {
+      // A cow gives milk to an empty bucket (use_cow).
+      this.usecode.fill(179);
+      return;
+    }
     const l = this.objects.list(x, y, p.z);
+    // Of what is here, the thing that does something when used; else the topmost.
     const door = l?.find((o) => this.objects.isDoor(o));
-    const o = door ?? this.objects.get(x, y, p.z);
+    const working = l ? [...l].reverse().find((o) => !(o.status & 0x02) && (USED_IN_PLACE.has(o.objN) || this.usecode.handles(o))) : undefined;
+    const o = door ?? working ?? this.objects.get(x, y, p.z);
     if (!o || o.status & 0x02) {
       this.say('sys', 'Nothing to use there.');
       this.onChange();
@@ -1024,11 +1039,14 @@ export class Game implements ConvWorld {
       this.useOrb();
       return;
     }
-    else if (FOOD.has(o.objN)) {
+    else if (this.usecode.handles(o)) {
+      this.usecode.use(o);
+      return;
+    } else if (FOOD.has(o.objN)) {
       if (o.qty > 1) o.qty--;
       else this.objects.unlink(o);
       this.say('sys', 'You eat the food.');
-    } else this.say('sys', `Using the ${name} is beyond this port so far.`);
+    } else this.say('sys', 'Not usable.');
     this.endTurn();
   }
 
