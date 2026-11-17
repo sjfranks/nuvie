@@ -17,6 +17,15 @@ type OnEntry = On | Record<number, OnTo>;
 
 const BERRY = 73;
 const OXIUM = 131;
+/** player.lua's map_entrance_tbl: where each mine or cave mouth leads, by its quality. */
+const ENTRANCES: [number, number, number][] = [
+  [0x43, 0x51, 1], [0x80, 0x8d, 0], [0x76, 0xf2, 3], [0x7a, 0x0c, 3], [0x9a, 0x41, 4], [0x2b2, 0x1cc, 0], [0x73, 0x40, 4],
+  [0x29d, 0x1ce, 0], [0xb3, 0xe1, 4], [0x27b, 0x1f1, 0], [0xc3, 0x70, 1], [0xcb, 0x1d1, 0], [0x24, 0xf1, 1], [0x31a, 0x232, 0],
+  [0x5c, 0xf1, 1], [0x34c, 0x25a, 0], [0x7c, 0x28, 4], [0x13e, 0x118, 0], [0x0a, 0x61, 5], [0x3b7, 0x1c4, 0], [0x5c, 0xb1, 5],
+  [0x3dc, 0x1dd, 0], [0x5e, 0x29, 4], [0x227, 0x1ab, 0],
+];
+/** pod_teleport_tbl: where the alien pods send the party. */
+const POD_EXITS: [number, number][] = [[0xca, 0x295], [0x34d, 0x295], [0x13a, 0x17a], [0x2cd, 0x1fa]];
 /** usecode_move_obj_table: the wheelbarrow, plank, rail car and drill. */
 const MOVED: ReadonlySet<number> = new Set([268, 395, 410, 441]);
 /** rest_level_up_actor's experience for each level. */
@@ -482,6 +491,101 @@ export class MdUseCode {
         g.onChange();
       },
     };
+  }
+
+  // ---- each turn: entrances, the belt, the powered doors ----
+
+  private last = '';
+
+  /** After each turn (player_post_move_action): where the party stepped, the conveyor, the doors that open themselves. */
+  turn(): void {
+    const g = this.g;
+    const p = g.player;
+    const here = `${p.x},${p.y},${p.z}`;
+    const moved = here !== this.last;
+    this.last = here;
+    if (moved && this.entrance()) {
+      this.last = `${g.player.x},${g.player.y},${g.player.z}`;
+      return;
+    }
+    this.conveyor(true);
+    this.aroundParty();
+  }
+
+  /**
+   * Mine and cave mouths (map_entrance_tbl, by the entrance's quality), and the alien pods once they work: the party
+   * comes out at the other end. A rail car on the track at a mine's mouth goes through with it.
+   */
+  private entrance(): boolean {
+    const g = this.g;
+    const p = g.player;
+    for (const o of g.objects.list(p.x, p.y, p.z) ?? []) {
+      const n = o.objN;
+      if (!(n === 175 || n === 163 || n === 180 || n === 178 || (n === 197 && o.frameN === 3) || n === 210)) continue;
+      if (n === 197) {
+        if (!((g.actors.get(0x73)?.talkFlags ?? 0) & (1 << 4))) {
+          this.say('THE_ALIEN_DEVICE_DOESNT_SEEM_TO_BE_FUNCTIONING');
+          return false;
+        }
+        const pod = POD_EXITS[o.quality - 1];
+        if (!pod) {
+          this.say('NOTHING_APPEARS_TO_HAPPEN');
+          return false;
+        }
+        g.relocate(pod[0], pod[1], 0);
+        return true;
+      }
+      const to = ENTRANCES[o.quality - 1];
+      if (!to) return false;
+      // What stands on the track before a mine's mouth goes through too.
+      const dy = n === 175 ? -1 : n === 163 ? 1 : 0;
+      if (dy) {
+        for (const t of [...(g.objects.list(p.x, p.y + dy, p.z) ?? [])]) {
+          if (t.objN === 410 || t.objN === 268) g.objects.move(t, to[0], to[1] + (n === 175 ? -1 : 2), to[2]);
+        }
+      }
+      g.relocate(to[0], to[1], to[2]);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * update_objects_around_party: with the power on, the mine's doors open for whoever comes near and shut behind; a
+   * reflective surface shows who stands before it.
+   */
+  private aroundParty(): void {
+    const g = this.g;
+    const p = g.player;
+    const flag = (f: number): boolean => !!((g.actors.get(0x73)?.talkFlags ?? 0) & (1 << f));
+    const OX = [0, 1, 1, 1, 0, -1, -1, -1];
+    const OY = [-1, -1, 0, 1, 1, 1, 0, -1];
+    for (let y = p.y - 5; y <= p.y + 5; y++) {
+      for (let x = p.x - 5; x <= p.x + 5; x++) {
+        for (const o of g.objects.list(x, y, p.z) ?? []) {
+          if ((o.objN === 227 && flag(2)) || (o.objN === 179 && flag(4))) {
+            if (o.quality & 0x80) continue;
+            const base = o.frameN & 2;
+            if (g.actors.at(o.x, o.y, o.z)) {
+              o.frameN = base + 9;
+              continue;
+            }
+            const near = g.actors.at(o.x + OX[base], o.y + OY[base], o.z) ?? g.actors.at(o.x + OX[base + 4], o.y + OY[base + 4], o.z);
+            if (near) o.frameN = base + (o.frameN < 4 ? 5 : o.frameN < 8 ? 1 : 5);
+            else if (o.frameN === 5) o.frameN = 1;
+            else if (o.frameN === 7) o.frameN = 3;
+          } else if (o.objN === 301 && o.frameN < 3) {
+            const a = g.actors.at(o.x, o.y + 1, o.z);
+            if (!a) o.frameN = 0;
+            else {
+              const id = a.id;
+              o.frameN = id >= 0x70 || id === 0x5d || (id >= 0x6a && id <= 0x6c) ? 0
+                : (id < 0x20 && id !== 6) || (id >= 0x2a && id <= 0x5c) || id === 0x60 || id === 0x69 || id === 0x6d ? 1 : 2;
+            }
+          }
+        }
+      }
+    }
   }
 
   // ---- pushing, the drill and the conveyor ----

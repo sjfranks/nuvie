@@ -673,7 +673,7 @@ export class Game implements ConvWorld {
     if (this.kegTurns > 0 && --this.kegTurns === 0) this.usecode.explodeKegs();
     if (this.infraTurns > 0) this.infraTurns--;
     if (this.stormTurns > 0) this.stormTurns--;
-    if (this.kind === 'md') this.mdUse.conveyor(true);
+    if (this.kind === 'md') this.mdUse.turn();
     if (this.eclipseTurns > 0) this.eclipseTurns--;
     this.combat.update();
     this.combat.round();

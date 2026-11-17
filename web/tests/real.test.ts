@@ -434,6 +434,25 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     expect(coal.x).toBe(0x3b);
   });
 
+  it.runIf(folder === 'martian')('goes down stairs and through mine mouths to where they lead', () => {
+    const g = new Game(load());
+    const p = g.player;
+    const ENT = [[0x43, 0x51, 1], [0x80, 0x8d, 0], [0x76, 0xf2, 3], [0x7a, 0x0c, 3], [0x9a, 0x41, 4], [0x2b2, 0x1cc, 0], [0x73, 0x40, 4],
+      [0x29d, 0x1ce, 0], [0xb3, 0xe1, 4], [0x27b, 0x1f1, 0], [0xc3, 0x70, 1], [0xcb, 0x1d1, 0], [0x24, 0xf1, 1], [0x31a, 0x232, 0],
+      [0x5c, 0xf1, 1], [0x34c, 0x25a, 0], [0x7c, 0x28, 4], [0x13e, 0x118, 0], [0x0a, 0x61, 5], [0x3b7, 0x1c4, 0], [0x5c, 0xb1, 5],
+      [0x3dc, 0x1dd, 0], [0x5e, 0x29, 4], [0x227, 0x1ab, 0]];
+    let tried = 0;
+    for (const e of g.objects.all().filter((o) => [175, 163, 180, 178].includes(o.objN) && o.quality > 0 && o.loc === 'map')) {
+      const from = [[0, 1], [0, -1], [1, 0], [-1, 0]].find(([dx, dy]) => g.canStand(e.x + dx, e.y + dy, e.z));
+      if (!from || !g.map.isPassable(e.x, e.y, e.z)) continue;
+      g.relocate(e.x + from[0], e.y + from[1], e.z);
+      g.move(-from[0], -from[1]);
+      expect([p.x, p.y, p.z]).toEqual(ENT[e.quality - 1]);
+      if (++tried >= 4) break;
+    }
+    expect(tried).toBeGreaterThan(0);
+  });
+
   it.runIf(folder === 'ultima6')('boards a skiff, sails it, goes ashore; rides a horse', () => {
     const g = new Game(load());
     for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
