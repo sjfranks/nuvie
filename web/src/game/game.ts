@@ -152,17 +152,18 @@ export class Game implements ConvWorld {
       p = 0;
       for (let i = 0; i < 5; i++) p += this.objects.loadBlock(dng, p);
       const objlist = dng.slice(p);
-      // A new game's hero, as Nuvie sets them up, where the files leave them blank.
+      // A new game's hero, as Nuvie sets them up (SaveGame::update_objlist_for_new_game_u6): a name where the
+      // files give none, and the starting level and numbers.
       if (objlist[0xf00] === 0) {
         const name = 'Avatar';
         for (let i = 0; i <= name.length; i++) objlist[0xf00 + i] = name.charCodeAt(i) || 0;
-        objlist[0x1c72] = 1;
-        objlist[0x901] = objlist[0xa01] = objlist[0xb01] = 0xf;
-        objlist[0xc02] = 0x72;
-        objlist[0xc03] = 0x01;
-        objlist[0x13f2] = 0x1e;
-        objlist[0xff2] = 3;
       }
+      if (objlist[0x1c72] === 0) objlist[0x1c72] = 1;
+      objlist[0x901] = objlist[0xa01] = objlist[0xb01] = 0xf;
+      objlist[0xc02] = 0x72;
+      objlist[0xc03] = 0x01;
+      objlist[0x13f2] = 0x1e;
+      objlist[0xff2] = 3;
       return objlist;
     }
     const letters = 'abcdefgh';
@@ -315,7 +316,7 @@ export class Game implements ConvWorld {
     if (p.z !== 0) return `underground, level ${p.z}`;
     const lat = Math.round((p.y - 512) / 8);
     const lon = Math.round((p.x - 512) / 8);
-    return `${Math.abs(lat)}°${lat < 0 ? 'N' : 'S'} ${Math.abs(lon)}°${lon < 0 ? 'W' : 'E'}`;
+    return `${Math.abs(lat)}${lat < 0 ? 'N' : 'S'} ${Math.abs(lon)}${lon < 0 ? 'W' : 'E'}`;
   }
 
   // ---- moving ----
@@ -665,8 +666,9 @@ export class Game implements ConvWorld {
   /** Remember the words a speaker drops that they answer to: those marked in what they say, and any that fit a keyword. */
   private learn(c: Converse, text: string): void {
     const keys = this.lib.keywords(this.lib.scriptNum(c.npc));
-    for (const m of text.matchAll(/(@?)([A-Za-z']+)/g)) {
-      const word = m[2].toLowerCase();
+    for (const m of text.matchAll(/(@?)([A-Za-z]+(?:'[A-Za-z]+)*)/g)) {
+      // "cellar's" is asked about as "cellar".
+      const word = m[2].toLowerCase().replace(/'s$/, '');
       if (word.length < 3) continue;
       const fits = keys.some((k) => k.length >= Math.min(4, word.length) && checkKeywords(k, word));
       if (fits || (m[1] && keys.length === 0)) this.journal.addTopic(c.npc.id, word);

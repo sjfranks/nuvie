@@ -9,6 +9,7 @@ import { invWeight } from '../game/inventory.ts';
 import type { Obj } from '../game/objects.ts';
 import { OBJ } from '../game/u6tables.ts';
 import { MapView } from './mapview.ts';
+import { haveIcons } from './theme.ts';
 
 type Mode = 'look' | 'talk' | 'use' | 'get' | null;
 type Pane = 'log' | 'party';
@@ -44,11 +45,15 @@ export class App {
   private readonly root = el('div', 'play');
   private readonly status = el('div', 'status');
   private readonly modeTag = el('div', 'mode');
+  /** The speaker's face over the map while they talk. */
+  private readonly face = el('div', 'face');
+  private faceOf = -1;
   private readonly body = el('div', 'panebody');
-  private readonly foot = el('div');
+  private readonly foot = el('div', 'foot');
   private readonly tabLog: HTMLButtonElement;
   private readonly tabParty: HTMLButtonElement;
   private pane: Pane = 'log';
+  private wasTalking = false;
   private mode: Mode = null;
   private walk: { x: number; y: number; then: Mode | 'walk' } | null = null;
   private walkTimer = 0;
@@ -63,18 +68,26 @@ export class App {
     readonly game: Game,
     private readonly hooks: AppHooks,
   ) {
-    const wrap = el('div', 'viewwrap');
+    const wrap = el('div', 'viewwrap paper');
+    const box = el('div', 'mapbox');
     const canvas = el('canvas', 'view');
     this.view = new MapView(game, canvas);
+    this.view.light.className = 'light';
     this.modeTag.hidden = true;
-    wrap.append(canvas, this.status, this.modeTag);
-    const pane = el('div', 'pane');
+    box.append(canvas, this.view.light, this.modeTag, this.face);
+    this.status.className = 'clock';
+    wrap.append(box);
+    const divider = el('div', 'divider');
     const tabs = el('div', 'tabs');
     this.tabLog = btn('Log', () => this.setPane('log'));
     this.tabParty = btn('Party', () => this.setPane('party'));
-    tabs.append(this.tabLog, this.tabParty, btn('☰', () => this.menu()));
-    pane.append(this.body, tabs);
-    this.root.append(wrap, pane, this.foot);
+    tabs.append(this.tabLog, this.tabParty, this.status, btn('Menu', () => this.menu()));
+    divider.append(tabs);
+    const pane = el('div', 'pane paper');
+    pane.append(this.body);
+    const side = el('div', 'side');
+    side.append(divider, pane, this.foot);
+    this.root.append(wrap, side);
     host.replaceChildren(this.root);
 
     canvas.addEventListener('pointerdown', (e) => {
@@ -108,9 +121,10 @@ export class App {
   /** As many squares across as keeps each a comfortable size for a finger. */
   private layout(): void {
     const w = this.view.canvas.getBoundingClientRect().width || 352;
-    let n = Math.floor(w / 34);
+    // At least 11 squares, each at most 40 pixels; odd, so the party stands in the middle.
+    let n = Math.floor(w / 32);
     if (n % 2 === 0) n--;
-    n = Math.max(9, Math.min(15, n));
+    n = Math.max(11, Math.min(15, n));
     if (n !== this.view.cols) this.view.resize(n, n);
     this.view.render();
   }
@@ -241,9 +255,22 @@ export class App {
   private changed(): void {
     const g = this.game;
     this.view.render();
-    this.status.replaceChildren(el('span', '', `${g.date()}  ${g.time()}`), el('span', '', `${g.gold()} gold`));
+    this.status.textContent = `${String(g.clock.hour).padStart(2, '0')}:${String(g.clock.minute).padStart(2, '0')}`;
     // While someone talks, or a container stands open, the pane shows the log whatever was chosen.
     const pane: Pane = g.converse ? 'log' : this.pane;
+    this.face.hidden = !(g.converse && g.speaker);
+    const sp = g.converse ? g.speaker : null;
+    if (sp && (sp.actor !== this.faceOf || this.face.textContent !== sp.name)) {
+      this.faceOf = sp.actor;
+      const a = g.actors.get(sp.actor);
+      this.face.replaceChildren();
+      if (a) this.face.append(this.facePicture(a));
+      this.face.append(el('div', 'facename', sp.name));
+    }
+    if (this.root.classList.toggle('talking', !!g.converse) !== this.wasTalking) {
+      this.wasTalking = !this.wasTalking;
+      requestAnimationFrame(() => this.layout());
+    }
     this.tabLog.classList.toggle('on', pane === 'log');
     this.tabParty.classList.toggle('on', pane === 'party');
     if (pane === 'log') this.seenLog = g.log.length;
@@ -255,7 +282,7 @@ export class App {
     this.saveTimer = window.setTimeout(() => !g.converse && this.hooks.save(g.save()), 1500);
   }
 
-  private face(a: Actor): HTMLCanvasElement {
+  private facePicture(a: Actor): HTMLCanvasElement {
     const p = this.game.portrait(a);
     return p ? this.view.portraitImage(p) : this.view.tileImage(this.game.objects.objToTile[a.objN] + 8);
   }
@@ -263,13 +290,6 @@ export class App {
   private drawLog(): void {
     const g = this.game;
     const log = el('div', 'log');
-    if (g.converse && g.speaker) {
-      const a = g.actors.get(g.speaker.actor);
-      const head = el('div', 'speaker');
-      if (a) head.append(this.face(a));
-      head.append(el('b', '', g.speaker.name));
-      log.append(head);
-    }
     for (const line of g.log.slice(-60)) {
       const p = el('p', line.kind);
       const text = line.text.replace(/^\n+|\n+$/g, '');
@@ -301,6 +321,9 @@ export class App {
   private drawParty(): void {
     const g = this.game;
     const list = el('div');
+    const head = el('div', 'partyhead');
+    head.append(el('span', '', g.date()), el('span', '', `Gold ${g.gold()}`));
+    list.append(head);
     for (const m of g.party) {
       const a = m.actor;
       const row = el('div', 'member');
@@ -310,7 +333,7 @@ export class App {
       fill.style.width = `${Math.max(0, Math.min(100, (a.hp / Math.max(1, a.maxHp)) * 100))}%`;
       bar.append(fill);
       mid.append(el('div', 'name', m.name), bar);
-      row.append(this.view.tileImage(g.objects.objToTile[a.objN] + 8), mid, el('div', 'small', `${a.hp}/${a.maxHp} hp · lvl ${a.level}`));
+      row.append(this.view.tileImage(g.objects.objToTile[a.objN] + 8), mid, el('div', '', `${a.hp}/${a.maxHp}`));
       row.addEventListener('click', () => this.character(m.actor, m.name));
       list.append(row);
     }
@@ -327,14 +350,29 @@ export class App {
     if (key === this.footKey) return;
     this.footKey = key;
     if (!g.converse) {
-      const bar = el('div', 'bar-cmds');
-      const m = (label: string, mode: Mode): HTMLButtonElement => btn(label, () => this.setMode(this.mode === mode ? null : mode), this.mode === mode ? 'on' : '');
-      bar.append(m('Look', 'look'), m('Talk', 'talk'), m('Use', 'use'), m('Get', 'get'), btn('Pass', () => g.pass()), btn('Journal', () => this.journal()));
+      const bar = el('div', haveIcons ? 'bar-cmds icons' : 'bar-cmds');
+      const icon = (b: HTMLButtonElement, tile: number): HTMLButtonElement => {
+        b.setAttribute('aria-label', b.textContent ?? '');
+        if (haveIcons) {
+          b.replaceChildren();
+          b.classList.add('iconbtn');
+          const c = this.view.tileImage(tile);
+          c.className = 'icon';
+          b.prepend(c);
+        }
+        return b;
+      };
+      const m = (label: string, mode: Mode, tile: number): HTMLButtonElement =>
+        icon(btn(label, () => this.setMode(this.mode === mode ? null : mode), this.mode === mode ? 'on' : ''), tile);
+      bar.append(
+        m('Look', 'look', 403), m('Talk', 'talk', 402), m('Use', 'use', 407), m('Get', 'get', 404),
+        icon(btn('Pass', () => g.pass()), 408), icon(btn('Notes', () => this.journal()), 409),
+      );
       this.foot.replaceChildren(bar);
       return;
     }
     const say = el('div', 'say');
-    if (g.paused) say.append(btn('Continue ▾', () => g.continueTalk(), 'primary'));
+    if (g.paused) say.append(btn('Continue', () => g.continueTalk(), 'primary'));
     else if (ask) {
       const list = el('div', 'opts');
       for (const o of opts) list.append(btn(o.label, () => g.reply(o.say), opts.length <= 2 || o.say === 'bye' ? 'wide' : ''));
@@ -363,10 +401,10 @@ export class App {
   private open(title: string, fill: (body: HTMLElement) => void): void {
     this.sheet?.remove();
     const sheet = el('div', 'sheet');
-    const box = el('div');
+    const box = el('div', 'paper');
     const head = el('header');
     const body = el('div', 'body');
-    head.append(el('h2', '', title), btn('✕', () => this.close()));
+    head.append(el('h2', '', title), btn('X', () => this.close()));
     box.append(head, body);
     sheet.append(box);
     sheet.addEventListener('click', (e) => e.target === sheet && this.close());
@@ -388,10 +426,10 @@ export class App {
         body.replaceChildren();
         const top = el('div', 'member');
         const mid = el('div');
-        mid.append(el('div', 'name', g.lookActor(a)), el('div', 'small', `Level ${a.level} · ${a.exp} experience`));
-        top.append(this.face(a), mid, el('div'));
+        mid.append(el('div', 'name', g.lookActor(a)), el('div', 'small', `Level ${a.level}, ${a.exp} experience`));
+        top.append(this.facePicture(a), mid, el('div'));
         const stats = el('div', 'stats');
-        for (const [k, v] of [['Strength', a.strength], ['Dexterity', a.dex], ['Intelligence', a.intelligence], ['Health', `${a.hp}/${a.maxHp}`], ['Magic', a.magic], ['Carrying', `${invWeight(g.objects, a.id).toFixed(1)}/${a.maxWeight}`]] as const) {
+        for (const [k, v] of [['Str', a.strength], ['Dex', a.dex], ['Int', a.intelligence], ['Health', `${a.hp}/${a.maxHp}`], ['Magic', a.magic], ['Load', `${Math.round(invWeight(g.objects, a.id))}/${a.maxWeight}`]] as const) {
           const d = el('div');
           d.append(el('b', '', String(v)), el('span', 'small', k));
           stats.append(d);
@@ -434,7 +472,7 @@ export class App {
           if (j.readings.length === 0) body.append(el('p', 'small', 'Signs and books read are kept here.'));
           for (const r of [...j.readings].reverse()) {
             const n = el('div', 'note');
-            n.append(el('div', 'small', `${r.what} · ${r.where} · ${r.date}`), el('q', '', r.text));
+            n.append(el('div', 'small', `${r.what}, ${r.where}, ${r.date}`), el('q', '', r.text));
             body.append(n);
           }
           return;
@@ -445,7 +483,7 @@ export class App {
           for (const q of [...j.people].reverse()) {
             const row = el('div', 'member');
             const mid = el('div');
-            mid.append(el('div', 'name', q.name || q.desc), el('div', 'small', `${q.name ? q.desc + ' · ' : ''}${q.where} · met ${q.met}`));
+            mid.append(el('div', 'name', q.name || q.desc), el('div', 'small', `${q.name ? q.desc + ', ' : ''}${q.where}, met ${q.met}`));
             const a = g.actors.get(q.actor);
             row.append(a ? this.view.tileImage(g.objects.objToTile[a.objN] + 8) : el('div'), mid, el('div', 'small', `${q.notes.length} ›`));
             row.addEventListener('click', () => draw('people', q.actor));
@@ -453,7 +491,7 @@ export class App {
           }
           return;
         }
-        body.append(btn('‹ Everyone', () => draw('people')), el('h3', '', p.name || p.desc), el('div', 'small', `${p.desc} · ${p.where} · met ${p.met}`));
+        body.append(btn('< Everyone', () => draw('people')), el('h3', '', p.name || p.desc), el('div', 'small', `${p.desc}, ${p.where}, met ${p.met}`));
         if (p.topics.length) {
           const chips = el('div', 'chips');
           for (const t of p.topics) chips.append(el('span', '', t));
@@ -461,7 +499,7 @@ export class App {
         }
         for (const n of p.notes) {
           const d = el('div', 'note');
-          d.append(el('div', 'asked', `${n.asked} · ${n.date}`), el('q', '', n.said));
+          d.append(el('div', 'asked', `${n.asked}, ${n.date}`), el('q', '', n.said));
           body.append(d);
         }
       };
