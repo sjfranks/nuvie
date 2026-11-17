@@ -100,6 +100,34 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     expect(g.log.some((l) => /Create \d+ food/.test(l.text))).toBe(true);
   });
 
+  it.runIf(folder === 'ultima6')('casts every spell without fault', () => {
+    const g = new Game(load());
+    const avatar = g.player;
+    const book = g.objects.create(57, 0, 0);
+    g.objects.toInventory(book, avatar.id);
+    g.ready(book, avatar);
+    g.objects.toContainer(g.objects.create(58, 0, 255), book);
+    avatar.level = 8;
+    for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
+    const ported: string[] = [];
+    for (const sp of SPELLS) {
+      for (const r of [65, 66, 67, 68, 69, 70, 71, 72]) if (g.invCount(avatar.id, r) < 2) g.invNew(avatar.id, r, 5, 0);
+      avatar.magic = 99;
+      avatar.hp = avatar.maxHp;
+      if (g.player !== avatar) break;
+      const troll = g.combat.spawn(371, avatar.x + 2, avatar.y, avatar.z, 0, 8);
+      g.log = [];
+      const aim = g.magic.aim(sp);
+      expect(() => g.castSpell(avatar, sp, aim === 'none' ? undefined : troll?.x, aim === 'none' ? undefined : troll?.y)).not.toThrow();
+      if (!g.log.some((l) => l.text.includes('not yet ported'))) ported.push(sp.name);
+      if (troll && troll.objN) Object.assign(troll, { objN: 0, visible: false });
+      for (const a of g.actors.list) if (a.id >= 203) Object.assign(a, { objN: 0, visible: false });
+      g.peer = false;
+    }
+    console.log(ported.length, 'spells ported');
+    expect(ported.length).toBeGreaterThan(50);
+  });
+
   it.runIf(folder === 'ultima6')('opens a red moongate with the orb, and goes through it', () => {
     const g = new Game(load());
     for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });

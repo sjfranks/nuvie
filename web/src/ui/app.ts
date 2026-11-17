@@ -287,6 +287,14 @@ export class App {
 
   private changed(): void {
     const g = this.game;
+    if (g.peer) {
+      g.peer = false;
+      this.open('Peer', (body) => {
+        const map = this.view.overhead(128);
+        map.className = 'overhead';
+        body.append(map, el('p', 'small', `The land about, from above: ${g.where()}.`));
+      });
+    }
     if (g.askWhere && this.mode !== 'where') {
       this.sheet?.remove();
       this.sheet = null;

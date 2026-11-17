@@ -84,10 +84,13 @@ and death - the Avatar wakes in Lord British's castle with the fallen raised. Si
 turn (not by movement points), monsters that cast fight bare-handed, and thrown weapons are not lost.
 
 **Magic** has Magic.cpp's checks - a readied spellbook holding the spell, a level and magic points as high as its
-circle, a reagent of each kind - and magic points come back each hour. Ported spells: Create Food, Douse, Harm,
-Heal, Help, Ignite, Light, Magic Arrow, Poison, Sleep, Unlock Magic, Fireball, Great Light, Mass Awaken, Mass Sleep,
-Great Heal, Locate, Explosion, Lightning, Chain Bolt, Kill and Resurrect; the other 58 are listed and cost their
-reagents, but say they are not yet ported. Torches can be lit and held, and Light and torches widen the party's
+circle, a reagent of each kind - and magic points come back each hour. 55 of the 80 spells are ported from their Lua:
+the healing, harming and killing spells, the winds and storms, sleep, poison, paralysis, charm, curse, protection,
+invisibility, fear and confusion, Light, Infravision, X-ray and Peer (the land seen from above), locking and
+unlocking, Vanish and Reappear, Conjure, Insect Swarm and Summon, Time Stop, Tremor, Help and Resurrect. The rest
+(fields, Gate Travel, Wizard Eye, Enchant, Clone, Armageddon and the like) cost their reagents but say they are not
+yet ported. Their effects wear off as in the original, poison bites now and then, and the charmed fight for the
+party. Torches can be lit and held, and Light and torches widen the party's
 light at night.
 
 **The Orb of the Moons** works as in Ultima VI once Lord British has told of it: use it from the Avatar's sheet,

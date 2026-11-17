@@ -6,9 +6,11 @@
 import type { Actor } from './actors.ts';
 import { STATUS_DEAD } from './actors.ts';
 import type { Game } from './game.ts';
+import { ALIGN, CHARMED, CURSED, INVISIBLE, PARALYZED, PROTECTED, adj, alignment } from './combat.ts';
 import { carried, invCount, invDelete, invNew } from './inventory.ts';
 import type { Obj } from './objects.ts';
 import { MONSTERS, SPELLS } from './u6combat.ts';
+import { setAlignment as setAlign } from './combat.ts';
 import { OBJ } from './u6tables.ts';
 
 export type Spell = (typeof SPELLS)[number];
@@ -56,7 +58,7 @@ const LIGHTS: ReadonlySet<number> = new Set([122, 145, 164, OBJ.TORCH, 206]);
 export class Magic {
   constructor(readonly g: Game) {}
 
-  private rand(lo: number, hi: number): number {
+  rand(lo: number, hi: number): number {
     return lo + this.g.random(hi - lo + 1);
   }
 
@@ -145,6 +147,60 @@ export class Magic {
 
   actorAt(x: number, y: number, z: number): Actor | null {
     return this.g.actors.at(x, y, z);
+  }
+
+  /** Everyone within five squares of the caster (fear.lua, tremor.lua and the like). */
+  nearCaster(c: Actor): Actor[] {
+    return this.g.actors.list.filter((a) => a !== c && a.alive && a.visible && a.objN !== 0 && a.z === c.z && Math.abs(a.x - c.x) <= 5 && Math.abs(a.y - c.y) <= 5);
+  }
+
+  /** A wind (magic_wind): the square aimed at and two to either side of it, across the way it blows. */
+  wind(c: Actor, x: number, y: number): Actor[] {
+    const dx = Math.sign(x - c.x);
+    const dy = Math.sign(y - c.y);
+    const [px, py] = dx && dy ? [dx, -dy] : [dy, dx];
+    const out: Actor[] = [];
+    for (let i = -2; i <= 2; i++) {
+      const a = this.actorAt(x + px * i, y + py * i, c.z);
+      if (a && a !== c && !out.includes(a)) out.push(a);
+    }
+    return out;
+  }
+
+  /** Bring creatures to fight for the caster (conjure.lua, insect_swarm.lua, summon.lua). */
+  summon(c: Actor, objN: number, n: number, near = 5): void {
+    let made = 0;
+    for (let tries = 0; tries < n * 8 && made < n; tries++) {
+      const x = c.x + this.rand(-near, near);
+      const y = c.y + this.rand(-near, near);
+      if (!this.g.canStand(x, y, c.z)) continue;
+      const a = this.g.combat.spawn(objN, x, y, c.z, alignment(c), 0x8);
+      if (a) made++;
+    }
+    if (made) this.g.say('sys', `${made === 1 ? 'A creature appears' : `${made} creatures appear`} to fight for ${this.name(c)}.`);
+    else this.noEffect();
+  }
+
+  /** spell_kill_actor */
+  kill(c: Actor, a: Actor): void {
+    if (MONSTERS.get(a.objN)?.corpImmune === 1) this.noEffect();
+    else if (this.resists(a, c)) this.failed();
+    else this.g.combat.hurt(c, a, a.hp);
+  }
+
+  /** spell_poison_actor */
+  poison(c: Actor, a: Actor): void {
+    if (MONSTERS.get(a.objN)?.poisonImmune === 1 || !MONSTERS.has(a.objN) || a.id === 0) this.noEffect();
+    else if (Math.floor((Math.floor(adj(a, a.strength) / 2) + 30 - adj(c, c.intelligence)) / 2) <= this.rand(1, 30)) {
+      a.statusFlags |= 0x08;
+      this.g.combat.flash(a.x, a.y, a.z, 'hit');
+      this.g.say('sys', `${this.name(a)} poisoned!`);
+    } else this.failed();
+  }
+
+  charm(c: Actor, a: Actor): void {
+    if (this.resists(a, c)) this.failed();
+    else this.g.combat.charm(a, alignment(c));
   }
 
   /** Everyone within two squares of a place (an explosion's reach). */
@@ -242,14 +298,7 @@ const CASTS = new Map<number, Cast>([
     if ((Math.floor(a.dex / 2) + 30 - c.intelligence) / 2 <= m.g.random(30) + 1) m.g.combat.hurt(c, a, m.g.random(10) + 1);
     else m.failed();
   }) }],
-  [18, { aim: 'actor', tile: 0x17c, run: (m, c, x, y) => onActor(m, x, y, c.z, (a) => {
-    if (MONSTERS.get(a.objN)?.poisonImmune === 1 || !MONSTERS.has(a.objN)) m.noEffect();
-    else if (Math.floor((Math.floor(a.strength / 2) + 30 - c.intelligence) / 2) <= m.g.random(30) + 1) {
-      a.statusFlags |= 0x08;
-      m.g.combat.flash(a.x, a.y, a.z, 'hit');
-      m.g.say('sys', `${m.g.lookActor(a)} poisoned!`);
-    } else m.failed();
-  }) }],
+  [18, { aim: 'actor', tile: 0x17c, run: (m, c, x, y) => onActor(m, x, y, c.z, (a) => m.poison(c, a)) }],
   [20, { aim: 'actor', tile: 0x17d, run: (m, c, x, y) => onActor(m, x, y, c.z, (a) => void m.sleep(c, a)) }],
   [23, { aim: 'obj', run: (m, c, x, y) => onObj(m, x, y, c.z, (o) => {
     if (o.objN >= OBJ.OAKEN_DOOR && o.objN <= OBJ.STEEL_DOOR && o.frameN >= 13) o.frameN -= 8;
@@ -296,12 +345,143 @@ const CASTS = new Map<number, Cast>([
         .sort((p, q) => (p.x - from.x) ** 2 + (p.y - from.y) ** 2 - ((q.x - from.x) ** 2 + (q.y - from.y) ** 2))[0] ?? null;
     }
   }) }],
-  [101, { aim: 'actor', tile: 0x18c, run: (m, c, x, y) => onActor(m, x, y, c.z, (a) => {
-    if (MONSTERS.get(a.objN)?.corpImmune === 1) m.noEffect();
-    else if (m.resists(a, c)) m.failed();
-    else m.g.combat.hurt(c, a, a.hp);
-  }) }],
+  [101, { aim: 'actor', tile: 0x18c, run: (m, c, x, y) => onActor(m, x, y, c.z, (a) => m.kill(c, a)) }],
   // Circle 8
+  // ---- more, ported for the round after combat ----
+  [3, { aim: 'actor', tile: 0x17f, run: (m, c, x, y) => onActor(m, x, y, c.z, (a) => {
+    // Dispel Magic: sleep, poison, paralysis and charm undone.
+    const was = a.statusFlags & (0x04 | 0x08 | PARALYZED) || a.objFlags & CHARMED;
+    a.statusFlags &= ~(0x04 | 0x08 | PARALYZED);
+    m.g.combat.uncharm(a);
+    if (was) m.success();
+    else m.noEffect();
+  }) }],
+  [16, { aim: 'none', run: (m) => {
+    m.g.infraTurns = Math.max(m.g.infraTurns, 20);
+    m.success();
+  } }],
+  [19, { aim: 'place', tile: 0x17f, run: (m, c, x, y) => {
+    // Reappear: what Vanish took, set down here.
+    const v = m.g.vanished;
+    if (!v || !m.g.map.isPassable(x, y, c.z)) return void m.noEffect();
+    const o = m.g.objects.create(v.objN, 1, 0);
+    o.frameN = v.frameN;
+    o.status |= 0x21;
+    [o.x, o.y, o.z] = [x, y, c.z];
+    m.g.objects.add(o);
+    m.g.vanished = null;
+    m.success();
+  } }],
+  [25, { aim: 'obj', tile: 0x17f, run: (m, c, x, y) => onObj(m, x, y, c.z, (o) => {
+    // Vanish: small things only (tile flag 3, bit 3).
+    if (!(m.g.objects.tileOf(o).flags3 & 0x08) || o.container) return false;
+    m.g.vanished = { objN: o.objN, frameN: o.frameN };
+    m.g.objects.unlink(o);
+    return m.success();
+  }) }],
+  [32, { aim: 'actor', tile: 0x17f, run: (m, c, x, y) => onActor(m, x, y, c.z, (a) => {
+    a.objFlags |= CURSED;
+    m.success();
+  }) }],
+  [36, { aim: 'obj', run: (m, c, x, y) => onObj(m, x, y, c.z, (o) => {
+    if (o.objN >= OBJ.OAKEN_DOOR && o.objN <= OBJ.STEEL_DOOR && o.frameN >= 5 && o.frameN <= 7) o.frameN += 8;
+    else if (o.objN === OBJ.CHEST && (o.frameN === 1 || o.frameN === 2)) o.frameN = 3;
+    else return false;
+    m.g.say('sys', 'Magically locked!');
+    return true;
+  }) }],
+  [39, { aim: 'none', run: (m) => {
+    m.g.peer = true;
+  } }],
+  [40, { aim: 'actor', tile: 0x17f, run: (m, c, x, y) => onActor(m, x, y, c.z, (a) => {
+    a.statusFlags |= PROTECTED;
+    m.success();
+  }) }],
+  [41, { aim: 'none', run: (m, c) => {
+    for (const a of m.nearCaster(c)) if (MONSTERS.get(a.objN)?.halfDmg === 1 && !m.resists(a, c)) a.worktype = 0x13;
+    m.success();
+  } }],
+  [49, { aim: 'none', run: (m, c) => {
+    const i = m.g.random(16);
+    m.summon(c, i <= 3 ? 0x173 : i <= 6 ? 0x156 : i <= 9 ? 0x169 : i <= 12 ? 0x158 : 0x166, 1);
+  } }],
+  [50, { aim: 'actor', run: (m, c, x, y) => onActor(m, x, y, c.z, (a) => {
+    // Disable: down to one hit point.
+    if (m.resists(a, c)) m.failed();
+    else m.g.combat.hurt(c, a, Math.max(0, a.hp - 1));
+  }) }],
+  [66, { aim: 'none', run: (m, c) => m.summon(c, 0x157, 8) }],
+  [67, { aim: 'actor', tile: 0x18b, run: (m, c, x, y) => onActor(m, x, y, c.z, (a) => {
+    if (a.objFlags & INVISIBLE) return void m.noEffect();
+    a.objFlags |= INVISIBLE;
+    m.success();
+  }) }],
+  [69, { aim: 'actor', tile: 0x17f, run: (m, c, x, y) => onActor(m, x, y, c.z, (a) => {
+    a.statusFlags |= PARALYZED;
+    m.g.combat.flash(a.x, a.y, a.z, 'hit');
+    m.g.say('sys', `${m.g.lookActor(a)} is paralyzed.`);
+  }) }],
+  [71, { aim: 'none', run: (m, c) => {
+    for (const a of m.g.actors.list) if (a.objFlags & INVISIBLE && a.z === c.z && Math.abs(a.x - c.x) <= 5 && Math.abs(a.y - c.y) <= 5) a.objFlags &= ~INVISIBLE;
+    m.success();
+  } }],
+  [73, { aim: 'none', run: (m) => {
+    m.g.xrayUntil = (typeof performance !== 'undefined' ? performance.now() : 0) + 6000;
+    m.g.say('sys', 'The walls fade...');
+  } }],
+  [80, { aim: 'actor', tile: 0x17f, run: (m, c, x, y) => onActor(m, x, y, c.z, (a) => m.charm(c, a)) }],
+  [82, { aim: 'none', run: (m, c) => {
+    // Confuse: the evil turn on their own.
+    for (const a of m.nearCaster(c)) if (alignment(a) === ALIGN.EVIL && !m.resists(a, c)) {
+      setAlign(a, ALIGN.GOOD);
+      a.worktype = 0x8;
+    }
+    m.success();
+  } }],
+  [83, { aim: 'place', run: (m, c, x, y) => m.wind(c, x, y).forEach((a) => m.fire(c, a)) }],
+  [84, { aim: 'place', run: (m, c, x, y) => {
+    // Hail Storm: a hard rain of small blows.
+    for (const a of m.around(x, y, c.z)) for (let i = m.rand(1, 4); i > 0 && a.hp > 0; i--) m.g.combat.hurt(c, a, 1);
+    m.success();
+  } }],
+  [85, { aim: 'place', tile: 0x18b, run: (m, c, x, y) => {
+    for (const a of m.around(x, y, c.z)) a.statusFlags |= PROTECTED;
+    m.success();
+  } }],
+  [87, { aim: 'place', run: (m, c, x, y) => m.wind(c, x, y).forEach((a) => m.poison(c, a)) }],
+  [98, { aim: 'place', run: (m, c, x, y) => m.wind(c, x, y).forEach((a) => m.g.combat.hurt(c, a, m.rand(1, 30))) }],
+  [99, { aim: 'none', run: (m, c) => {
+    // Fear: all but the good, and the dead that walk, flee.
+    for (const a of m.nearCaster(c)) if (alignment(a) !== ALIGN.GOOD && !m.resists(a, c) && MONSTERS.get(a.objN)?.corpImmune !== 1) a.worktype = 0x13;
+    m.success();
+  } }],
+  [102, { aim: 'place', tile: 0x18b, run: (m, c, x, y) => {
+    for (const a of m.around(x, y, c.z)) if (!a.inParty) a.objFlags |= CURSED;
+    m.success();
+  } }],
+  [103, { aim: 'none', run: (m) => {
+    for (const p of m.g.party) p.actor.objFlags |= INVISIBLE;
+    m.success();
+  } }],
+  [104, { aim: 'none', run: (m, c) => {
+    // Wing Strike: a dragon's shadow over every foe near.
+    const foes = m.nearCaster(c).filter((a) => alignment(a) === ALIGN.EVIL || alignment(a) === ALIGN.CHAOTIC);
+    if (!foes.length) return void m.g.say('sys', 'No foes.');
+    for (const a of foes) m.g.combat.hurt(c, a, m.rand(1, 20));
+  } }],
+  [113, { aim: 'place', run: (m, c, x, y) => m.wind(c, x, y).forEach((a) => m.kill(c, a)) }],
+  [115, { aim: 'place', tile: 0x188, run: (m, c, x, y) => m.around(x, y, c.z).forEach((a) => a !== c && !a.inParty && m.charm(c, a)) }],
+  [116, { aim: 'place', tile: 0x188, run: (m, c, x, y) => m.around(x, y, c.z).forEach((a) => a !== c && m.kill(c, a)) }],
+  [119, { aim: 'none', run: (m, c) => m.summon(c, 367, 1, 1) }],
+  [120, { aim: 'none', run: (m) => {
+    m.g.combat.timeStop = 10;
+    m.g.say('sys', 'Time stops.');
+  } }],
+  [121, { aim: 'none', run: (m, c) => {
+    // Tremor: the earth shakes the evil, but not what flies.
+    for (const a of m.nearCaster(c)) if (alignment(a) === ALIGN.EVIL && MONSTERS.get(a.objN)?.flies !== 1) m.g.combat.hurt(c, a, m.rand(1, 30));
+    m.success();
+  } }],
   [117, { aim: 'obj', run: (m, c, x, y) => onObj(m, x, y, c.z, (o) => {
     // Resurrect: a body that was someone (not a passing monster) gets up.
     if (o.objN !== OBJ.DEAD_BODY || o.quality === 0 || o.quality >= 203) return false;

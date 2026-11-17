@@ -99,6 +99,14 @@ export class Game implements ConvWorld {
   readonly magic: Magic;
   /** Turns left of a Light spell's glow round the party. */
   lightTurns = 0;
+  /** Turns left of Infravision: everyone is seen, even in the dark. */
+  infraTurns = 0;
+  /** Until when (performance.now()) X-ray shows through walls. */
+  xrayUntil = 0;
+  /** What Vanish took, for Reappear. */
+  vanished: { objN: number; frameN: number } | null = null;
+  /** The Peer spell asks for the map seen from above. */
+  peer = false;
   readonly clock: Clock;
   party: PartyMember[] = [];
   log: LogLine[] = [];
@@ -463,6 +471,7 @@ export class Game implements ConvWorld {
     this.turns++;
     if (this.turns % 2 === 0) this.advance(1);
     if (this.lightTurns > 0) this.lightTurns--;
+    if (this.infraTurns > 0) this.infraTurns--;
     this.combat.update();
     this.combat.round();
     this.moveNpcs();
