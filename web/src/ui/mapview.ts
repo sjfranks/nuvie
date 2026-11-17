@@ -288,8 +288,10 @@ export class MapView {
   private drawObjs(lower: boolean, top: boolean): void {
     const g = this.game;
     const z = g.player.z;
-    for (let vy = 0; vy <= this.rows; vy++) {
-      for (let vx = 0; vx <= this.cols; vx++) {
+    // From the bottom right to the top left, as MapWindow::drawObjSuperBlock does: a thing two squares wide or tall is
+    // based at its bottom right, so what stands on its other squares (a candle on a table) is drawn after it.
+    for (let vy = this.rows + 1; vy >= 0; vy--) {
+      for (let vx = this.cols + 1; vx >= 0; vx--) {
         const l = g.objects.list(wrap(this.curX + vx, z), wrap(this.curY + vy, z), z);
         if (l) for (const o of l) this.drawObj(o, vx, vy, lower, top);
       }

@@ -7,7 +7,7 @@ import type { Actor } from '../game/actors.ts';
 import { Game, type SaveState } from '../game/game.ts';
 import { invWeight } from '../game/inventory.ts';
 import type { Obj } from '../game/objects.ts';
-import { OBJ } from '../game/u6tables.ts';
+import { OBJ, READY_SLOT } from '../game/u6tables.ts';
 import { REAGENTS, reagentCounts, reagentNames, words, type Spell } from '../game/magic.ts';
 import { MapView } from './mapview.ts';
 import { haveIcons } from './theme.ts';
@@ -59,6 +59,13 @@ export class App {
   /** A spell chosen in the book, waiting for where. */
   private pending: { caster: Actor; spell: Spell } | null = null;
   private wasTalking = false;
+  /** Whether the log follows its newest line (until the player scrolls back). */
+  private stick = true;
+  private logLength = 0;
+  /** Where in the log the conversation now going began. */
+  private talkFrom = 0;
+  /** The container whose contents are open over the game. */
+  private shownContainer: Obj | null = null;
   private readonly music: Music;
   private readonly sfx: Sfx;
   private mode: Mode = null;
@@ -96,6 +103,11 @@ export class App {
     side.append(divider, pane, this.foot);
     this.root.append(wrap, side);
     host.replaceChildren(this.root);
+    this.body.addEventListener('scroll', () => {
+      this.stick = this.body.scrollTop + this.body.clientHeight >= this.body.scrollHeight - 6;
+    });
+    // The pane changes size (a conversation shrinks the map): the newest line stays in view.
+    new ResizeObserver(() => this.toBottom()).observe(this.body);
 
     // A tap acts (tap()); a finger held down walks the party towards it while it stays, sliding to steer.
     const at = (e: PointerEvent): { x: number; y: number } => {
@@ -367,6 +379,7 @@ export class App {
   private changed(): void {
     const g = this.game;
     this.music?.update();
+    if (g.openContainer && g.openContainer !== this.shownContainer && !g.converse) this.containerSheet(g.openContainer);
     if (g.peer) {
       g.peer = false;
       this.open('Peer', (body) => {
@@ -395,6 +408,7 @@ export class App {
     }
     if (this.root.classList.toggle('talking', !!g.converse) !== this.wasTalking) {
       this.wasTalking = !this.wasTalking;
+      if (this.wasTalking) this.talkFrom = Math.max(0, g.log.length - 3);
       requestAnimationFrame(() => this.layout());
     }
     this.tabLog.classList.toggle('on', pane === 'log');
@@ -416,23 +430,43 @@ export class App {
   private drawLog(): void {
     const g = this.game;
     const log = el('div', 'log');
-    for (const line of g.log.slice(-60)) {
+    // In a conversation, the words its speaker answers to are marked, and a tap asks about them.
+    const c = g.converse;
+    const keys = c ? g.lib.keywords(g.lib.scriptNum(c.npc)).filter((k) => k !== '*' && k.length > 1) : [];
+    const fits = (w: string): boolean => {
+      const lw = w.toLowerCase().replace(/'s$/, '');
+      return lw.length >= 3 && keys.some((k) => k.length >= Math.min(4, lw.length) && lw.slice(0, k.length) === k);
+    };
+    g.log.slice(-60).forEach((line, i, shown) => {
       const p = el('p', line.kind);
       const text = line.text.replace(/^\n+|\n+$/g, '');
-      if (!text) continue;
-      p.innerHTML = line.kind === 'npc' ? esc(text).replace(/@([A-Za-z']+)/g, '<span class="kw">$1</span>') : esc(text);
+      if (!text) return;
+      const current = c && g.log.length - shown.length + i >= this.talkFrom;
+      if (line.kind === 'npc') {
+        p.innerHTML = esc(text).replace(/(@?)([A-Za-z]+(?:'[A-Za-z]+)*)/g, (m, at: string, w: string) =>
+          at || (current && fits(w)) ? `<span class="kw" data-say="${w.toLowerCase().replace(/'s$/, '')}">${w}</span>` : m,
+        );
+      } else p.textContent = text;
       log.append(p);
-    }
-    const c = g.openContainer;
-    if (c && !g.converse) {
-      for (const o of c.container ?? []) {
-        const row = this.itemRow(o);
-        row.append(btn('Take', () => g.get(0, 0, o)));
-        log.append(row);
-      }
-    }
+    });
+    log.addEventListener('click', (e) => {
+      const say = (e.target as HTMLElement).dataset?.say;
+      if (say && g.asking()?.type === 'keyword') g.reply(say);
+    });
+    const grew = g.log.length !== this.logLength;
+    this.logLength = g.log.length;
     this.body.replaceChildren(log);
+    if (grew) this.stick = true;
+    this.toBottom();
+  }
+
+  /** Keep the newest lines in view, unless the player has scrolled back to read. */
+  private toBottom(): void {
+    if (!this.stick) return;
     this.body.scrollTop = this.body.scrollHeight;
+    requestAnimationFrame(() => {
+      if (this.stick) this.body.scrollTop = this.body.scrollHeight;
+    });
   }
 
   private itemRow(o: Obj, sub = false): HTMLElement {
@@ -528,6 +562,9 @@ export class App {
 
   private open(title: string, fill: (body: HTMLElement) => void): void {
     this.sheet?.remove();
+    const f = this.onClose;
+    this.onClose = null;
+    f?.();
     const sheet = el('div', 'sheet');
     const box = el('div', 'paper');
     const head = el('header');
@@ -541,14 +578,113 @@ export class App {
     this.sheet = sheet;
   }
 
+  /** Run once when the sheet now open closes. */
+  private onClose: (() => void) | null = null;
+
   private close(): void {
     this.sheet?.remove();
     this.sheet = null;
+    const f = this.onClose;
+    this.onClose = null;
+    f?.();
     this.changed();
+  }
+
+  /**
+   * The paper doll (DollWidget, the original look): the body from the game's own tiles (368 to 371), and round it a
+   * ring for each place a thing is worn or held - head, neck, body, both arms, both hands for rings, feet - with what
+   * is readied there. A ring held by a two-handed weapon is barred. Tapping a place picks what is there.
+   */
+  private doll(a: Actor, pick: (o: Obj) => void): HTMLCanvasElement | null {
+    const g = this.game;
+    if (g.kind !== 'u6' || !haveIcons) return null;
+    const S = 16;
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    c.className = 'doll';
+    const ctx = c.getContext('2d')!;
+    const put = (tile: number, x: number, y: number): void => ctx.drawImage(this.view.tileImage(tile), x, y);
+    for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) put(368 + i * 2 + j, S + j * S, S + i * S);
+    // Where each place is (DollWidget::display_doll).
+    const at: Record<string, [number, number]> = {
+      head: [24, 0], neck: [0, 8], body: [48, 8], arm: [0, 24], arm2: [48, 24], hand: [0, 40], hand2: [48, 40], foot: [24, 48],
+    };
+    const worn: Record<string, Obj | 'barred'> = {};
+    for (const o of g.objects.inventories[a.id] ?? []) {
+      if (o.loc !== 'readied') continue;
+      const slot = READY_SLOT.get(o.objN);
+      if (slot === 0) worn.head = o;
+      else if (slot === 1) worn.neck = o;
+      else if (slot === 2) worn.body = o;
+      else if (slot === 7) worn.foot = o;
+      else if (slot === 4) {
+        worn.arm = o;
+        worn.arm2 = 'barred';
+      } else if (slot === 3) {
+        if (!worn.arm) worn.arm = o;
+        else worn.arm2 = o;
+      } else if (slot === 5) {
+        if (!worn.hand) worn.hand = o;
+        else worn.hand2 = o;
+      }
+    }
+    for (const [k, [x, y]] of Object.entries(at)) {
+      const w = worn[k];
+      if (w === 'barred') put(389, x, y);
+      else if (w) put(g.objects.tileNum(w), x, y);
+      else put(410, x, y);
+    }
+    c.addEventListener('click', (e) => {
+      const r = c.getBoundingClientRect();
+      const x = ((e.clientX - r.left) / r.width) * 64;
+      const y = ((e.clientY - r.top) / r.height) * 64;
+      for (const [k, [sx, sy]] of Object.entries(at)) {
+        const w = worn[k];
+        if (x >= sx && x < sx + S && y >= sy && y < sy + S && w && w !== 'barred') pick(w);
+      }
+    });
+    return c;
+  }
+
+  /** What a container in the world holds, over the game, each thing to take or all of it. */
+  private containerSheet(c: Obj): void {
+    const g = this.game;
+    this.shownContainer = c;
+    const title = g.objects.look(c).replace(/^(a|an|the) /, '');
+    this.open(title[0].toUpperCase() + title.slice(1), (body) => {
+      const draw = (): void => {
+        body.replaceChildren();
+        const inside = c.container ?? [];
+        if (!inside.length) {
+          body.append(el('p', '', 'Empty.'));
+          return;
+        }
+        for (const o of [...inside]) {
+          const row = this.itemRow(o);
+          row.append(btn('Take', () => {
+            g.get(0, 0, o);
+            draw();
+          }));
+          body.append(row);
+        }
+        const all = el('div', 'row');
+        all.append(btn('Take all', () => {
+          for (const o of [...inside]) g.get(0, 0, o);
+          draw();
+        }, 'primary'));
+        body.append(all);
+      };
+      draw();
+    });
+    this.onClose = () => {
+      g.openContainer = null;
+      this.shownContainer = null;
+    };
   }
 
   private character(a: Actor, name: string): void {
     const g = this.game;
+    const expanded = new Set<Obj>();
     this.open(name, (body) => {
       const draw = (picked: Obj | null): void => {
         body.replaceChildren();
@@ -562,12 +698,27 @@ export class App {
           d.append(el('b', '', String(v)), el('span', 'small', k));
           stats.append(d);
         }
-        body.append(top, stats);
+        body.append(top);
+        const doll = this.doll(a, (o) => draw(picked === o ? null : o));
+        if (doll) body.append(doll);
+        body.append(stats);
         const inv = g.objects.inventories[a.id];
         if (inv.length === 0) body.append(el('p', 'small', 'Carrying nothing.'));
-        const add = (o: Obj, sub: boolean): void => {
-          const row = this.itemRow(o, sub);
+        const add = (o: Obj, depth: number): void => {
+          const row = this.itemRow(o, depth > 0);
+          if (depth > 1) row.style.marginLeft = `${depth * 24}px`;
           row.addEventListener('click', () => draw(picked === o ? null : o));
+          // A container is shut until opened here.
+          if (o.container?.length) {
+            const open = expanded.has(o);
+            const t = btn(open ? '-' : `+${o.container.length}`, () => {
+              if (open) expanded.delete(o);
+              else expanded.add(o);
+              draw(picked);
+            }, 'fold');
+            t.addEventListener('click', (e) => e.stopPropagation());
+            row.append(t);
+          }
           body.append(row);
           if (picked === o) {
             const acts = el('div', 'row');
@@ -581,9 +732,9 @@ export class App {
             for (const m of g.party) if (m.actor !== a) acts.append(btn(`Give to ${m.name}`, done(() => g.give(o, m.actor))));
             body.append(acts);
           }
-          if (o.container) for (const c of o.container) add(c, true);
+          if (o.container && expanded.has(o)) for (const c of o.container) add(c, depth + 1);
         };
-        for (const o of inv) add(o, false);
+        for (const o of inv) add(o, 0);
       };
       draw(null);
     });
@@ -702,6 +853,17 @@ export class App {
         body.append(row);
       };
       item('Journal', () => this.journal());
+      const big = document.documentElement.classList.contains('big-text');
+      item(big ? 'Text: large' : 'Text: small', () => {
+        document.documentElement.classList.toggle('big-text', !big);
+        try {
+          localStorage.setItem('nuvie.text', big ? 'small' : 'large');
+        } catch {
+          // Not kept.
+        }
+        this.close();
+        this.layout();
+      });
       item(this.sfx.enabled ? 'Sounds: on' : 'Sounds: off', () => {
         this.sfx.enabled = !this.sfx.enabled;
         try {

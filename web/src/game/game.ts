@@ -132,6 +132,8 @@ export class Game implements ConvWorld {
   speaker: { actor: number; name: string } | null = null;
   /** The speaker has stopped; the player goes on. */
   paused = false;
+  /** The conversation is over, its last words still showing until the player goes on. */
+  talkOver = false;
   gender = 0;
   karma = 0;
   questFlag = 0;
@@ -807,12 +809,12 @@ export class Game implements ConvWorld {
           break;
         }
       } else if (e.type === 'end') {
+        // The last words stay to be read: the player goes on when ready.
         this.keepNote(c);
-        this.converse = null;
-        this.speaker = null;
         this.pending = [];
-        this.endTurn();
-        return;
+        this.talkOver = true;
+        this.paused = true;
+        break;
       }
     }
     if (!this.paused && c.ask) this.keepNote(c);
@@ -842,7 +844,16 @@ export class Game implements ConvWorld {
 
   /** The player taps to hear the rest. */
   continueTalk(): void {
-    if (this.converse && this.paused) this.pump();
+    if (!this.converse || !this.paused) return;
+    if (this.talkOver) {
+      this.talkOver = false;
+      this.paused = false;
+      this.converse = null;
+      this.speaker = null;
+      this.endTurn();
+      return;
+    }
+    this.pump();
   }
 
   reply(s: string): void {
@@ -1003,7 +1014,7 @@ export class Game implements ConvWorld {
       else {
         if (o.objN === OBJ.CHEST) o.frameN = 0;
         this.openContainer = o;
-        this.say('sys', o.container.length ? `Searching the ${name}: ${o.container.map((c) => this.objects.look(c)).join(', ')}.` : `The ${name} is empty.`);
+        this.say('sys', o.container.length ? `Searching the ${name}.` : `The ${name} is empty.`);
       }
     } else if (o.objN === OBJ.TORCH && this.kind === 'u6') this.useTorch(o);
     else if (BOATS.has(o.objN) && this.kind === 'u6') {

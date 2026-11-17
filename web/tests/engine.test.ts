@@ -96,6 +96,10 @@ describe('the demo world', () => {
     g.reply('nonsense');
     expect(text(g)).toContain('I know naught of that');
     g.reply('bye');
+    // The last words stay until the player goes on.
+    expect(g.talkOver).toBe(true);
+    expect(text(g)).toContain('Fair winds to thee');
+    g.continueTalk();
     expect(g.converse).toBeNull();
     const p = g.journal.person(2)!;
     expect(p.name).toBe('Tobble');

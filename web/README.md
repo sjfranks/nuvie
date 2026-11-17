@@ -54,8 +54,13 @@ Sunset and sunrise glow orange.
 - **Talking**: the speaker's face shows over the map (which shrinks to give the words room), and the foot becomes a
   menu of what can be said: Name and
   Job, the words this person has dropped (shown in gold in what they say), Bye - or Yes and No where that is the
-  question - with a box to type anything else. Where the speaker stops, **Continue** goes on.
-- **Party**: tap a member for their numbers and what they carry; tap a thing to use it, drop it or hand it on.
+  question - with a box to type anything else. The words a speaker answers to are marked in what they say: tap one
+  to ask about it. Where the speaker stops, **Continue** goes on; the last words of a conversation stay to be read
+  until the player goes on.
+- **Party**: tap a member for their sheet: the original's paper doll, with a ring for each place a thing is worn or
+  held and what is there; their numbers; and what they carry, each bag or chest folded until opened with its +.
+  Tap a thing (on the doll or in the list) to ready, use, drop or hand it on.
+- **Containers** in the world - chests, barrels, bodies - open over the game, each thing to take, or all of it.
 - **Journal**: everyone spoken with, what each said to each thing asked, the words they answer to, and every sign
   and book read.
 - The game saves itself as you play. A keyboard works too: arrows walk, space passes, L/T/U/G choose a command.

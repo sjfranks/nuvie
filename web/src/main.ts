@@ -8,6 +8,11 @@ import { App } from './ui/app.ts';
 import { installTheme } from './ui/theme.ts';
 
 const host = document.getElementById('app')!;
+try {
+  if (localStorage.getItem('nuvie.text') === 'large') document.documentElement.classList.add('big-text');
+} catch {
+  // Small text.
+}
 let app: App | null = null;
 
 type Kind = 'demo' | 'game';
