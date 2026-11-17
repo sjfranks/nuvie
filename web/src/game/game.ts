@@ -16,7 +16,7 @@ import { readShape, type Shape } from '../files/shape.ts';
 import { GameMap, wrap } from './map.ts';
 import { Obj, Objects, STATUS_OK_TO_TAKE, type Loc } from './objects.ts';
 import { Tiles } from './tiles.ts';
-import { OBJ } from './u6tables.ts';
+import { OBJ, READY_SLOT } from './u6tables.ts';
 
 export type LogKind = 'sys' | 'npc' | 'you' | 'read';
 
@@ -962,6 +962,57 @@ export class Game implements ConvWorld {
     this.objects.add(o);
     this.say('sys', `Drop ${what}.`);
     this.endTurn();
+  }
+
+  /** Whether a thing can be worn or held (Ultima VI). */
+  readiable(o: Obj): boolean {
+    return this.kind === 'u6' && READY_SLOT.has(o.objN);
+  }
+
+  /**
+   * Wear or hold a thing (Actor::add_readied_object): a slot each for head, neck, body and feet; two arms, a weapon
+   * held in both taking both; two hands for rings.
+   */
+  ready(o: Obj, a: Actor): boolean {
+    const slot = READY_SLOT.get(o.objN);
+    const what = this.objects.look(o);
+    if (slot === undefined || this.kind !== 'u6') {
+      this.say('sys', `${what} cannot be readied.`);
+      this.onChange();
+      return false;
+    }
+    const worn = this.objects.inventories[a.id].filter((r) => r.loc === 'readied' && r !== o).map((r) => READY_SLOT.get(r.objN) ?? -1);
+    const arms = worn.filter((w) => w === 3).length + worn.filter((w) => w === 4).length * 2;
+    const ok =
+      slot === 3 ? arms < 2 : slot === 4 ? arms === 0 : slot === 5 ? worn.filter((w) => w === 5).length < 2 : !worn.includes(slot);
+    if (!ok) {
+      this.say('sys', `${this.partyMemberName(a.id) || 'They'} cannot ready ${what}: take something off first.`);
+      this.onChange();
+      return false;
+    }
+    // A thing in a bag comes out to be held; a stack gives one of itself.
+    let item = o;
+    if (this.objects.isStackable(o) && o.qty > 1) {
+      o.qty--;
+      item = this.objects.create(o.objN, 1, o.quality);
+      item.frameN = o.frameN;
+    }
+    if (item.loc !== 'inv' || item.holder !== a.id) {
+      this.objects.unlink(item);
+      this.objects.inventories[a.id].unshift(item);
+      item.holder = a.id;
+    }
+    item.loc = 'readied';
+    this.say('sys', `${this.partyMemberName(a.id) || 'They'} readied ${what}.`);
+    this.onChange();
+    return true;
+  }
+
+  unready(o: Obj): void {
+    if (o.loc !== 'readied') return;
+    o.loc = 'inv';
+    this.say('sys', `Unreadied ${this.objects.look(o)}.`);
+    this.onChange();
   }
 
   /** Hand something to another member of the party. */

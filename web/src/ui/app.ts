@@ -465,6 +465,8 @@ export class App {
               f();
               draw(null);
             };
+            if (o.loc === 'readied') acts.append(btn('Unready', done(() => g.unready(o))));
+            else if (g.readiable(o)) acts.append(btn('Ready', done(() => g.ready(o, a))));
             acts.append(btn('Use', done(() => g.useObj(o))), btn('Drop', done(() => g.drop(o))));
             for (const m of g.party) if (m.actor !== a) acts.append(btn(`Give to ${m.name}`, done(() => g.give(o, m.actor))));
             body.append(acts);

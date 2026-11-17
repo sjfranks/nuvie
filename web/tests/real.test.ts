@@ -54,13 +54,34 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     const p = g.player;
     const troll = g.combat.spawn(371, p.x + 2, p.y, p.z, 0, 8)!;
     g.log = [];
-    for (let i = 0; i < 200 && troll.objN !== 0; i++) {
-      for (const a of g.actors.list) if (a.objN === 363) a.hp = 0; // the gargoyles keep out of it
-      if (!g.attackAt(troll.x, troll.y)) g.pass();
+    for (const a of gargoyles) Object.assign(a, { objN: 0, visible: false }); // the gargoyles keep out of it
+    for (let i = 0; i < 300 && troll.objN !== 0; i++) {
+      if (g.attackAt(troll.x, troll.y)) continue;
+      // Out of reach (it may flee): after it.
+      const way = g.pathTo(troll.x, troll.y, true);
+      if (way?.length) g.move(way[0][0], way[0][1]);
+      else g.pass();
     }
     const text = g.log.map((l) => l.text).join('\n');
     expect(text).toContain('Troll killed!');
     expect(g.party.length).toBe(4);
+  });
+
+  it.runIf(folder === 'ultima6')('readies and unreadies what the party carries', () => {
+    const g = new Game(load());
+    const dupre = g.party[1].actor;
+    const inv = g.objects.inventories[dupre.id];
+    const sword = inv.find((o) => o.objN === 43)!;
+    expect(sword.loc).toBe('readied');
+    g.unready(sword);
+    expect(sword.loc).toBe('inv');
+    expect(g.ready(sword, dupre)).toBe(true);
+    // A second weapon held in both hands will not go on beside it.
+    const halberd = g.objects.create(47, 0, 0);
+    g.objects.toInventory(halberd, dupre.id);
+    expect(g.ready(halberd, dupre)).toBe(false);
+    expect(g.ready(g.objects.create(55, 5, 0), dupre)).toBe(false); // arrows
+    console.log('Dupre readied:', inv.filter((o) => o.loc === 'readied').map((o) => g.objects.look(o)));
   });
 
   it('holds a conversation with everyone who has one, without the interpreter failing', () => {
