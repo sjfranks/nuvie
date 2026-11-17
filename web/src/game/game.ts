@@ -10,6 +10,7 @@ import { Actor, Actors, HYDRA, HYDRA_BODY, MANY_SQUARES, SHIP, STATUS_IN_PARTY, 
 import { Converse, ConverseLib, checkKeywords, type ConvAsk, type ConvWorld } from './converse.ts';
 import { Combat } from './combat.ts';
 import { Magic, type Spell } from './magic.ts';
+import type { SfxId } from '../audio/sfx.ts';
 import { invCount, invDelete, invFind, invNew, invWeight } from './inventory.ts';
 import { Journal, type JournalData } from './journal.ts';
 import { detectKind, mdPortrait, OFFSETS, PALETTE, type Kind } from './kind.ts';
@@ -117,6 +118,8 @@ export class Game implements ConvWorld {
   vanished: { objN: number; frameN: number } | null = null;
   /** Where the eight moonstones lie, by phase (objlist 0x1c1b); a blue moongate stands at each while a moon is up. */
   moonstones: [number, number, number][] = [];
+  /** Where the game's sounds go (the interface plays them): a sound's name, and for casting its circle. */
+  sfx: (id: SfxId, circle?: number) => void = () => {};
   /** The Peer spell asks for the map seen from above. */
   peer = false;
   readonly clock: Clock;
@@ -463,6 +466,7 @@ export class Game implements ConvWorld {
       }
       p.setDirection(facing(dx, dy));
       this.say('sys', 'Blocked!');
+      this.sfx('blocked');
       this.onChange();
       return false;
     }
@@ -1158,6 +1162,7 @@ export class Game implements ConvWorld {
       [v.x, v.y] = [ox, oy];
       v.setDirection(od);
       this.say('sys', 'Blocked!');
+      this.sfx('blocked');
       this.onChange();
       return false;
     }

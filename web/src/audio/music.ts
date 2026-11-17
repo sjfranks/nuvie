@@ -42,13 +42,22 @@ export class Music {
     return this.game.kind === 'u6' && this.game.files.has('brit.m');
   }
 
-  /** Start the sound (browsers allow it only after a touch). */
+  /** The page's sound, made at the first touch (browsers allow it only then); effects play through it too. */
+  get context(): AudioContext | null {
+    return this.ctx;
+  }
+
+  /** Start the sound (browsers allow it only after a touch): the context always, the music where there is some. */
   start(): Promise<void> {
+    if (!this.ctx) {
+      const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!Ctx) return Promise.resolve();
+      this.ctx = new Ctx();
+    }
+    void this.ctx.resume();
     if (!this.available || !this.enabled) return Promise.resolve();
+    const ctx = this.ctx;
     this.starting ??= (async () => {
-      const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      const ctx = new Ctx();
-      this.ctx = ctx;
       this.chip = await createOpl(ctx.sampleRate);
       const node = ctx.createScriptProcessor(4096, 0, 2);
       node.onaudioprocess = (e) => this.fill(e.outputBuffer);
@@ -59,7 +68,6 @@ export class Music {
     })().catch(() => {
       this.starting = null;
     });
-    void this.ctx?.resume();
     return this.starting;
   }
 
@@ -70,8 +78,8 @@ export class Music {
     } catch {
       // Not kept.
     }
-    if (on) void this.start().then(() => this.ctx?.resume());
-    else void this.ctx?.suspend();
+    if (on) void this.start();
+    if (this.gain) this.gain.gain.value = on ? 0.6 : 0;
   }
 
   /** The group the moment calls for (Party::update_music). */

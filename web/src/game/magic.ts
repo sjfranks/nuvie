@@ -120,6 +120,7 @@ export class Magic {
     g.say('you', `${s.name}: "${words(s)}"`);
     if (why) {
       g.say('sys', why);
+      g.sfx('failure');
       return false;
     }
     const c = CASTS.get(s.num);
@@ -133,6 +134,7 @@ export class Magic {
       g.say('sys', 'The spell takes no shape here (not yet ported).');
       return true;
     }
+    g.sfx('cast2', s.circle);
     if (c.tile && (x !== a.x || y !== a.y)) g.combat.flash(x, y, a.z, 'miss', { tile: c.tile, fromX: a.x, fromY: a.y });
     c.run(this, a, x, y);
     return true;
@@ -231,10 +233,12 @@ export class Magic {
   }
   failed(): boolean {
     this.g.say('sys', 'Failed.');
+    this.g.sfx('failure');
     return false;
   }
   noEffect(): boolean {
     this.g.say('sys', 'No effect.');
+    this.g.sfx('failure');
     return false;
   }
 }
@@ -283,6 +287,7 @@ const CASTS = new Map<number, Cast>([
     for (const p of g.party) p.actor.hp = p.actor.maxHp;
     g.relocate(0x133, 0x160, 0);
     g.say('npc', 'A voice in the darkness intones, "KAL LOR!"');
+    g.sfx('kallor');
   } }],
   [8, { aim: 'obj', tile: 0x18d, run: (m, c, x, y) => onObj(m, x, y, c.z, (o) => {
     if (!LIGHTS.has(o.objN) || (o.objN === 206 && o.frameN !== 0) || !(o.frameN === 0 || o.frameN === 2)) return false;
@@ -441,6 +446,7 @@ const CASTS = new Map<number, Cast>([
   [83, { aim: 'place', run: (m, c, x, y) => m.wind(c, x, y).forEach((a) => m.fire(c, a)) }],
   [84, { aim: 'place', run: (m, c, x, y) => {
     // Hail Storm: a hard rain of small blows.
+    m.g.sfx('hail');
     for (const a of m.around(x, y, c.z)) for (let i = m.rand(1, 4); i > 0 && a.hp > 0; i--) m.g.combat.hurt(c, a, 1);
     m.success();
   } }],
@@ -479,6 +485,7 @@ const CASTS = new Map<number, Cast>([
   } }],
   [121, { aim: 'none', run: (m, c) => {
     // Tremor: the earth shakes the evil, but not what flies.
+    m.g.sfx('quake');
     for (const a of m.nearCaster(c)) if (alignment(a) === ALIGN.EVIL && MONSTERS.get(a.objN)?.flies !== 1) m.g.combat.hurt(c, a, m.rand(1, 30));
     m.success();
   } }],

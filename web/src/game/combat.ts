@@ -279,6 +279,7 @@ export class Combat {
       if (w.objN === 41 || w.objN === 54) invDelete(this.g.objects, att.id, ARROW, 1, 0);
       if (w.objN === 42 || w.objN === 50) invDelete(this.g.objects, att.id, BOLT, 1, 0);
     }
+    if (!ranged && Math.max(Math.abs(att.x - this.g.player.x), Math.abs(att.y - this.g.player.y)) < 6) this.g.sfx('swing');
     const shot = ranged && PROJECTILE.has(w.objN) ? { tile: PROJECTILE.get(w.objN)!, fromX: att.x, fromY: att.y } : undefined;
     if (!hit) {
       this.flash(foe.x, foe.y, foe.z, 'miss', shot);
@@ -303,6 +304,7 @@ export class Combat {
     const ac = this.ac(def);
     if (dmg !== 255 && ac > 0) dmg -= this.rand(1, ac);
     const who = this.cap(this.name(def));
+    if (dmg > 0) this.g.sfx('hit');
     if (dmg > 0) def.statusFlags &= ~0x04;
     if (dmg > 0) att.exp += this.hit(def, dmg);
     else this.g.say('sys', `${who} grazed.`);
@@ -325,6 +327,7 @@ export class Combat {
     const who = this.cap(this.name(def));
     def.statusFlags &= ~0x04; // the hurt wake
     this.flash(def.x, def.y, def.z, 'hit');
+    this.g.sfx('hit');
     att.exp += this.hit(def, dmg);
     if (def.hp > 0) {
       this.hitMessage(def);
@@ -420,6 +423,8 @@ export class Combat {
   private avatarDeath(): void {
     const g = this.g;
     g.say('sys', 'An unending darkness engulfs thee...');
+    g.sfx('death');
+    setTimeout(() => g.sfx('kallor'), 2400);
     g.say('npc', 'A voice in the darkness intones, "KAL LOR!"');
     // The party's dead are raised with the Avatar.
     for (const a of this.fallen) {

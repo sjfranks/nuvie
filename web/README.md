@@ -26,7 +26,9 @@ is in this repository; the demo world uses the same colours with a plain frame.
 **Music** (Ultima VI) is the game's own: its `.m` songs played by a port of AdPlug's Ultima 6 player (`u6m.cpp`) on
 DOSBox's FM synthesiser compiled to WebAssembly ([@malvineous/opl](https://github.com/Malvineous/opljs)), changing as
 the original's does - a song of the land, the battle song in a fight, the hornpipe aboard ship, the dungeon's below.
-It starts at the first touch, and Menu turns it off and on.
+It starts at the first touch, and Menu turns it off and on. **Sound effects** are the PC speaker's, made as the
+original made them (Nuvie's `PCSpeakerStream.cpp`): blocked, the swing and hit of a blow, casting by circle, failure,
+Kal Lor, the death dirge, the tremor and the hail; Menu turns them off and on.
 
 **Night** is a modern take, not the original's black that closes in square by square: a soft blue dusk over the map,
 deeper underground, with smooth pools of light round the party, and warm firelight from lamps, braziers and torches.
@@ -108,8 +110,7 @@ moongates stand at the eight moonstones while either moon is in the sky, and lea
 tap water to sail, and land beside the boat to go ashore. Ships keep to open water and must have room to turn.
 Tap a roaming horse to ride it, and the rider to get down.
 
-Not ported yet: the remaining spells, most of Nuvie's other Lua scripts, balloons, sound effects, music for Martian Dreams and Savage
-Empire, the intro and ending, most other usecode, and the silver serpent's long body (it draws as
+Not ported yet: the remaining spells, most of Nuvie's other Lua scripts, balloons, music for Martian Dreams and Savage Empire, the intro and ending, most other usecode, and the silver serpent's long body (it draws as
 one tile).
 
 `tests/real.test.ts` runs on your copies put in `web/gamedata/ultima6/`, `savage/` and `martian/` (git-ignored).

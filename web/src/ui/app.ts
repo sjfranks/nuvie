@@ -12,6 +12,7 @@ import { REAGENTS, reagentCounts, reagentNames, words, type Spell } from '../gam
 import { MapView } from './mapview.ts';
 import { haveIcons } from './theme.ts';
 import { Music } from '../audio/music.ts';
+import { Sfx } from '../audio/sfx.ts';
 
 type Mode = 'look' | 'talk' | 'use' | 'get' | 'attack' | 'cast' | 'where' | null;
 type Pane = 'log' | 'party';
@@ -59,6 +60,7 @@ export class App {
   private pending: { caster: Actor; spell: Spell } | null = null;
   private wasTalking = false;
   private readonly music: Music;
+  private readonly sfx: Sfx;
   private mode: Mode = null;
   private walk: { x: number; y: number; then: Mode | 'walk'; foe?: Actor } | null = null;
   private walkTimer = 0;
@@ -144,6 +146,13 @@ export class App {
       this.music.stop();
     };
     this.music = new Music(game);
+    this.sfx = new Sfx(() => this.music.context);
+    try {
+      this.sfx.enabled = localStorage.getItem('nuvie.sfx') !== 'off';
+    } catch {
+      // Sound on.
+    }
+    game.sfx = (id, circle) => this.sfx.play(id, circle);
     // Sound may start only once the player has touched the page.
     const wake = (): void => void this.music.start();
     window.addEventListener('pointerdown', wake, { once: true });
@@ -693,6 +702,15 @@ export class App {
         body.append(row);
       };
       item('Journal', () => this.journal());
+      item(this.sfx.enabled ? 'Sounds: on' : 'Sounds: off', () => {
+        this.sfx.enabled = !this.sfx.enabled;
+        try {
+          localStorage.setItem('nuvie.sfx', this.sfx.enabled ? 'on' : 'off');
+        } catch {
+          // Not kept.
+        }
+        this.close();
+      });
       if (this.music.available) {
         item(this.music.enabled ? 'Music: on' : 'Music: off', () => {
           this.music.setEnabled(!this.music.enabled);
