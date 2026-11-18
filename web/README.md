@@ -180,6 +180,11 @@ looses three bolts; a wand now and then vanishes. A ship whose hull gives out br
 has it - the rest stay where they are, and stay out of any fight. Alone, no one may climb ladders, enter a dungeon or
 a moongate, board a boat or rest, and only the Avatar may talk. "Party mode" (in the party list) gathers them again,
 once everyone is within six squares of the leader and no fight is on.
+
+**Formation** (Menu): how the party walks behind its leader, as Party::reform_party lays it out - standard (one
+behind and to the left, then widening rows), column, row, delta (an open triangle), or single file. Each member steps
+towards their place, turned to the way the leader faces, keeping beside someone ahead of them; where no step brings
+them nearer (a doorway, a narrow path) they fall in behind in single file. Kept with the saved game.
 Monsters that know spells (mages, liches, dragons,
 wisps, gazers and the like) carry them as charges and now and then cast one instead of striking, as actor.lua has it.
 

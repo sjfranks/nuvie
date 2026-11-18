@@ -152,6 +152,55 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     expect(g.player).toBe(leader);
   });
 
+  it.runIf(folder === 'ultima6')('walks the party in each formation, falling into place behind the leader', () => {
+    const g = new Game(load());
+    for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
+    const p = g.player;
+    // Open ground, well away from the castle.
+    let spot: [number, number] | null = null;
+    for (let r = 20; r < 200 && !spot; r += 3) for (const [x, y] of [[p.x + r, p.y], [p.x, p.y + r]]) {
+      let ok = !spot;
+      for (let dy = -6; dy <= 6; dy++) for (let dx = -6; dx <= 6; dx++) ok &&= g.map.isPassable(x + dx, y + dy, 0);
+      if (ok) spot = [x, y];
+    }
+    expect(spot).toBeTruthy();
+    for (const f of ['standard', 'column', 'row', 'delta', 'file'] as const) {
+      g.relocate(spot![0], spot![1], 0);
+      g.formation = f;
+      for (let i = 0; i < 5; i++) g.move(0, -1);
+      for (let i = 1; i < g.party.length; i++) {
+        const a = g.party[i].actor;
+        if (f !== 'file') expect([f, a.x, a.y]).toEqual([f, ...g.formationSpot(i)]);
+        expect(Math.max(Math.abs(a.x - p.x), Math.abs(a.y - p.y))).toBeLessThanOrEqual(4);
+      }
+      // Turning, the party wheels round behind.
+      for (let i = 0; i < 4; i++) g.move(1, 0);
+      for (let i = 1; i < g.party.length; i++) expect(Math.max(Math.abs(g.party[i].actor.x - p.x), Math.abs(g.party[i].actor.y - p.y))).toBeLessThanOrEqual(4);
+    }
+    // Through the castle's doors and halls, in the standard formation, the party keeps together.
+    const h = new Game(load());
+    for (const a of h.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
+    const q = h.player;
+    let goal: [number, number] = [q.x, q.y];
+    for (const [dx, dy] of [[0, 24], [0, 18], [12, 12], [-12, 12], [16, 0], [-16, 0], [0, -16]]) {
+      const w = h.pathTo(q.x + dx, q.y + dy, true);
+      if (w && w.length >= 12) {
+        goal = [q.x + dx, q.y + dy];
+        break;
+      }
+    }
+    const from = [q.x, q.y];
+    let worst = 0;
+    for (let i = 0; i < 80 && (q.x !== goal[0] || q.y !== goal[1]); i++) {
+      const way = h.pathTo(goal[0], goal[1], true);
+      if (!way?.length) break;
+      h.move(way[0][0], way[0][1]);
+      for (const m of h.party) worst = Math.max(worst, Math.max(Math.abs(m.actor.x - q.x), Math.abs(m.actor.y - q.y)));
+    }
+    expect(Math.abs(q.y - from[1]) + Math.abs(q.x - from[0])).toBeGreaterThan(10);
+    expect(worst).toBeLessThanOrEqual(4);
+  });
+
   it.runIf(folder === 'ultima6')('casts spells from a readied book, using magic points and reagents', () => {
     const g = new Game(load());
     const avatar = g.player;

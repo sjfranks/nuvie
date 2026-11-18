@@ -4,7 +4,7 @@
  * Held sideways, the map stands at the left and the rest beside it.
  */
 import type { Actor } from '../game/actors.ts';
-import { Game, type SaveState } from '../game/game.ts';
+import { Game, type Formation, type SaveState } from '../game/game.ts';
 import { invWeight } from '../game/inventory.ts';
 import type { Obj } from '../game/objects.ts';
 import { OBJ } from '../game/u6tables.ts';
@@ -80,6 +80,9 @@ export interface AppHooks {
   /** Back to the first screen; `forget` drops the saved game. */
   leave(forget: boolean): void;
 }
+
+/** How the party may walk behind its leader (Nuvie's party_formation setting, and single file). */
+const FORMATIONS: [Formation, string][] = [['standard', 'standard'], ['column', 'column'], ['row', 'row'], ['delta', 'delta'], ['file', 'single file']];
 
 /** The ways one of the party may fight (U6 combat modes), and how each is told. */
 const FIGHT_MODES: [number, string][] = [[0x2, 'Command'], [0x3, 'Front'], [0x4, 'Rear'], [0x5, 'Flank'], [0x6, 'Berserk'], [0x7, 'Retreat'], [0x8, 'Assault']];
@@ -1819,6 +1822,12 @@ export class App {
         }
         this.close();
         this.layout();
+      });
+      item(`Formation: ${FORMATIONS.find(([f]) => f === this.game.formation)?.[1] ?? 'standard'}`, () => {
+        const i = FORMATIONS.findIndex(([f]) => f === this.game.formation);
+        this.game.formation = FORMATIONS[(i + 1) % FORMATIONS.length][0];
+        this.close();
+        this.menu();
       });
       item(`Battle speed: ${BATTLE_SPEEDS[this.battleSpeed].name}`, () => {
         this.battleSpeed = (this.battleSpeed + 1) % BATTLE_SPEEDS.length;

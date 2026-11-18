@@ -64,6 +64,7 @@ export interface SaveState {
   heard?: string[];
   /** The one of the party walking alone, if any. */
   solo?: number;
+  formation?: Formation;
   /** Martian Dreams: the Avatar is dreaming, the party waiting. */
   dream?: unknown;
   moonstones?: [number, number, number][];
@@ -114,6 +115,56 @@ const FOOD: ReadonlySet<number> = new Set([OBJ.BREAD, OBJ.MEAT_PORTION]);
 const LOCS: Loc[] = ['map', 'cont', 'inv', 'readied'];
 
 /** The direction (0 north, 1 east, 2 south, 3 west) a step faces. */
+export type Formation = 'standard' | 'column' | 'row' | 'delta' | 'file';
+
+/** Each member's place behind a leader facing north (Party::reform_party), the leader at 0,0. */
+export function formationOffsets(f: Formation, n: number): [number, number][] {
+  const out: [number, number][] = [[0, 0]];
+  if (f === 'column') {
+    let [x, y] = [0, 1];
+    for (let m = 1; m < n; m++) {
+      out.push([x, y++]);
+      if (y === 5) [x, y] = [x + 1, 0];
+    }
+  } else if (f === 'row') {
+    let [x, y] = [-1, 0];
+    for (let m = 1; m < n; m++) {
+      out.push([x--, y]);
+      if (x === -5) [x, y] = [0, y + 1];
+    }
+  } else if (f === 'delta') {
+    let [x, y] = [-1, 1];
+    for (let m = 1; m < n; m++) {
+      out.push([x, y]);
+      x = -x;
+      if (x === 0 || x < 0) {
+        x -= 1;
+        y++;
+      }
+      if (y === 5) {
+        y -= -x - 1;
+        x = 0;
+      }
+    }
+  } else {
+    // Standard (and single file's fallback): the first behind, or behind and to the left; then rows widening.
+    if (n > 1) out.push([n >= 3 ? -1 : 0, 1]);
+    let [x, y, maxX] = [1, 1, 1];
+    let even = false;
+    for (let m = 2; m < n; m++) {
+      out.push([x, y]);
+      x = x === 0 ? x - 2 : x < 0 ? -x : -x - 2;
+      if (x > maxX || (x < 0 && -x > maxX)) {
+        y++;
+        even = !even;
+        maxX++;
+        x = even ? 0 : -1;
+      }
+    }
+  }
+  return out;
+}
+
 export function facing(dx: number, dy: number): number {
   if (Math.abs(dx) > Math.abs(dy)) return dx > 0 ? 1 : 3;
   return dy > 0 ? 2 : 0;
@@ -638,12 +689,78 @@ export class Game implements ConvWorld {
     p.y = ny;
     p.setDirection(facing(dx, dy));
     // Each companion takes the square the one ahead has left - but in a fight, each fights.
-    // Alone, the rest stay put.
-    const fighting = this.combat.fighting || this.isSolo;
-    for (let i = 1; i < this.party.length && !fighting; i++) {
+    // Alone, the rest stay put; in a fight, each fights.
+    if (!this.combat.fighting && !this.isSolo) this.follow(trail, other);
+    if (this.kind === 'u6') this.enterGate(nx, ny, p.z);
+    this.cost = dx !== 0 && dy !== 0 ? 10 : 5;
+    this.endTurn();
+    return true;
+  }
+
+  /** How the party walks behind its leader (Party::reform_party): Nuvie's four, or single file. */
+  formation: Formation = 'standard';
+
+  /**
+   * Where the i-th member should stand (Party::get_formation_coords): their place in the formation, turned to face
+   * the way the leader faces.
+   */
+  formationSpot(i: number): [number, number] {
+    const l = this.party[0].actor;
+    const [fx, fy] = formationOffsets(this.formation, this.party.length)[i] ?? [0, i];
+    switch (l.direction & 3) {
+      case 0:
+        return [l.x + fx, l.y + fy];
+      case 1:
+        return [l.x - fy, l.y + fx];
+      case 2:
+        return [l.x - fx, l.y - fy];
+      default:
+        return [l.x + fy, l.y - fx];
+    }
+  }
+
+  /**
+   * The party follows its leader (Party::follow, much simplified): each steps towards their place in the formation,
+   * keeping beside someone ahead of them in it; where no step brings them nearer (a doorway, a narrow path), they take
+   * the square the one ahead has left, in single file.
+   */
+  private follow(trail: { x: number; y: number }[], other: Actor | null): void {
+    const p = this.party[0].actor;
+    const free = (x: number, y: number): boolean => this.canStand(x, y, p.z);
+    for (let i = 1; i < this.party.length; i++) {
       const a = this.party[i].actor;
       if (a === other || a.z !== p.z) continue;
       const t = trail[i - 1];
+      const lost = Math.max(Math.abs(p.x - a.x), Math.abs(p.y - a.y)) > 3;
+      if (this.formation !== 'file' && !lost) {
+        const [tx, ty] = this.formationSpot(i);
+        if (a.x === tx && a.y === ty) continue;
+        const d2 = (x: number, y: number): number => (tx - x) ** 2 + (ty - y) ** 2;
+        // Beside the leader or one of those ahead in the formation, once moved.
+        const kept = (x: number, y: number): boolean => this.party.slice(0, i).some((m) => Math.max(Math.abs(m.actor.x - x), Math.abs(m.actor.y - y)) <= 1);
+        // A step nearer the place; and one more for one still short of it (follow_passA's second chance).
+        let moved = false;
+        for (let tries = 0; tries < 2 && (a.x !== tx || a.y !== ty); tries++) {
+          let best: [number, number] | null = null;
+          let bd = d2(a.x, a.y);
+          for (const [dx, dy] of [[0, -1], [1, 0], [0, 1], [-1, 0], [1, -1], [1, 1], [-1, 1], [-1, -1]]) {
+            const nx = a.x + dx;
+            const ny = a.y + dy;
+            const d = d2(nx, ny);
+            if (d < bd && free(nx, ny) && kept(nx, ny)) {
+              bd = d;
+              best = [nx, ny];
+            }
+          }
+          if (!best) break;
+          a.setDirection(facing(best[0] - a.x, best[1] - a.y));
+          [a.x, a.y] = best;
+          moved = true;
+        }
+        if (moved) continue;
+        if (Math.max(Math.abs(p.x - a.x), Math.abs(p.y - a.y)) <= 2 && kept(a.x, a.y)) continue;
+      }
+      // Single file: the square the one ahead has left.
       if (t.x === a.x && t.y === a.y) continue;
       if (Math.abs(t.x - a.x) > 2 || Math.abs(t.y - a.y) > 2 || !this.actors.at(t.x, t.y, p.z)) {
         a.setDirection(facing(t.x - a.x, t.y - a.y));
@@ -651,10 +768,6 @@ export class Game implements ConvWorld {
         a.y = t.y;
       }
     }
-    if (this.kind === 'u6') this.enterGate(nx, ny, p.z);
-    this.cost = dx !== 0 && dy !== 0 ? 10 : 5;
-    this.endTurn();
-    return true;
   }
 
   /** A turn goes by after something was done (the use code's). */
@@ -2068,6 +2181,7 @@ export class Game implements ConvWorld {
       wind: this.wind,
       heard: [...this.heard],
       solo: this.isSolo ? this.solo!.id : undefined,
+      formation: this.formation,
       dream: this.kind === 'md' ? this.mdUse.saveDream() : undefined,
       moonstones: this.moonstones,
       party: this.party.map((m) => ({ id: m.actor.id, name: m.name })),
@@ -2089,6 +2203,7 @@ export class Game implements ConvWorld {
     if (s.wind) this.wind = s.wind;
     if (s.heard) this.heard = new Set(s.heard);
     if (s.solo !== undefined) this.solo = this.actors.get(s.solo) ?? null;
+    if (s.formation) this.formation = s.formation;
     if (this.kind === 'md') this.mdUse.loadDream(s.dream);
     this.restCounter = s.rest ?? 0;
     this.kegTurns = s.keg ?? 0;
