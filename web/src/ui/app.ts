@@ -12,7 +12,8 @@ import { USED_IN_PLACE } from '../game/usecode.ts';
 import { MD_IN_PLACE } from '../game/mdusecode.ts';
 import { REAGENTS, reagentCounts, reagentNames, words, type Spell } from '../game/magic.ts';
 import { kvDelete, kvGet, kvSet } from '../files/gamefiles.ts';
-import { endingPicture } from './endings.ts';
+import { endingPicture, stillPicture } from './endings.ts';
+import { INTRO_U6 } from './intro6.ts';
 import { Gypsy } from './gypsy.ts';
 import { ASK_NAME, INTRO, Intanya, QUESTIONS as QUESTIONS_SE, SE_ENDING } from './intanya.ts';
 import { interview, type Hero, type Step } from './freud.ts';
@@ -342,6 +343,29 @@ export class App {
       const go = el('div', 'row');
       go.append(btn('Sit before the gypsy', () => this.gypsy(name, female, face), 'primary'));
       body.append(go);
+      if (g.files.has('intro.shp')) {
+        const watch = el('div', 'row');
+        watch.append(btn('Watch the introduction first', () => this.introU6(0)));
+        body.append(watch);
+      }
+    });
+  }
+
+  /** Ultima VI's introduction, a page of its words over a still at a time; then the gypsy. */
+  private introU6(i: number): void {
+    const g = this.game;
+    if (i >= INTRO_U6.length) return this.creation();
+    const [text, [file, pal, layers]] = INTRO_U6[i];
+    this.open('Ultima VI', (body) => {
+      const pic = stillPicture(g.files, file, ['palettes.int', pal], layers);
+      if (pic) {
+        pic.className = 'scene';
+        body.append(pic);
+      }
+      body.append(el('p', '', text));
+      const row = el('div', 'row');
+      row.append(btn('Skip', () => this.creation()), btn('Continue', () => this.introU6(i + 1), 'primary'));
+      body.append(row);
     });
   }
 

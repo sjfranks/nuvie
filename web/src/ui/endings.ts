@@ -36,6 +36,29 @@ const SCENES: Record<'u6' | 'md' | 'se', { images: string; palette: [string, num
   },
 };
 
+/** A still from any of a game's image libraries: layers of [picture (or group, picture), x, y] by their hot spots. */
+export function stillPicture(files: GameFiles, images: string, palette: [string, number], layers: [number, number, number][]): HTMLCanvasElement | null {
+  const all = loadImages(files, images);
+  const pal = loadPalette(files, palette[0], palette[1]);
+  if (!all.length || !pal) return null;
+  const c = document.createElement('canvas');
+  c.width = 320;
+  c.height = 200;
+  const ctx = c.getContext('2d')!;
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, 320, 200);
+  for (const [pic, x, y] of layers) {
+    const s = all[pic]?.[0];
+    if (!s) continue;
+    const tmp = document.createElement('canvas');
+    tmp.width = s.w;
+    tmp.height = s.h;
+    tmp.getContext('2d')!.putImageData(new ImageData(new Uint8ClampedArray(shapeRgba(s, pal)), s.w, s.h), 0, 0);
+    ctx.drawImage(tmp, x - (s.hx ?? 0), y - (s.hy ?? 0));
+  }
+  return c;
+}
+
 /** The picture for an ending's page, or null where the files lack it. */
 export function endingPicture(files: GameFiles, kind: 'u6' | 'md' | 'se', page: number, female: boolean): HTMLCanvasElement | null {
   const scene = SCENES[kind];

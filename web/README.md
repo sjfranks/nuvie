@@ -217,7 +217,12 @@ The endings show their pictures with their words (endings.ts): each page's still
 ending.lua scripts lay out, in the ending's own palette (cutscene.ts reads the .shp and .lzc image libraries and the
 .lbm, .pal and .int palettes).
 
-Not ported yet: the animated intros, and the endings' animation (they are shown as stills);
+Ultima VI's introduction can be watched before the gypsy ("Watch the introduction first"): intro.lua's words, from the
+lounge and the storm to the stones, the altar and the rescue, each over a still composed from intro_1/2/3.shp and
+intro.shp as the script lays them out.
+
+Not ported yet: Martian Dreams' and Savage Empire's intros, and the animation of the intro and endings (they are shown
+as stills);
 the rest of Martian Dreams' and Savage Empire's usecode, and Savage Empire's fighting (Nuvie has none to port).
 
 `tests/real.test.ts` runs on your copies put in `web/gamedata/ultima6/`, `savage/` and `martian/` (git-ignored).
