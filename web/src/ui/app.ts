@@ -158,8 +158,15 @@ export class App {
     side.append(divider, pane, this.foot);
     this.root.append(wrap, side);
     host.replaceChildren(this.root);
+    // Only the player's own scrolling leaves the newest lines: back to read stops following, down to the end follows
+    // again. Text and buttons coming and going move the scroll too, and must not.
+    let touching = 0;
+    const hold = (): void => {
+      touching = performance.now() + 1200;
+    };
+    for (const ev of ['touchstart', 'touchmove', 'wheel', 'pointerdown', 'keydown']) this.body.addEventListener(ev, hold, { passive: true });
     this.body.addEventListener('scroll', () => {
-      if (this.pane === 'log') this.stick = this.body.scrollTop + this.body.clientHeight >= this.body.scrollHeight - 6;
+      if (this.pane === 'log' && performance.now() < touching) this.stick = this.body.scrollTop + this.body.clientHeight >= this.body.scrollHeight - 6;
       this.drawThumb();
     });
     // The pane changes size (a conversation shrinks the map): the newest line stays in view.
@@ -995,7 +1002,7 @@ export class App {
     }
     if (this.root.classList.toggle('talking', !!g.converse) !== this.wasTalking) {
       this.wasTalking = !this.wasTalking;
-      if (this.wasTalking) this.talkFrom = Math.max(0, g.log.length - 3);
+      if (this.wasTalking) this.talkFrom = Math.min(g.talkStart, g.log.length);
       requestAnimationFrame(() => this.layout());
     }
     this.tabLog.classList.toggle('on', pane === 'log');
@@ -1070,7 +1077,14 @@ export class App {
     this.exchangeFrom = -1;
     if (grew) this.stick = true;
     this.toBottom();
+    // Lines that grow as they settle (fonts, wrapping) keep the end in view.
+    this.logSize.disconnect();
+    this.logSize.observe(log);
   }
+
+  private readonly logSize = new ResizeObserver(() => {
+    if (this.pane === 'log' && !this.game.converse) this.toBottom();
+  });
 
   /** Where the conversation's exchange now shown begins in the log. */
   private exchangeFrom = -1;

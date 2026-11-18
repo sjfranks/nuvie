@@ -1220,8 +1220,12 @@ export class Game implements ConvWorld {
     this.talkTo(a);
   }
 
+  /** Where in the log the conversation now going on began: its window shows nothing before. */
+  talkStart = 0;
+
   talkTo(a: Actor): void {
     if (this.converse) return;
+    this.talkStart = this.log.length;
     // Alone, only the Avatar may talk (Event::talk).
     if (this.isSolo && this.player.id !== 1 && this.soloRefused()) return;
     const c = a.statusFlags & 0x04 ? null : Converse.start(this, this.lib, a);
