@@ -201,6 +201,40 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     expect(worst).toBeLessThanOrEqual(4);
   });
 
+  it.runIf(folder === 'ultima6')('puts people to bed at night, lying in their beds, and gets them up in the morning', () => {
+    const g = new Game(load());
+    const internal = g as unknown as { updateSchedules: () => void };
+    g.clock.hour = 23;
+    internal.updateSchedules();
+    const abed = g.actors.list.filter((a) => a.objN === 146 && a.worktype === 0x91 && [[0, 0], [1, 0], [0, 1], [1, 1]].some(([dx, dy]) => g.objects.list(a.x + dx, a.y + dy, a.z)?.some((o) => o.objN === 163)));
+    expect(abed.length).toBeGreaterThan(5);
+    expect(abed.every((a) => a.statusFlags & 0x04)).toBe(true);
+    g.clock.hour = 9;
+    internal.updateSchedules();
+    expect(abed.filter((a) => a.objN === 146).length).toBe(0);
+    expect(abed.every((a) => a.objN === a.baseObjN)).toBe(true);
+  });
+
+  it.runIf(folder === 'ultima6')('lets Sherry the mouse through a mousehole', () => {
+    const g = new Game(load());
+    for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
+    const sherry = g.actors.list.find((a) => a.objN === 354 && a.id < 203)!;
+    expect(sherry).toBeTruthy();
+    const hole = g.objects.all().find((o) => o.objN === 213 && !g.map.isPassable(o.x, o.y, o.z) &&
+      [[0, 1], [0, -1], [1, 0], [-1, 0]].some(([dx, dy]) => g.canStand(o.x + dx, o.y + dy, o.z)))!;
+    expect(hole).toBeTruthy();
+    expect(g.passableFor(sherry, hole.x, hole.y, hole.z)).toBe(true);
+    expect(g.passableFor(g.player, hole.x, hole.y, hole.z)).toBe(false);
+    // In the party, alone, she walks into it.
+    g.partyAdd(sherry);
+    const [dx, dy] = [[0, 1], [0, -1], [1, 0], [-1, 0]].find(([x, y]) => g.canStand(hole.x + x, hole.y + y, hole.z))!;
+    g.relocate(hole.x + dx, hole.y + dy, hole.z);
+    g.goSolo(sherry);
+    [sherry.x, sherry.y] = [hole.x + dx, hole.y + dy];
+    expect(g.move(-dx, -dy)).toBe(true);
+    expect([sherry.x, sherry.y]).toEqual([hole.x, hole.y]);
+  });
+
   it.runIf(folder === 'ultima6')('casts spells from a readied book, using magic points and reagents', () => {
     const g = new Game(load());
     const avatar = g.player;

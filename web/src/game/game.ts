@@ -6,7 +6,7 @@
 import type { GameFiles } from '../files/gamefiles.ts';
 import { Lib } from '../files/lib.ts';
 import { lzwDecompress, lzwFile } from '../files/lzw.ts';
-import { Actor, Actors, HYDRA, HYDRA_BODY, MANY_SQUARES, SHIP, STATUS_IN_PARTY, WT } from './actors.ts';
+import { Actor, Actors, HYDRA, HYDRA_BODY, MANY_SQUARES, SHIP, STATUS_ASLEEP, STATUS_IN_PARTY, WT } from './actors.ts';
 import { Converse, ConverseLib, checkKeywords, type ConvAsk, type ConvWorld } from './converse.ts';
 import { CHARMED, Combat } from './combat.ts';
 import { FOODS, UseCode, USED_IN_PLACE } from './usecode.ts';
@@ -22,7 +22,7 @@ import { Tiles } from './tiles.ts';
 import { READY_BY_TILE } from './mdse.ts';
 import { MdUseCode } from './mdusecode.ts';
 import { SeUseCode } from './seusecode.ts';
-import { OBJ, READY_SLOT } from './u6tables.ts';
+import { ACTOR_TYPES, OBJ, READY_SLOT } from './u6tables.ts';
 
 export type LogKind = 'sys' | 'npc' | 'you' | 'read';
 
@@ -615,8 +615,15 @@ export class Game implements ConvWorld {
   // ---- moving ----
 
   /** Whether an actor could stand on a square now. */
-  canStand(x: number, y: number, z: number): boolean {
-    return this.map.isPassable(x, y, z) && !this.actors.at(wrap(x, z), wrap(y, z), z);
+  canStand(x: number, y: number, z: number, a?: Actor): boolean {
+    return (a ? this.passableFor(a, x, y, z) : this.map.isPassable(x, y, z)) && !this.actors.at(wrap(x, z), wrap(y, z), z);
+  }
+
+  /** Whether an actor may go onto a square: as the map allows, or for a mouse, through a mousehole, bars or a portcullis (U6Actor::check_move). */
+  passableFor(a: Actor, x: number, y: number, z: number): boolean {
+    if (this.map.isPassable(x, y, z)) return true;
+    if (this.kind !== 'u6' || a.objN !== OBJ.MOUSE) return false;
+    return !!this.objects.list(wrap(x, z), wrap(y, z), z)?.some((o) => o.objN === OBJ.MOUSEHOLE || o.objN === OBJ.BARS || o.objN === OBJ.PORTCULLIS);
   }
 
   private closedDoorAt(x: number, y: number, z: number): Obj | null {
@@ -671,7 +678,7 @@ export class Game implements ConvWorld {
       other.x = p.x;
       other.y = p.y;
       other.setDirection(facing(-dx, -dy));
-    } else if (other || (!this.map.isPassable(nx, ny, p.z) && !barrier)) {
+    } else if (other || (!this.passableFor(p, nx, ny, p.z) && !barrier)) {
       const door = this.closedDoorAt(nx, ny, p.z);
       if (door && !other) {
         this.useDoor(door);
@@ -726,7 +733,7 @@ export class Game implements ConvWorld {
    */
   private follow(trail: { x: number; y: number }[], other: Actor | null): void {
     const p = this.party[0].actor;
-    const free = (x: number, y: number): boolean => this.canStand(x, y, p.z);
+    const free = (x: number, y: number, a?: Actor): boolean => this.canStand(x, y, p.z, a);
     for (let i = 1; i < this.party.length; i++) {
       const a = this.party[i].actor;
       if (a === other || a.z !== p.z) continue;
@@ -747,7 +754,7 @@ export class Game implements ConvWorld {
             const nx = a.x + dx;
             const ny = a.y + dy;
             const d = d2(nx, ny);
-            if (d < bd && free(nx, ny) && kept(nx, ny)) {
+            if (d < bd && free(nx, ny, a) && kept(nx, ny)) {
               bd = d;
               best = [nx, ny];
             }
@@ -983,6 +990,7 @@ export class Game implements ConvWorld {
       if (pos === a.schedPos || pos < 0) continue;
       a.schedPos = pos;
       const s = a.sched[pos];
+      this.rise(a);
       a.worktype = s.worktype;
       a.dest = { x: s.x, y: s.y, z: s.z };
       const near = (x: number, y: number, z: number): boolean => z === p.z && Math.abs(x - p.x) <= 10 && Math.abs(y - p.y) <= 10;
@@ -992,14 +1000,51 @@ export class Game implements ConvWorld {
         a.y = s.y;
         a.z = s.z;
         a.dest = null;
+        this.settle(a);
       }
     }
+  }
+
+  /**
+   * Arrived where their schedule sends them: one going to sleep lies down in the bed there, or on the ground
+   * (U6Actor::wt_sleep).
+   */
+  settle(a: Actor): void {
+    if (this.kind !== 'u6' || a.worktype !== WT.SLEEP) return;
+    if (a.objN === OBJ.PERSON_SLEEPING) {
+      a.statusFlags |= STATUS_ASLEEP;
+      return;
+    }
+    // A bed is two squares long, the object at its foot: look under them and at the squares that reach over them.
+    const beds = [[0, 0], [1, 0], [0, 1], [1, 1]].flatMap(([dx, dy]) => this.objects.list(a.x + dx, a.y + dy, a.z)?.filter((o) => o.objN === OBJ.BED) ?? []);
+    const bed = beds.find((o) => [1, 5, 7, 10].includes(o.frameN));
+    const frame = bed ? (bed.frameN === 1 || bed.frameN === 5 ? 0 : bed.frameN === 7 || bed.frameN === 10 ? 1 : -1) : -1;
+    a.oldFrame = a.frameN;
+    if (frame >= 0) {
+      a.objN = OBJ.PERSON_SLEEPING;
+      a.frameN = frame;
+    } else {
+      const t = ACTOR_TYPES.find((r) => r[0] === a.baseObjN);
+      if (!t || !t[7]) return; // not one to lie down
+      a.objN = t[5] as number;
+      a.frameN = t[6] as number;
+    }
+    a.statusFlags |= STATUS_ASLEEP;
+  }
+
+  /** Up again: back to themselves (U6Actor::set_asleep(false), set_worktype). */
+  rise(a: Actor): void {
+    if (!(a.statusFlags & STATUS_ASLEEP) && a.objN === a.baseObjN) return;
+    if (a.worktype !== WT.SLEEP) return;
+    a.statusFlags &= ~STATUS_ASLEEP;
+    if (a.baseObjN) a.objN = a.baseObjN;
+    a.frameN = a.oldFrame ?? 0;
   }
 
   stepActor(a: Actor, dx: number, dy: number): boolean {
     const nx = wrap(a.x + dx, a.z);
     const ny = wrap(a.y + dy, a.z);
-    if (!this.canStand(nx, ny, a.z)) return false;
+    if (!this.canStand(nx, ny, a.z, a)) return false;
     a.x = nx;
     a.y = ny;
     a.setDirection(facing(dx, dy));
@@ -1022,6 +1067,7 @@ export class Game implements ConvWorld {
         if (a.dest.z !== a.z || (a.dest.x === a.x && a.dest.y === a.y)) {
           if (a.dest.z !== a.z) Object.assign(a, a.dest);
           a.dest = null;
+          this.settle(a);
           continue;
         }
         const dx = Math.sign(a.dest.x - a.x);

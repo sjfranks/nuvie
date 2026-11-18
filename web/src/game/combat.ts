@@ -778,7 +778,7 @@ export class Combat {
     const mt = (g.kind === 'u6' ? MOVETYPE.get(a.objN) : undefined) ?? 1;
     if (mt === MOVETYPE_WATER_LOW || mt === MOVETYPE_WATER_HIGH) return g.map.isWater(x, y, a.z);
     if (mt === MOVETYPE_AIR_LOW || mt === MOVETYPE_AIR_HIGH) return g.map.isPassable(x, y, a.z) || g.map.isWater(x, y, a.z);
-    return g.map.isPassable(x, y, a.z);
+    return g.passableFor(a, x, y, a.z);
   }
 
   /** A step towards (or, `away`, from) a square (actor_move_towards_loc): straight, else either way round. */
