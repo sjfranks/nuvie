@@ -132,6 +132,19 @@ export class Combat {
     return this.g.kind === 'u6' ? TEMP_FROM : 224;
   }
 
+  /** Turns are shown one by one (the app sets this; the battle speed is its own). */
+  paced = false;
+  /** Fighters' turns yet to be taken this round, when paced. */
+  readonly queue: { a: Actor; run: () => void }[] = [];
+
+  /** Take the next waiting turn; returns the actor who took it, or null when none wait. */
+  nextTurn(): Actor | null {
+    const t = this.queue.shift();
+    if (!t) return null;
+    t.run();
+    return t.a;
+  }
+
   /** A creature's base numbers in this game. */
   monster(objN: number): MonsterType | undefined {
     return this.t.monsters.get(objN);
@@ -591,6 +604,7 @@ export class Combat {
   /** actor_avatar_death: darkness, KAL LOR, and the party wakes healed in Lord British's castle. */
   private avatarDeath(): void {
     const g = this.g;
+    this.queue.length = 0;
     if (g.kind === 'md') return this.unconscious();
     g.say('sys', 'An unending darkness engulfs thee...');
     g.sfx('death');
@@ -719,25 +733,34 @@ export class Combat {
       this.timeStop--;
       return;
     }
+    // Each fighter's turn, in order: run now, or (paced) one at a time for the player to watch.
+    const turns: { a: Actor; run: () => void }[] = [];
     for (const a of g.actors.list) {
-      if (!g.party.length || g.player !== p) return; // the Avatar fell
       if (a.inParty || !this.standing(a) || a.z !== p.z || !FIGHTING.has(a.worktype)) continue;
-      if (this.asleep(a) || a.statusFlags & PARALYZED) continue;
       if (Math.max(Math.abs(a.x - p.x), Math.abs(a.y - p.y)) > 16) continue;
-      this.act(a);
+      turns.push({ a, run: () => {
+        if (!g.party.length || g.player !== p) return; // the Avatar fell
+        if (!this.standing(a) || this.asleep(a) || a.statusFlags & PARALYZED || !FIGHTING.has(a.worktype)) return;
+        this.act(a);
+      } });
     }
     // The party fights by itself, but for the one the player moves.
     if (this.fighting) {
       for (const m of g.party.slice(1)) {
         const a = m.actor;
-        if (!this.standing(a) || a.z !== p.z || this.asleep(a) || a.statusFlags & PARALYZED) continue;
-        const t = this.findTarget(a);
-        if (!t) continue;
-        if (this.range(a, t.x, t.y) <= this.reach(a) && this.clearLine(a.x, a.y, t.x, t.y, a.z)) this.attack(a, t);
-        else if (Math.max(Math.abs(a.x - p.x), Math.abs(a.y - p.y)) < 6) this.step(a, t.x, t.y);
-        else this.step(a, p.x, p.y);
+        turns.push({ a, run: () => {
+          if (!g.party.length || g.player !== p || !this.fighting) return;
+          if (!this.standing(a) || a.z !== p.z || this.asleep(a) || a.statusFlags & PARALYZED) return;
+          const t = this.findTarget(a);
+          if (!t) return;
+          if (this.range(a, t.x, t.y) <= this.reach(a) && this.clearLine(a.x, a.y, t.x, t.y, a.z)) this.attack(a, t);
+          else if (Math.max(Math.abs(a.x - p.x), Math.abs(a.y - p.y)) < 6) this.step(a, t.x, t.y);
+          else this.step(a, p.x, p.y);
+        } });
       }
     }
+    if (this.paced && this.fighting) this.queue.push(...turns);
+    else for (const t of turns) t.run();
     const now = typeof performance !== 'undefined' ? performance.now() : 0;
     this.flashes = this.flashes.filter((f) => f.until > now - 2000);
   }

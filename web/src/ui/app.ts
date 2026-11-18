@@ -34,6 +34,12 @@ const btn = (label: string, on: () => void, cls = ''): HTMLButtonElement => {
   b.addEventListener('click', on);
   return b;
 };
+/** The battle speeds: how long each fighter's turn is shown. */
+const BATTLE_SPEEDS = [
+  { name: 'slow', ms: 750 },
+  { name: 'normal', ms: 420 },
+  { name: 'fast', ms: 200 },
+];
 const esc = (s: string): string => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]!);
 
 /** Things a tap uses rather than walks onto. */
@@ -188,6 +194,19 @@ export class App {
       this.view.tick();
       this.view.render();
     }, 150));
+    // A fight's turns, one at a time, at the battle speed: each fighter is seen to act.
+    game.combat.paced = true;
+    this.timers.push(window.setInterval(() => {
+      const c = game.combat;
+      if (!c.queue.length || performance.now() < this.turnAt) return;
+      const p = game.player;
+      let a = c.nextTurn();
+      // Turns far off the map need no watching.
+      while (a && (a.z !== p.z || Math.max(Math.abs(a.x - p.x), Math.abs(a.y - p.y)) > 8) && c.queue.length) a = c.nextTurn();
+      this.turnAt = performance.now() + BATTLE_SPEEDS[this.battleSpeed].ms;
+      this.changed();
+      this.view.render();
+    }, 30));
     this.layout();
     this.changed();
     if (game.fresh && game.kind === 'u6') this.creation();
@@ -410,7 +429,7 @@ export class App {
 
   private tap(sq: { x: number; y: number }): void {
     const g = this.game;
-    if (g.converse) return;
+    if (g.converse || this.busy) return;
     clearTimeout(this.walkTimer);
     const p = g.player;
     const mode = this.mode;
@@ -495,6 +514,12 @@ export class App {
   private step(): void {
     const g = this.game;
     const w = this.walk;
+    if (w && this.busy) {
+      // The fighters are still taking their turns: the party's next step waits for them.
+      clearTimeout(this.walkTimer);
+      this.walkTimer = window.setTimeout(() => this.step(), 60);
+      return;
+    }
     if (!w || g.converse) {
       this.walk = null;
       this.mark();
@@ -733,6 +758,22 @@ export class App {
   private optsAt = -1;
 
   private thumb!: HTMLElement;
+  /** When the next fighter may take their turn. */
+  private turnAt = 0;
+  private battleSpeed = (() => {
+    try {
+      const saved = localStorage.getItem('nuvie.battle');
+      const v = saved === null ? 1 : Number(saved);
+      return v >= 0 && v < BATTLE_SPEEDS.length ? v : 1;
+    } catch {
+      return 1;
+    }
+  })();
+
+  /** While fighters take their turns, the player waits. */
+  private get busy(): boolean {
+    return this.game.combat.queue.length > 0;
+  }
 
   /** The scroll bar's thumb: shown only when there is more than fits. */
   private drawThumb(): void {
@@ -1351,6 +1392,27 @@ export class App {
         }
         this.close();
         this.layout();
+      });
+      const bare = document.documentElement.classList.contains('no-frame');
+      item(bare ? 'Map frame: off' : 'Map frame: paper', () => {
+        document.documentElement.classList.toggle('no-frame', !bare);
+        try {
+          localStorage.setItem('nuvie.frame', bare ? 'paper' : 'off');
+        } catch {
+          // Not kept.
+        }
+        this.close();
+        this.layout();
+      });
+      item(`Battle speed: ${BATTLE_SPEEDS[this.battleSpeed].name}`, () => {
+        this.battleSpeed = (this.battleSpeed + 1) % BATTLE_SPEEDS.length;
+        try {
+          localStorage.setItem('nuvie.battle', String(this.battleSpeed));
+        } catch {
+          // Not kept.
+        }
+        this.close();
+        this.menu();
       });
       item(this.sfx.enabled ? 'Sounds: on' : 'Sounds: off', () => {
         this.sfx.enabled = !this.sfx.enabled;
