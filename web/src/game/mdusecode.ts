@@ -17,6 +17,10 @@ type OnEntry = On | Record<number, OnTo>;
 
 const BERRY = 73;
 const OXIUM = 131;
+/** clothing_get_warmth_rating's table: how warm each thing worn keeps its wearer. */
+const WARMTH = new Map<number, number>([[1, 1], [2, 2], [3, 3], [4, 3], [5, 2], [6, 1], [7, 1], [8, 2], [9, 1], [10, 1], [11, 2], [14, 4], [13, 3],
+  [17, 2], [18, 3], [19, 3], [20, 4], [21, 4], [22, 3], [23, 5], [90, 12], [25, 2], [26, 2], [27, 2], [28, 3], [29, 3], [30, 3], [33, 1],
+  [34, 1], [35, 1], [36, 2], [37, 3], [38, 1], [39, 3]]);
 /** player.lua's map_entrance_tbl: where each mine or cave mouth leads, by its quality. */
 const ENTRANCES: [number, number, number][] = [
   [0x43, 0x51, 1], [0x80, 0x8d, 0], [0x76, 0xf2, 3], [0x7a, 0x0c, 3], [0x9a, 0x41, 4], [0x2b2, 0x1cc, 0], [0x73, 0x40, 4],
@@ -467,6 +471,7 @@ export class MdUseCode {
 
   private sleep(hours: number): void {
     const g = this.g;
+    this.warm = true;
     if (g.restCounter === 0 && hours > 4) {
       for (const m of g.party) m.actor.hp = Math.min(m.actor.maxHp, m.actor.hp + this.rand(3, 8) + this.rand(3, 8) * Math.floor(hours / 2));
       g.restCounter = 6;
@@ -485,6 +490,7 @@ export class MdUseCode {
         this.say('FEELS_BETTER', m.name);
       } else a.hp = Math.max(5, a.hp - (hours * 2 + 5));
     }
+    this.warm = false;
     g.say('sys', `The party rests for ${hours} hour${hours === 1 ? '' : 's'}.`);
     this.obelisks(dreamers);
     g.onChange();
@@ -1031,6 +1037,100 @@ export class MdUseCode {
         else if (o.z === z && o.objN === 233 && (o.frameN === 5 || o.frameN === 7)) o.frameN -= 4;
         else if (o.objN === 154 && (o.z === z || o.z === 4)) o.frameN = 0;
       }
+    }
+  }
+
+  // ---- time passing: the cold, the thin air, radium, ice, berries (actor.lua's advance_time) ----
+
+  /** The party is camped (or otherwise kept warm): no cold, no air used. */
+  warm = false;
+  private cold = new Set<number>();
+  private lastHour = -1;
+
+  /** A minute's worth of Mars, for each minute passed. */
+  tick(minutes: number): void {
+    const g = this.g;
+    for (let i = 0; i < Math.min(minutes, 30); i++) this.minute();
+    if (g.clock.hour !== this.lastHour) {
+      if (this.lastHour >= 0) this.hour();
+      this.lastHour = g.clock.hour;
+    }
+  }
+
+  private needsAir(a: Actor): boolean {
+    return a.id !== 6 && this.hasFlag(0x10, 5) && !this.dream && !this.warm;
+  }
+
+  private setHypoxia(a: Actor, on: boolean): void {
+    const was = !!(a.objFlags & 0x40);
+    if (was === on) return;
+    a.objFlags = on ? a.objFlags | 0x40 : a.objFlags & ~0x40;
+    this.say(on ? 'GASPS_FOR_AIR' : 'BREATHES_EASIER', this.g.partyMemberName(a.id) || this.g.lookActor(a));
+  }
+
+  private minute(): void {
+    const g = this.g;
+    const h = g.clock.hour;
+    if (this.dream) return;
+    for (const m of g.party) {
+      const a = m.actor;
+      if (!a.alive || a.statusFlags & 0x04) continue;
+      const inv = g.objects.inventories[a.id];
+      this.setHypoxia(a, this.needsAir(a) && !inv.some((o) => o.objN === OXIUM));
+      // The cold: by night without warm clothes, out on the surface.
+      const warmth = inv.filter((o) => o.loc === 'readied').reduce((n, o) => n + (WARMTH.get(o.objN) ?? 0), 0);
+      let cold = 0;
+      if (!this.warm && a.z === 0 && a.id !== 6) {
+        if (h <= 3 || h >= 22) cold = warmth >= 10 ? 1 : 2;
+        else if ((h <= 6 || h >= 18) && warmth < 10) cold = 1;
+      }
+      if (!cold) {
+        if (this.cold.delete(a.id)) this.say('FEELS_WARMER', m.name);
+      } else {
+        this.cold.add(a.id);
+        if (this.rand(0, 1) === 1 || cold === 2) {
+          this.say('IS_FREEZING', m.name);
+          g.combat.harm(a, this.rand(1, 2) + (cold === 2 && this.rand(0, 1) ? this.rand(1, 2) : 0));
+        }
+      }
+      // Radium carried outside its lead box poisons; ice melts; the berries' powers fade.
+      for (const o of [...inv, ...inv.flatMap((c) => c.container ?? [])]) {
+        if ((o.objN === 448 || (o.objN === 449 && a.id !== 6)) && o.parentObj?.objN !== 139 && !(a.statusFlags & 0x08)) {
+          a.statusFlags |= 0x08;
+          this.say('IS_POISONED', m.name);
+        } else if ((o.objN === 160 && o.frameN > 1) || o.objN === 256) {
+          if (this.rand(0, 100) < 10) {
+            this.say('SOME_ICE_HAS_MELTED');
+            if (o.objN === 160) o.frameN = 1;
+            else g.objects.unlink(o);
+          }
+        }
+      }
+      const b = this.berries.get(a.id);
+      if (b) {
+        for (let k = 0; k < 3; k++) {
+          if (b[k] > 0 && this.rand(1, Math.max(1, a.intelligence * 4)) === 1) {
+            b[k]--;
+            this.say('A_PSYCHIC_POWER_FADES');
+          }
+        }
+      }
+      if (this.frenzy.has(a.id) && !g.combat.fighting) this.frenzy.delete(a.id);
+    }
+  }
+
+  /** On the hour: each breathes a blob of oxium where the air is thin. */
+  private hour(): void {
+    const g = this.g;
+    for (const m of g.party) {
+      const a = m.actor;
+      if (!this.needsAir(a) || a.statusFlags & 0x04) continue;
+      const ox = g.objects.inventories[a.id].find((o) => o.objN === OXIUM);
+      if (ox) {
+        if (ox.qty > 1) ox.qty--;
+        else g.objects.unlink(ox);
+      }
+      this.setHypoxia(a, !g.objects.inventories[a.id].some((o) => o.objN === OXIUM));
     }
   }
 

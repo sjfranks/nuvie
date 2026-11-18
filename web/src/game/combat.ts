@@ -437,6 +437,11 @@ export class Combat {
     } else if (def.id !== 1) this.g.say('sys', `${who} killed!`);
   }
 
+  /** Harm without a blow or its messages (the cold, starvation): actor_hit alone. */
+  harm(def: Actor, dmg: number): void {
+    this.hit(def, dmg);
+  }
+
   /** Damage that does not miss and no armour turns (spells): as a blow, with its messages. */
   hurt(att: Actor, def: Actor, dmg: number): void {
     const who = this.cap(this.name(def));

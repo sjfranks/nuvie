@@ -455,6 +455,7 @@ export class Game implements ConvWorld {
   advance(minutes: number): void {
     const c = this.clock;
     c.minute += minutes;
+
     // The wind changes every so often, to any way or none (Weather::change_wind_dir).
     this.windMinutes -= minutes;
     if (this.windMinutes <= 0) {
@@ -481,6 +482,8 @@ export class Game implements ConvWorld {
         this.updateMoongates();
       }
     }
+    // Martian Dreams' Mars as time passes: the cold, the air, radium, ice, berries.
+    if (this.kind === 'md') this.mdUse.tick(minutes);
   }
 
   /** Where the party is, for the journal: a rough bearing, the world having no place names in its files. */

@@ -149,7 +149,9 @@ whose answers set strength, dexterity and intelligence. The coal works run as wo
 with the belt mended, power the towers); the mended belt laid over bare rollers, broken track replaced, the tower's
 cable fixed with pliers (rubber gloves on!), and the wrench on switches, drill and panels. The mid-game scenes
 (midgameN.lzc: pictures with the Avatar as they are, and their words) play where the story calls for them - the
-hatch, the power, the cable, the dream machine, the slippers. Not yet: the dream stages Nuvie left unfinished.
+hatch, the power, the cable, the dream machine, the slippers. Mars itself as time passes (advance_time): by night on the surface those without warm enough clothes freeze; once
+the air grows thin each needs oxium (a blob an hour) or gasps for air; radium outside its lead box poisons; ice melts;
+the berries' powers fade; a tent keeps the party warm. Not yet: the dream stages Nuvie left unfinished.
 
 A new game of Savage Empire begins in Intanya's hut (intro.lua's create_new_character): a name, then three of the
 shaman's six questions, each answer adding to strength, dexterity or intelligence and choosing the next; its ending's
