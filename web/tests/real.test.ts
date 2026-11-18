@@ -516,6 +516,22 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     expect(g.objects.inventories[g.player.id].some((o) => o.objN === 132)).toBe(true);
   });
 
+  it.runIf(folder === 'savage')('searches a pouch, basket or pot looked at, tipping out what it holds', () => {
+    const g = new Game(load());
+    const pouch = g.objects.all().find((o) => [182, 183, 184].includes(o.objN) && o.loc === 'map' && o.container?.length && g.objects.get(o.x, o.y, o.z) === o)!;
+    expect(pouch).toBeTruthy();
+    const inside = [...pouch.container!];
+    g.look(pouch.x, pouch.y);
+    expect(g.log.at(-1)!.text).toMatch(/^Searching here, you find .+\.$/);
+    expect(pouch.container!.length).toBe(0);
+    for (const c of inside) expect([c.loc, c.x, c.y]).toEqual(['map', pouch.x, pouch.y]);
+    // Empty now, it has nothing more to give.
+    g.search(pouch);
+    expect(g.log.at(-1)!.text).toBe('Searching here, you find nothing.');
+    // A container can be filled again.
+    expect(g.objects.isContainer(183)).toBe(true);
+  });
+
   it.runIf(folder === 'savage')('pulls a branch from a tree and fishes by water', () => {
     const g = new Game(load());
     const tree = g.objects.all().find((o) => o.objN >= 263 && o.objN <= 266 && o.loc === 'map' && g.canStand(o.x, o.y + 1, o.z))!;

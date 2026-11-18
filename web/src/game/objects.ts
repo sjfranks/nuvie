@@ -3,7 +3,7 @@
  */
 import type { GameFiles } from '../files/gamefiles.ts';
 import { F2_BOUNDARY, F3_FORCED_PASSABLE, F3_IGNORE, type Tile, type Tiles } from './tiles.ts';
-import { EGG, MD_CONTAINERS, MD_DOORS, STACKABLE, type Kind } from './kind.ts';
+import { EGG, MD_CONTAINERS, MD_DOORS, SE_CONTAINERS, STACKABLE, type Kind } from './kind.ts';
 import { OBJ } from './u6tables.ts';
 
 export const STATUS_OK_TO_TAKE = 0x01;
@@ -82,7 +82,7 @@ export class Objects {
 
   isContainer(objN: number): boolean {
     if (this.kind === 'md') return MD_CONTAINERS.has(objN);
-    if (this.kind === 'se') return false;
+    if (this.kind === 'se') return SE_CONTAINERS.has(objN);
     return CONTAINERS.has(objN);
   }
 

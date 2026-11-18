@@ -47,6 +47,8 @@ export const STACKABLE: Record<'md' | 'se', ReadonlySet<number>> = { md: new Set
 export const MD_DOORS: ReadonlySet<number> = new Set([152, 222, 421]);
 /** Martian Dreams' containers (usecode.lua use_container). */
 export const MD_CONTAINERS: ReadonlySet<number> = new Set([86, 87, 104, 284]);
+/** Savage Empire's containers (init.lua's g_container_obj_tbl): mortar, grinding stone, jar, pouch, basket, pot. */
+export const SE_CONTAINERS: ReadonlySet<number> = new Set([59, 60, 97, 182, 183, 184]);
 
 /** The palette file. */
 export const PALETTE: Record<Kind, string> = { u6: 'u6pal', md: 'mdpal', se: 'sepal' };

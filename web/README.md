@@ -159,7 +159,9 @@ A new game of Savage Empire begins in Intanya's hut (intro.lua's create_new_char
 shaman's six questions, each answer adding to strength, dexterity or intelligence and choosing the next; its ending's
 words are ready should the game be won. Savage Empire's usecode.lua has only a little in use, and that is ported:
 corn from a corn stalk, clay with a digging stick, a soft pot shaped from clay, a branch pulled from a tree, and fish
-caught with a pole beside deep water.
+caught with a pole beside deep water. Its containers (init.lua: mortars, grinding stones, jars, pouches, baskets and pots) hold
+things, and looking at one on the ground searches it, as look.lua does: what it holds is tipped out beside it and
+named.
 
 **Combat** follows Ultima VI's rules as Nuvie's Lua has them: the hit roll (dexterity, or strength for clubs and
 maces, against the foe's dexterity), weapon damage less a roll against readied armour, half damage for the creatures
@@ -259,7 +261,7 @@ its title in motion (seintro.ts: the two logos, the title rising over the jungle
 layers under the credits), then its story so far before Intanya (ten pictures from create.lzc, still as its script
 has them).
 
-Not ported yet: the rest of Martian Dreams' and Savage Empire's usecode, and Savage Empire's fighting (Nuvie has none to port).
+Not ported yet: the rest of Martian Dreams' and Savage Empire's usecode (what Nuvie leaves commented out), and Savage Empire's fighting (Nuvie has none to port).
 
 `tests/real.test.ts` runs on your copies put in `web/gamedata/ultima6/`, `savage/` and `martian/` (git-ignored).
 For each it loads a new game, saves and restores it, and talks with everyone who has a conversation (199 people in

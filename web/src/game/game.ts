@@ -946,9 +946,29 @@ export class Game implements ConvWorld {
       this.say('sys', `The flame of ${['truth', 'love', 'courage'][o.quality - 1]}.`);
       return this.onChange();
     }
-    this.say('sys', `Thou dost see ${text}.`);
+    this.say('sys', this.kind === 'se' ? `You see ${text}.` : `Thou dost see ${text}.`);
     if (o && !a && READABLE.has(o.objN)) this.read(o);
+    // Savage Empire searches a container looked at, tipping out what it holds (look_obj, search).
+    if (o && !a && this.kind === 'se' && this.objects.isContainer(o.objN)) this.search(o);
     this.onChange();
+  }
+
+  /** init.lua's search: what a container on the map holds is put on the ground beside it, and named. */
+  search(o: Obj): void {
+    if (o.loc !== 'map') return;
+    const found = [...(o.container ?? [])];
+    if (!found.length) {
+      this.say('sys', 'Searching here, you find nothing.');
+      return;
+    }
+    const names = found.map((c) => this.objects.look(c));
+    for (const c of found) {
+      this.objects.unlink(c);
+      [c.x, c.y, c.z] = [o.x, o.y, o.z];
+      this.objects.add(c);
+    }
+    const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0];
+    this.say('sys', `Searching here, you find ${list}.`);
   }
 
   private read(o: Obj): void {
