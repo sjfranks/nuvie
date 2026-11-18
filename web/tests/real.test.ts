@@ -459,6 +459,28 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     expect(g.objects.inventories[g.player.id].some((o) => o.objN === 132)).toBe(true);
   });
 
+  it.runIf(folder === 'savage')('pulls a branch from a tree and fishes by water', () => {
+    const g = new Game(load());
+    const tree = g.objects.all().find((o) => o.objN >= 263 && o.objN <= 266 && o.loc === 'map' && g.canStand(o.x, o.y + 1, o.z))!;
+    expect(tree).toBeTruthy();
+    g.relocate(tree.x, tree.y + 1, tree.z);
+    g.useObj(tree);
+    expect(g.log.at(-1)!.text).toBe('You pulled a branch from the tree.');
+    const pole = g.objects.create(212, 1, 0);
+    g.objects.toInventory(pole, g.player.id);
+    let shore: [number, number] | null = null;
+    const p = g.player;
+    for (let r = 1; r < 120 && !shore; r++) for (let dx = -r; dx <= r && !shore; dx++) for (const dy of [-r, r]) {
+      const x = p.x + dx;
+      const y = p.y + dy;
+      if (g.canStand(x, y, p.z) && [[0, -1], [1, 0], [0, 1], [-1, 0]].some(([a, b]) => g.map.isWater(x + a, y + b, p.z))) shore = [x, y];
+    }
+    expect(shore).toBeTruthy();
+    g.relocate(shore![0], shore![1], p.z);
+    for (let i = 0; i < 60 && !g.objects.inventories[p.id].some((o) => o.objN === 213); i++) g.useObj(pole);
+    expect(g.objects.inventories[p.id].some((o) => o.objN === 213)).toBe(true);
+  });
+
   it.runIf(folder === 'martian')('pushes a wheelbarrow, drills rock, and runs the conveyor', () => {
     const g = new Game(load());
     const p = g.player;
