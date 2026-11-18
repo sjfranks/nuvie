@@ -12,6 +12,7 @@ import { USED_IN_PLACE } from '../game/usecode.ts';
 import { MD_IN_PLACE } from '../game/mdusecode.ts';
 import { REAGENTS, reagentCounts, reagentNames, words, type Spell } from '../game/magic.ts';
 import { kvDelete, kvGet, kvSet } from '../files/gamefiles.ts';
+import { endingPicture } from './endings.ts';
 import { Gypsy } from './gypsy.ts';
 import { ASK_NAME, INTRO, Intanya, QUESTIONS as QUESTIONS_SE, SE_ENDING } from './intanya.ts';
 import { interview, type Hero, type Step } from './freud.ts';
@@ -1314,6 +1315,11 @@ export class App {
     this.music.update();
     const page = (i: number): void => {
       this.open(i < pages.length ? 'The Codex' : 'Congratulations', (body) => {
+        const pic = endingPicture(g.files, 'u6', Math.min(i, pages.length - 1), g.gender === 1);
+        if (pic) {
+          pic.className = 'scene';
+          body.append(pic);
+        }
         if (i < pages.length) body.append(el('p', '', pages[i]));
         else {
           body.append(
@@ -1346,6 +1352,11 @@ export class App {
     const pages = g.kind === 'se' ? SE_ENDING : g.sceneText('scenetxt.lzc', 3).filter((l) => l.trim());
     const page = (i: number): void => {
       this.open(i < pages.length ? 'Home' : 'The end', (body) => {
+        const pic = endingPicture(g.files, g.kind as 'md' | 'se', i, g.gender === 1);
+        if (pic) {
+          pic.className = 'scene';
+          body.append(pic);
+        }
         body.append(el('p', '', i < pages.length ? pages[i] : `Well done, ${g.playerName()}. Thou mayest go on exploring ${g.kind === 'se' ? 'the Valley of Eodon' : 'Mars'}.`));
         const row = el('div', 'row');
         row.append(btn(i < pages.length ? 'Continue' : 'Close', () => {

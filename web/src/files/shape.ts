@@ -1,5 +1,8 @@
 /** shape.ts - the games' run-length pictures, with a hot spot (Nuvie's files/U6Shape.cpp). */
 export interface Shape {
+  /** Where the shape's own origin (its hot spot) lies in the picture: a cutscene places it there. */
+  hx?: number;
+  hy?: number;
   w: number;
   h: number;
   /** Palette indices; 0xff is see-through. */
@@ -46,5 +49,5 @@ export function readShape(buf: Uint8Array, start = 0): Shape | null {
       j += n2;
     }
   }
-  return { w, h, data };
+  return { w, h, data, hx: hotx, hy: hoty };
 }

@@ -213,7 +213,11 @@ Martian Dreams and Savage Empire have their music too (midi.ts): their MIDI song
 Nuvie's OriginFXAdLibDriver with the games' own instruments (md.tim, savage.tim) - one of the longer songs at a time,
 another when it ends, since Nuvie never chose among them in play.
 
-Not ported yet: the animated intro and ending pictures;
+The endings show their pictures with their words (endings.ts): each page's still composed from the pieces the
+ending.lua scripts lay out, in the ending's own palette (cutscene.ts reads the .shp and .lzc image libraries and the
+.lbm, .pal and .int palettes).
+
+Not ported yet: the animated intros, and the endings' animation (they are shown as stills);
 the rest of Martian Dreams' and Savage Empire's usecode, and Savage Empire's fighting (Nuvie has none to port).
 
 `tests/real.test.ts` runs on your copies put in `web/gamedata/ultima6/`, `savage/` and `martian/` (git-ignored).
