@@ -353,7 +353,11 @@ export class MdUseCode {
     } else if (door.frameN < 4) {
       door.frameN = (door.frameN & 2) + 9;
       frame = 1;
-    } else door.frameN = (door.frameN & 2) + 1;
+    } else {
+      door.frameN = (door.frameN & 2) + 1;
+      // The minotaur let out of the shop ends Tiffany's dream.
+      if (this.dream?.stage === 0x44 && this.minotaurOut(door.z)) return this.tiffanyDone();
+    }
     for (const s of switches) s.frameN = frame;
     g.sfx('success');
   }
@@ -1036,11 +1040,20 @@ export class MdUseCode {
     return (this.g.objects.list(x, y, z) ?? []).find((o) => o.objN === n);
   }
 
-  /** The cokers dig coal onto the belt; the stokers carry it from the belt's end to the furnace. */
+  /** The cokers dig coal onto the belt; the stokers carry it from the belt's end to the furnace; in the dreams, Your Mother and the minotaur. */
   work(a: Actor): void {
     const g = this.g;
     const { x, y, z } = a;
     switch (a.worktype) {
+      case 0x15: { // worktype_15_your_mother: down upon you, a cuff for whoever is nearest
+        if (g.stepActor(a, 0, 1)) break;
+        const t = g.combat.findTarget(a);
+        if (t && Math.max(Math.abs(t.x - x), Math.abs(t.y - y)) <= 1) g.combat.hurt(a, t, this.rand(1, 6));
+        break;
+      }
+      case 0x16: // worktype_16_minotaur
+        this.minotaur(a);
+        break;
       case 0x99: // coker to the coal vein
         if (!g.stepActor(a, 0, -1) && this.objAt(x, y - 1, z, 446)) a.worktype = 0x9a;
         break;
@@ -1089,6 +1102,75 @@ export class MdUseCode {
         }
         break;
     }
+  }
+
+  /** The minotaur charges the red cape - carried, or dropped in the shop - smashing pitchers as it goes. */
+  private minotaur(a: Actor): void {
+    const g = this.g;
+    const d = this.dream;
+    if (d?.stage === 0x60) {
+      g.combat.hurt(a, a, a.hp);
+      return;
+    }
+    const p = g.player;
+    let target: { x: number; y: number; who?: Actor } | null = null;
+    if (g.objects.inventories[p.id].some((o) => o.objN === 162)) target = { x: p.x, y: p.y, who: p };
+    else {
+      const cape = g.objects.all().find((o) => o.objN === 162 && o.loc === 'map' && o.z === 2 && o.x >= 0x21 && o.x < 0x3d && o.y >= 0x33 && o.y < 0x43);
+      if (cape) target = { x: cape.x, y: cape.y };
+    }
+    const smash = (): void => {
+      for (const o of [...(g.objects.list(a.x, a.y, a.z) ?? [])]) if (o.objN === 217 || o.objN === 218) g.objects.unlink(o);
+    };
+    if (!target) {
+      // worktype_stomp_around
+      const [dx, dy] = [[0, -1], [1, 0], [0, 1], [-1, 0]][this.rand(0, 3)];
+      g.stepActor(a, dx, dy);
+      smash();
+      return;
+    }
+    if (Math.max(Math.abs(target.x - a.x), Math.abs(target.y - a.y)) <= 1) {
+      if (target.who) return void g.combat.attack(a, target.who);
+      if (!this.hasFlag(0x54, 6) && a.x >= 0x37 && a.y <= 0x37) return this.tiffanyDone();
+    }
+    g.combat.step(a, target.x, target.y);
+    g.sfx('quake');
+    smash();
+  }
+
+  /** complete_tiffany_stage */
+  private tiffanyDone(): void {
+    const t = this.g.actors.get(0x54);
+    if (!t) return;
+    this.finishDreamQuest(t);
+    t.talkFlags |= 1 << 1;
+    this.g.talkTo(t);
+    this.wakeAfterTalk = true;
+  }
+
+  /** has_minotaur_left_the_shop */
+  private minotaurOut(z: number): boolean {
+    return !this.hasFlag(0x54, 6) && this.g.actors.list.some((a) => a.objN === 398 && a.alive && a.z === z && a.x >= 0x37 && a.y <= 0x37);
+  }
+
+  /** ready_obj: the throw rug worn becomes a red cape; winged shoes lay a bridge in the dream, and will not come off. */
+  ready(o: Obj, a: Actor, readying: boolean): boolean {
+    const g = this.g;
+    if (readying) {
+      if (o.objN === 161) o.objN = 162;
+      else if (o.objN === 136) this.say('THE_TONGS_WILL_NOW_PROTECT_YOUR_HANDS');
+      else if (o.objN === 15 && a.z === 2) {
+        const bridge = g.objects.create(146, 1, 0);
+        [bridge.x, bridge.y, bridge.z] = [0xc9, 0x9b, 2];
+        g.objects.add(bridge);
+      }
+      return true;
+    }
+    if (o.objN === 15) {
+      this.say('THEY_WONT_COME_OFF');
+      return false;
+    }
+    return true;
   }
 
   /** activate_tower_electricity: the towers by the works light, their cables live. */

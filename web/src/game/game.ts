@@ -1722,6 +1722,7 @@ export class Game implements ConvWorld {
     // Two rings in Ultima VI; one pair of gloves in Martian Dreams.
     const ok =
       slot === 3 ? arms < 2 : slot === 4 ? arms === 0 : slot === 5 && this.kind === 'u6' ? worn.filter((w) => w === 5).length < 2 : !worn.includes(slot);
+    if (ok && this.kind === 'md' && !this.mdUse.ready(o, a, true)) return false;
     if (!ok) {
       this.say('sys', `${this.partyMemberName(a.id) || 'They'} cannot ready ${what}: take something off first.`);
       this.onChange();
@@ -1747,6 +1748,7 @@ export class Game implements ConvWorld {
 
   unready(o: Obj): void {
     if (o.loc !== 'readied') return;
+    if (this.kind === 'md' && !this.mdUse.ready(o, this.actors.get(o.holder) ?? this.player, false)) return this.onChange();
     o.loc = 'inv';
     this.say('sys', `Unreadied ${this.objects.look(o)}.`);
     this.onChange();
