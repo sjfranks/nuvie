@@ -562,6 +562,15 @@ export class MdUseCode {
     for (const o of g.objects.list(p.x, p.y, p.z) ?? []) {
       const n = o.objN;
       if (n === 461 && this.dream) return this.teleporter(o);
+      if (n === 462 && this.dream) {
+        // OBJ_DREAM_TELEPORTER1: walking on the walls, or back on one's feet.
+        if (o.quality === 0) this.restoreLook();
+        else {
+          p.objN = g.gender === 1 ? 319 : 318;
+          p.frameN = 0;
+        }
+        continue;
+      }
       if (!(n === 175 || n === 163 || n === 180 || n === 178 || (n === 197 && o.frameN === 3) || n === 210)) continue;
       if (n === 197) {
         if (!((g.actors.get(0x73)?.talkFlags ?? 0) & (1 << 4))) {
@@ -799,7 +808,16 @@ export class MdUseCode {
       this.wake();
       return true;
     }
-    if (d.stage !== 0 && stage === 0x40) this.say('YOU_FALL_OFF_THE_CLIFF');
+    // The stage left (dreamworld_cleanup_tbl): back on one's feet after the cliff.
+    if (d.stage === 0x40 && stage !== 0xa5 && stage !== 0xe5) this.restoreLook();
+    if (d.stage !== 0 && stage === 0x40) {
+      // fall_from_cliff: flat on the ground, and Your Mother above crushed with the fall.
+      this.say('YOU_FALL_OFF_THE_CLIFF');
+      const p = g.player;
+      p.objN = g.gender === 1 ? 0x127 : 0x126;
+      p.frameN = 0;
+      for (const a of g.actors.list) if (a.objN === 391 && a.alive && a.x === p.x && a.y >= p.y - 8 && a.y <= p.y && a.z === p.z) g.combat.harm(a, a.hp);
+    }
     d.back = [o.quality, o.qty];
     g.relocate(o.quality, o.qty, g.player.z);
     if (stage !== 0xe5) {
@@ -811,6 +829,23 @@ export class MdUseCode {
       d.stage = stage;
     }
     return true;
+  }
+
+  /** The dreamer as they were (cleanup_cliff_fall, and the end of walking on walls). */
+  private restoreLook(): void {
+    const p = this.g.player;
+    const base = this.g.gender === 1 ? 344 : 343;
+    if (p.objN !== base) {
+      p.objN = base;
+      p.setDirection(p.direction);
+    }
+  }
+
+  /** player_before_move_action: a step south off a cliff's edge (tiles 384 to 387) is taken, wall or no. */
+  cliff(dx: number, dy: number): boolean {
+    const p = this.g.player;
+    const t = this.g.map.tileNum(p.x, p.y, p.z);
+    return dx === 0 && dy === 1 && t >= 384 && t <= 387;
   }
 
   /** setup_tiffany_stage: the shop of pitchers and the minotaur. */
@@ -887,6 +922,7 @@ export class MdUseCode {
     const hour = c.hour + 1;
     g.advance(60 - c.minute + (hour >= 8 ? 24 - hour + 8 : 8 - hour) * 60);
     const p = g.player;
+    this.restoreLook();
     for (const o of [...g.objects.inventories[p.id]]) g.objects.unlink(o);
     for (const o of [...g.objects.inventories[0]]) {
       g.objects.unlink(o);

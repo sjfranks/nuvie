@@ -524,6 +524,13 @@ export class Game implements ConvWorld {
       this.onChange();
       return false;
     }
+    // Over a Martian Dreams cliff's edge, whatever lies below.
+    if (this.kind === 'md' && this.mdUse.cliff(dx, dy) && !this.actors.at(nx, ny, p.z)) {
+      p.x = nx;
+      p.y = ny;
+      this.endTurn();
+      return true;
+    }
     // Martian Dreams' wheelbarrows, drills, rail cars and planks are pushed ahead (move_obj).
     const pushed = this.kind === 'md' && !this.actors.at(nx, ny, p.z) ? (this.objects.list(nx, ny, p.z) ?? []).find((o) => this.mdUse.pushable(o) && !this.objects.tileOf(o).passable) : undefined;
     if (pushed) {
