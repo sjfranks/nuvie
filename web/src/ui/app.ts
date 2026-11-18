@@ -12,7 +12,10 @@ import { USED_IN_PLACE } from '../game/usecode.ts';
 import { MD_IN_PLACE } from '../game/mdusecode.ts';
 import { REAGENTS, reagentCounts, reagentNames, words, type Spell } from '../game/magic.ts';
 import { kvDelete, kvGet, kvSet } from '../files/gamefiles.ts';
+import { play } from './anim.ts';
 import { endingPicture, stillPicture } from './endings.ts';
+import { mdEndingScene } from './mdending.ts';
+import { u6EndingScene } from './u6ending.ts';
 import { loadMidgame, shapeRgba } from '../files/cutscene.ts';
 import type { Shape } from '../files/shape.ts';
 import { INTRO_U6 } from './intro6.ts';
@@ -1438,7 +1441,10 @@ export class App {
     this.music.update();
     const page = (i: number): void => {
       this.open(i < pages.length ? 'The Codex' : 'Congratulations', (body) => {
-        const pic = endingPicture(g.files, 'u6', Math.min(i, pages.length - 1), g.gender === 1);
+        // The scene moves as ending.lua plays it; a still where it cannot.
+        const moving = play(g.files, ['endpal.lbm', 0], u6EndingScene(Math.min(i, pages.length - 1)));
+        stop = moving?.stop ?? null;
+        const pic = moving?.canvas ?? endingPicture(g.files, 'u6', Math.min(i, pages.length - 1), g.gender === 1);
         if (pic) {
           pic.className = 'scene';
           body.append(pic);
@@ -1453,6 +1459,7 @@ export class App {
         }
         const row = el('div', 'row');
         row.append(btn(i < pages.length ? 'Continue' : 'Close', () => {
+          stop?.();
           if (i < pages.length) {
             this.onClose = null; // the next page, not the end of it
             page(i + 1);
@@ -1461,11 +1468,13 @@ export class App {
         body.append(row);
       });
       this.onClose = () => {
+        stop?.();
         g.won = false;
         this.music.theme = null;
         this.music.update();
       };
     };
+    let stop: (() => void) | null = null;
     page(0);
   }
 
@@ -1475,7 +1484,10 @@ export class App {
     const pages = g.kind === 'se' ? SE_ENDING : g.sceneText('scenetxt.lzc', 3).filter((l) => l.trim());
     const page = (i: number): void => {
       this.open(i < pages.length ? 'Home' : 'The end', (body) => {
-        const pic = endingPicture(g.files, g.kind as 'md' | 'se', i, g.gender === 1);
+        // Martian Dreams' ending moves, as its ending.lua plays it; Savage Empire's is still pictures.
+        const moving = g.kind === 'md' ? play(g.files, ['md_title.pal', 0], mdEndingScene(Math.min(i, pages.length - 1), g.gender === 1)) : null;
+        stop = moving?.stop ?? null;
+        const pic = moving?.canvas ?? endingPicture(g.files, g.kind as 'md' | 'se', i, g.gender === 1);
         if (pic) {
           pic.className = 'scene';
           body.append(pic);
@@ -1483,6 +1495,7 @@ export class App {
         body.append(el('p', '', i < pages.length ? pages[i] : `Well done, ${g.playerName()}. Thou mayest go on exploring ${g.kind === 'se' ? 'the Valley of Eodon' : 'Mars'}.`));
         const row = el('div', 'row');
         row.append(btn(i < pages.length ? 'Continue' : 'Close', () => {
+          stop?.();
           if (i < pages.length) {
             this.onClose = null;
             page(i + 1);
@@ -1491,9 +1504,11 @@ export class App {
         body.append(row);
       });
       this.onClose = () => {
+        stop?.();
         g.won = false;
       };
     };
+    let stop: (() => void) | null = null;
     page(0);
   }
 

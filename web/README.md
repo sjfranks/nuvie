@@ -228,9 +228,13 @@ Martian Dreams and Savage Empire have their music too (midi.ts): their MIDI song
 Nuvie's OriginFXAdLibDriver with the games' own instruments (md.tim, savage.tim) - one of the longer songs at a time,
 another when it ends, since Nuvie never chose among them in play.
 
-The endings show their pictures with their words (endings.ts): each page's still composed from the pieces the
-ending.lua scripts lay out, in the ending's own palette (cutscene.ts reads the .shp and .lzc image libraries and the
-.lbm, .pal and .int palettes).
+The endings show their pictures with their words, in the ending's own palette (cutscene.ts reads the .shp and .lzc
+image libraries and the .lbm, .pal and .int palettes). Ultima VI's and Martian Dreams' endings move as their ending.lua
+scripts play them (anim.ts draws the sprites as ScriptCutscene does: hot spots, scaling, clipping, fading, the
+palette turning): in Ultima VI the red gates rise from the floor with the stones' colours cycling, the kings come
+and raise their lenses, the wall fades to streaming stars and the Codex wavers into view and opens; in Martian Dreams
+the capsule rockets from Mars and bobs in the sea, the photographer's flash goes off by the moongate, and the dust
+storm blows. Savage Empire's ending is still pictures, as its script has it.
 
 Ultima VI's introduction can be watched before the gypsy ("Watch the introduction first"): intro.lua's words, from the
 lounge and the storm to the stones, the altar and the rescue, each over a still composed from intro_1/2/3.shp and
@@ -239,7 +243,7 @@ intro.shp as the script lays them out.
 Martian Dreams offers its introduction before Freud (Spector's study, Tesla's lab now and in 1895: scenetxt.lzc's
 dialogue over scene1/3/4a.lzc), and Savage Empire its story so far before Intanya (ten pictures from create.lzc).
 
-Not ported yet: the animation of the intros and endings (they are shown as stills);
+Not ported yet: the animation of the intros (they are shown as stills);
 the rest of Martian Dreams' and Savage Empire's usecode, and Savage Empire's fighting (Nuvie has none to port).
 
 `tests/real.test.ts` runs on your copies put in `web/gamedata/ultima6/`, `savage/` and `martian/` (git-ignored).
