@@ -831,6 +831,8 @@ export class Combat {
   wt(a: Actor): number {
     if (!a.inParty) return a.worktype;
     if (!this.inFight) return a === this.g.player ? WT.PLAYER : WT.FOLLOW;
+    // Alone, the one walking is the player's; the rest, not in the fight, wait (Party not in combat mode).
+    if (this.g.isSolo) return a === this.g.solo ? WT.PLAYER : WT.FOLLOW;
     if (a === this.g.party[0]?.actor) return WT.PLAYER;
     const m = a.combatMode;
     return m >= WT.PLAYER && m <= WT.ASSAULT ? m : WT.FRONT;
@@ -933,7 +935,7 @@ export class Combat {
   private handBack(a: Actor | null): null {
     const g = this.g;
     this.waiting = false;
-    const leader = g.party[0]?.actor;
+    const leader = g.isSolo ? g.solo : g.party[0]?.actor;
     const next = a && a !== leader ? a : null;
     if (next !== g.controlled) {
       g.controlled = next;

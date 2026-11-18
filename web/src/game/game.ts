@@ -8,7 +8,7 @@ import { Lib } from '../files/lib.ts';
 import { lzwDecompress, lzwFile } from '../files/lzw.ts';
 import { Actor, Actors, HYDRA, HYDRA_BODY, MANY_SQUARES, SHIP, STATUS_IN_PARTY, WT } from './actors.ts';
 import { Converse, ConverseLib, checkKeywords, type ConvAsk, type ConvWorld } from './converse.ts';
-import { Combat } from './combat.ts';
+import { CHARMED, Combat } from './combat.ts';
 import { FOODS, UseCode, USED_IN_PLACE } from './usecode.ts';
 import { Magic, type Spell } from './magic.ts';
 import type { SfxId } from '../audio/sfx.ts';
@@ -62,6 +62,8 @@ export interface SaveState {
   keg?: number;
   wind?: [number, number];
   heard?: string[];
+  /** The one of the party walking alone, if any. */
+  solo?: number;
   /** Martian Dreams: the Avatar is dreaming, the party waiting. */
   dream?: unknown;
   moonstones?: [number, number, number][];
@@ -344,10 +346,66 @@ export class Game implements ConvWorld {
   /** One of the party the player moves in a fight, by their command (player_set_actor); else the leader. */
   controlled: Actor | null = null;
 
+  /** One of the party walking alone (Player::set_solo_mode); the others stay where they are. */
+  solo: Actor | null = null;
+
   get player(): Actor {
     const c = this.controlled;
     if (c && c.inParty && c.alive && this.party.some((m) => m.actor === c)) return c;
+    const s = this.solo;
+    if (s && s.inParty && s.alive && this.party.some((m) => m.actor === s)) return s;
     return this.party[0].actor;
+  }
+
+  /** Whether the party is split, one walking alone. */
+  get isSolo(): boolean {
+    const s = this.solo;
+    return !!s && s.inParty && s.alive && this.party.some((m) => m.actor === s);
+  }
+
+  /** Go on alone as one of the party (Player::set_solo_mode). */
+  goSolo(a: Actor): boolean {
+    if (!this.party.some((m) => m.actor === a)) return false;
+    if (this.vehicle) {
+      this.say('sys', 'Not while aboard!');
+      this.onChange();
+      return false;
+    }
+    if (a.objFlags & CHARMED) {
+      this.say('sys', `${this.partyMemberName(a.id)} fails to respond.`);
+      this.onChange();
+      return false;
+    }
+    this.solo = a;
+    this.controlled = null;
+    this.say('sys', `Solo mode: ${this.partyMemberName(a.id)}.`);
+    this.onChange();
+    return true;
+  }
+
+  /** Back to the whole party, if all are near the leader and no fight is on (Event::party_mode). */
+  partyMode(): boolean {
+    if (!this.isSolo) {
+      this.solo = null;
+      return true;
+    }
+    const leader = this.party[0].actor;
+    if (this.combat.fighting) this.say('sys', 'Not in combat mode!');
+    else if (this.party.every((m) => m.actor.z === leader.z && Math.max(Math.abs(m.actor.x - leader.x), Math.abs(m.actor.y - leader.y)) <= 6)) {
+      this.solo = null;
+      this.say('sys', 'Party mode.');
+    } else this.say('sys', 'Not everyone is here.');
+    this.onChange();
+    return !this.solo;
+  }
+
+  /** What only the whole party may do (ladders, gates, boats, rest): refused, alone. */
+  private soloRefused(why = 'Not in solo mode.'): boolean {
+    if (!this.isSolo) return false;
+    this.say('sys', why);
+    this.sfx('blocked');
+    this.onChange();
+    return true;
   }
   playerActor(): Actor {
     return this.player;
@@ -386,6 +444,8 @@ export class Game implements ConvWorld {
     const i = this.party.findIndex((m) => m.actor === a);
     if (i <= 0) return;
     this.party.splice(i, 1);
+    if (this.solo === a) this.solo = null;
+    if (this.controlled === a) this.controlled = null;
     a.statusFlags &= ~STATUS_IN_PARTY;
     a.worktype = WT.MOTIONLESS;
   }
@@ -578,7 +638,8 @@ export class Game implements ConvWorld {
     p.y = ny;
     p.setDirection(facing(dx, dy));
     // Each companion takes the square the one ahead has left - but in a fight, each fights.
-    const fighting = this.combat.fighting;
+    // Alone, the rest stay put.
+    const fighting = this.combat.fighting || this.isSolo;
     for (let i = 1; i < this.party.length && !fighting; i++) {
       const a = this.party[i].actor;
       if (a === other || a.z !== p.z) continue;
@@ -608,6 +669,7 @@ export class Game implements ConvWorld {
    */
   rest(hours: number): void {
     if (this.converse) return;
+    if (this.soloRefused('Rest - Not in solo mode!')) return;
     const p = this.player;
     const v = this.vehicle;
     const no = (why: string): void => {
@@ -1001,6 +1063,8 @@ export class Game implements ConvWorld {
 
   talkTo(a: Actor): void {
     if (this.converse) return;
+    // Alone, only the Avatar may talk (Event::talk).
+    if (this.isSolo && this.player.id !== 1 && this.soloRefused()) return;
     const c = a.statusFlags & 0x04 ? null : Converse.start(this, this.lib, a);
     if (!c) {
       this.say('sys', a.statusFlags & 0x04 ? 'No response.' : 'Funny, no response.');
@@ -1221,6 +1285,7 @@ export class Game implements ConvWorld {
   }
 
   private useLadder(o: Obj, down: boolean): void {
+    if (this.soloRefused()) return;
     let x = o.x;
     let y = o.y;
     let z: number;
@@ -1435,6 +1500,7 @@ export class Game implements ConvWorld {
 
   /** Board a ship, skiff or raft beside the party: it becomes the party's vehicle, and the party goes aboard. */
   private board(o: Obj): void {
+    if (this.soloRefused()) return;
     const p = this.player;
     let centre = o;
     if (o.objN === SHIP) {
@@ -1741,6 +1807,7 @@ export class Game implements ConvWorld {
 
   /** Stepping into a moongate (U6UseCode::enter_moongate): a red one where its place says, a blue one where the moons do. */
   private enterGate(x: number, y: number, z: number): boolean {
+    if (this.isSolo) return false;
     const blue = this.objects.list(x, y, z)?.find((o) => o.objN === MOONGATE && o.x === x);
     if (blue) {
       // The moon nearer the top of the sky chooses the moonstone.
@@ -2000,6 +2067,7 @@ export class Game implements ConvWorld {
       keg: this.kegTurns,
       wind: this.wind,
       heard: [...this.heard],
+      solo: this.isSolo ? this.solo!.id : undefined,
       dream: this.kind === 'md' ? this.mdUse.saveDream() : undefined,
       moonstones: this.moonstones,
       party: this.party.map((m) => ({ id: m.actor.id, name: m.name })),
@@ -2020,6 +2088,7 @@ export class Game implements ConvWorld {
     this.lightTurns = s.light ?? 0;
     if (s.wind) this.wind = s.wind;
     if (s.heard) this.heard = new Set(s.heard);
+    if (s.solo !== undefined) this.solo = this.actors.get(s.solo) ?? null;
     if (this.kind === 'md') this.mdUse.loadDream(s.dream);
     this.restCounter = s.rest ?? 0;
     this.kegTurns = s.keg ?? 0;

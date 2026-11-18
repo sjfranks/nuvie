@@ -126,6 +126,32 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     expect(g.log.some((l) => /killed!/.test(l.text))).toBe(true);
   });
 
+  it.runIf(folder === 'ultima6')('goes on alone as one of the party, and gathers them again', () => {
+    const g = new Game(load());
+    for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
+    const dupre = g.party[1].actor;
+    const others = g.party.filter((m) => m.actor !== dupre).map((m) => [m.actor, m.actor.x, m.actor.y] as const);
+    expect(g.goSolo(dupre)).toBe(true);
+    expect(g.player).toBe(dupre);
+    // Dupre walks; the rest stay where they are.
+    let walked = 0;
+    for (const [dx, dy] of [[0, 1], [0, 1], [0, 1], [1, 0], [-1, 0], [0, -1], [0, -1]]) if (g.move(dx, dy)) walked++;
+    expect(walked).toBeGreaterThan(0);
+    for (const [a, x, y] of others) expect([a.x, a.y]).toEqual([x, y]);
+    // Kept across a save.
+    const back = new Game(load(), JSON.parse(JSON.stringify(g.save())));
+    expect(back.player.id).toBe(dupre.id);
+    // Too far from the leader to gather; then near enough.
+    const leader = g.party[0].actor;
+    const [ox, oy] = [dupre.x, dupre.y];
+    dupre.x = leader.x + 9;
+    expect(g.partyMode()).toBe(false);
+    expect(g.log.at(-1)!.text).toBe('Not everyone is here.');
+    [dupre.x, dupre.y] = [ox, oy];
+    expect(g.partyMode()).toBe(true);
+    expect(g.player).toBe(leader);
+  });
+
   it.runIf(folder === 'ultima6')('casts spells from a readied book, using magic points and reagents', () => {
     const g = new Game(load());
     const avatar = g.player;

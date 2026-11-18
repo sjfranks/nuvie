@@ -1113,6 +1113,15 @@ export class App {
     const head = el('div', 'partyhead');
     head.append(el('span', '', g.date()), el('span', '', `Gold ${g.gold()}`));
     list.append(head);
+    // Split up: one walks alone until the party gathers again.
+    if (g.isSolo) {
+      const row = el('div', 'row soloing');
+      row.append(el('span', 'small', `${g.partyMemberName(g.solo!.id)} is alone.`), btn('Party mode', () => {
+        g.partyMode();
+        this.changed();
+      }, 'primary'));
+      list.append(row);
+    }
     for (const m of g.party) {
       const a = m.actor;
       const row = el('div', 'member');
@@ -1123,6 +1132,7 @@ export class App {
       bar.append(fill);
       mid.append(el('div', 'name', m.name), bar);
       row.append(this.view.tileImage(g.objects.objToTile[a.objN] + 8), mid, el('div', '', `${a.hp}/${a.maxHp}`));
+      if (g.isSolo && a === g.solo) row.classList.add('alone');
       row.addEventListener('click', () => this.character(m.actor, m.name));
       list.append(row);
     }
@@ -1349,6 +1359,18 @@ export class App {
         const doll = this.doll(a, (o) => draw(picked === o ? null : o));
         if (doll) body.append(doll);
         body.append(stats);
+        // Walk alone as this one, or gather the party again (Player::set_solo_mode, Event::party_mode).
+        if (a.inParty && g.party.length > 1) {
+          const solo = el('div', 'row');
+          if (g.isSolo && g.solo === a) solo.append(btn('Party mode', () => {
+            if (g.partyMode()) this.close();
+            else draw(picked);
+          }));
+          else solo.append(btn(`Go on alone as ${name}`, () => {
+            if (g.goSolo(a)) this.close();
+          }));
+          body.append(solo);
+        }
         // How they fight (the combat mode each keeps): the leader is always the player's to move.
         if (g.kind !== 'se' && a.inParty && a !== g.party[0]?.actor) {
           const modes = el('div', 'seg modes');

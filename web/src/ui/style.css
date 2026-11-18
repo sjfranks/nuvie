@@ -197,3 +197,7 @@ label.field input { min-height: 40px; border: 2px solid #000; border-radius: 3px
 /* A companion's way of fighting: seven choices, wrapping on a narrow screen. */
 .seg.modes { flex-wrap: wrap; }
 .seg.modes button { flex: 1 0 28%; }
+
+/* Solo mode: the one walking alone, and the way back to the party. */
+.row.soloing { align-items: center; justify-content: space-between; margin: 4px 0 8px; }
+.member.alone .name::after { content: ' (alone)'; color: var(--key); }

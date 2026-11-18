@@ -175,6 +175,11 @@ make for the strongest foe. Each companion's way is chosen on their sheet ("In a
 player's to move on their turn (the map follows them, and the log says whose turn it is). Thrown spears, axes and
 daggers land where they were thrown, to be picked up again; a flask of oil bursts into flame; the triple crossbow
 looses three bolts; a wand now and then vanishes. A ship whose hull gives out breaks up, leaving the party on a raft.
+
+**Solo mode**: any one of the party can go on alone (their sheet: "Go on alone as ..."), as Player::set_solo_mode
+has it - the rest stay where they are, and stay out of any fight. Alone, no one may climb ladders, enter a dungeon or
+a moongate, board a boat or rest, and only the Avatar may talk. "Party mode" (in the party list) gathers them again,
+once everyone is within six squares of the leader and no fight is on.
 Monsters that know spells (mages, liches, dragons,
 wisps, gazers and the like) carry them as charges and now and then cast one instead of striking, as actor.lua has it.
 
