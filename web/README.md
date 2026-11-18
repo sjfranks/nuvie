@@ -164,8 +164,16 @@ caught with a pole beside deep water.
 **Combat** follows Ultima VI's rules as Nuvie's Lua has them: the hit roll (dexterity, or strength for clubs and
 maces, against the foe's dexterity), weapon damage less a roll against readied armour, half damage for the creatures
 that take it, poison, experience for evil foes slain, bodies that hold what was carried, ammunition, missile walls,
-and death - the Avatar wakes in Lord British's castle with the fallen raised. Simplified: each fighter acts once a
-turn (not by movement points), and thrown weapons are not lost. Monsters that know spells (mages, liches, dragons,
+and death - the Avatar wakes in Lord British's castle with the fallen raised. Turns go by movement points, as
+actor_update_all has them: each fighter gets their dexterity in points a turn, a step costs five (ten on the
+diagonal) and a blow ten, and whoever has the most for their dexterity goes next - so the quick act more often than
+the slow, the Avatar included. Each fights its own way (actor_wt_front, rear, flank, berserk, retreat, assault): the
+front line forms between the party and its foes, the rear keeps behind it, flankers go round the side, the berserk
+make for the strongest foe. Each companion's way is chosen on their sheet ("In a fight"); one set to Command is the
+player's to move on their turn (the map follows them, and the log says whose turn it is). Thrown spears, axes and
+daggers land where they were thrown, to be picked up again; a flask of oil bursts into flame; the triple crossbow
+looses three bolts; a wand now and then vanishes. A ship whose hull gives out breaks up, leaving the party on a raft.
+Monsters that know spells (mages, liches, dragons,
 wisps, gazers and the like) carry them as charges and now and then cast one instead of striking, as actor.lua has it.
 
 **Magic** has Magic.cpp's checks - a readied spellbook holding the spell, a level and magic points as high as its

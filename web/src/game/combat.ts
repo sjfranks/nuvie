@@ -4,8 +4,9 @@
  * actor_find_target, actor_wt_attack, actor_init, actor_avatar_death) and its eggs (EggManager.cpp spawn_eggs and
  * spawn_egg, ActorManager.cpp create_temp_actor and the clean-up of temporary actors).
  *
- * Simplified where the original's detail would not show on a phone: every actor in a fight acts once a turn rather
- * than by movement points; thrown weapons are not lost.
+ * Turns in a fight go by movement points (actor_update_all): each fighter's dexterity in points a turn, a step costing
+ * five and a blow ten, the next to act the one with the most for their dexterity. Each fights by its worktype
+ * (actor_wt_front, rear, flank, berserk, timid, attack), the party by the way each was told to fight.
  */
 import type { Actor } from './actors.ts';
 import { SILVER_SERPENT, STATUS_DEAD, STATUS_IN_PARTY } from './actors.ts';
@@ -315,6 +316,79 @@ export class Combat {
     return true;
   }
 
+  /** Where a shot from one square at another comes down: the last open square before what stops it (map_line_hit_check). */
+  private lineEnd(x0: number, y0: number, x1: number, y1: number, z: number): [number, number] {
+    const dx = Math.abs(x1 - x0);
+    const dy = Math.abs(y1 - y0);
+    const sx = x0 < x1 ? 1 : -1;
+    const sy = y0 < y1 ? 1 : -1;
+    let err = dx - dy;
+    let [x, y] = [x0, y0];
+    for (let n = 0; n < 32 && (x !== x1 || y !== y1); n++) {
+      const e2 = err * 2;
+      const [px, py] = [x, y];
+      if (e2 > -dy) {
+        err -= dy;
+        x += sx;
+      }
+      if (e2 < dx) {
+        err += dx;
+        y += sy;
+      }
+      if (this.g.map.isMissileBoundary(x, y, z)) return [px, py];
+    }
+    return [x, y];
+  }
+
+  /**
+   * What a ranged attack uses up (combat_range_weapon_1D5F9): arrows and bolts (three for the triple crossbow), the
+   * flask of oil that bursts into flame, the spear, throwing axe or dagger that lands where it was thrown, a wand that
+   * now and then vanishes, and Zu Ylem's sleep.
+   */
+  private spendShot(att: Actor, foe: Actor, w: Weapon): void {
+    const g = this.g;
+    const objs = g.objects;
+    const [tx, ty] = this.lineEnd(att.x, att.y, foe.x, foe.y, att.z);
+    const drop = (objN: number, status: number): void => {
+      if (g.map.isWater(tx, ty, att.z)) return;
+      const o = objs.create(objN, objN === 317 ? 0 : 1, 0);
+      o.status = status;
+      [o.x, o.y, o.z] = [tx, ty, att.z];
+      objs.add(o);
+    };
+    switch (w.objN) {
+      case 41:
+      case 54:
+        invDelete(objs, att.id, ARROW, 1, 0);
+        break;
+      case 42:
+        invDelete(objs, att.id, BOLT, 1, 0);
+        break;
+      case 50:
+        invDelete(objs, att.id, BOLT, Math.min(3, invCount(objs, att.id, BOLT)), 0);
+        break;
+      case 83: // a flask of oil: fire where it lands
+        if (invDelete(objs, att.id, 83, 1, 0)) drop(317, STATUS_TEMPORARY);
+        break;
+      case 36:
+      case 37:
+      case 38: // thrown, and there to be picked up again
+        if (invDelete(objs, att.id, w.objN, 1, 0)) drop(w.objN, STATUS_OK_TO_TAKE | STATUS_TEMPORARY);
+        break;
+      case 79:
+      case 80:
+        if (this.rand(1, 100) === 37 && w.obj) {
+          objs.unlink(w.obj);
+          g.say('sys', 'A wand has vanished!');
+        }
+        break;
+      case 91:
+        invDelete(objs, att.id, 91, 1, 0);
+        if (foe.alive && foe.objN) g.magic.sleep(att, foe);
+        break;
+    }
+  }
+
   /** One actor attacks another (actor_attack). Returns false where the foe is out of reach. */
   attack(att: Actor, foe: Actor): boolean {
     const w = this.weapon(att, foe.x, foe.y);
@@ -336,10 +410,7 @@ export class Combat {
         const ammo = MD_AMMO.get(w.objN);
         if (ammo) invDelete(this.g.objects, att.id, ammo, 1, 0);
         else if (ammo === 0 && w.obj) w.obj.qty = Math.max(0, w.obj.qty - 1);
-      } else {
-        if (w.objN === 41 || w.objN === 54) invDelete(this.g.objects, att.id, ARROW, 1, 0);
-        if (w.objN === 42 || w.objN === 50) invDelete(this.g.objects, att.id, BOLT, 1, 0);
-      }
+      } else this.spendShot(att, foe, w);
     }
     if (!ranged && Math.max(Math.abs(att.x - this.g.player.x), Math.abs(att.y - this.g.player.y)) < 6) this.g.sfx('swing');
     const shot = ranged && this.t.shot.has(w.objN) ? { tile: this.t.shot.get(w.objN)!, fromX: att.x, fromY: att.y } : undefined;
@@ -516,9 +587,28 @@ export class Combat {
 
   /** actor_hit: the damage itself. Returns the experience it earns. */
   private hit(def: Actor, dmg: number): number {
-    // The party's boat takes blows to its hull, but is not sunk here.
+    // The party's boat takes blows to its hull. A ship with none left breaks up, and the party is left on a raft, tossed
+    // clear of the wreck (actor_hit's ship destruction); a skiff or raft holds together.
     if (def.id === 0) {
-      def.hp = Math.max(1, def.hp - dmg);
+      if (dmg < def.hp || def.objN !== 412) {
+        def.hp = Math.max(1, def.hp - dmg);
+        return 0;
+      }
+      const g = this.g;
+      def.objN = def.baseObjN = 415;
+      def.frameN = 0;
+      def.setDirection(0);
+      for (const [dx, dy] of [[0, -1], [0, 1], [1, 0], [-1, 0]]) {
+        if (g.afloat(def, def.x + dx, def.y + dy)) {
+          def.x = wrap(def.x + dx, def.z);
+          def.y = wrap(def.y + dy, def.z);
+          break;
+        }
+      }
+      def.hp = 10;
+      for (const m of g.party) [m.actor.x, m.actor.y, m.actor.z] = [def.x, def.y, def.z];
+      g.say('sys', 'The ship breaks apart! The party clings to a raft.');
+      g.sfx('quake');
       return 0;
     }
     if (def.objN === OBJ.LORD_BRITISH) {

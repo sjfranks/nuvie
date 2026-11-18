@@ -640,6 +640,35 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     expect(a.hp).toBe(a.strength * 2 + 96);
   });
 
+  it.runIf(folder === 'ultima6')('leaves thrown daggers where they land, and a wrecked ship as a raft', () => {
+    const g = new Game(load());
+    for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
+    const p = g.player;
+    // A dagger thrown at a troll three squares off lands by it, there to be picked up.
+    const spot = [[3, 0], [-3, 0], [0, 3], [0, -3]].find(([dx, dy]) => g.canStand(p.x + dx, p.y + dy, p.z) && g.combat.clearLine(p.x, p.y, p.x + dx, p.y + dy, p.z))!;
+    const troll = g.combat.spawn(371, p.x + spot[0], p.y + spot[1], p.z, 0, 0xe)!;
+    for (const o of g.objects.inventories[p.id]) if (o.loc === 'readied') o.loc = 'inv';
+    const daggers = g.objects.create(38, 1, 0);
+    g.objects.toInventory(daggers, p.id);
+    g.ready(daggers, p);
+    g.combat.attack(p, troll);
+    expect(g.objects.inventories[p.id].some((o) => o.objN === 38)).toBe(false);
+    expect(g.objects.all().some((o) => o.objN === 38 && Math.max(Math.abs(o.x - troll.x), Math.abs(o.y - troll.y)) <= 3)).toBe(true);
+    // The party's ship, its hull gone, breaks up and leaves them on a raft.
+    let sea: [number, number] | null = null;
+    for (let y = 0; y < 1024 && !sea; y += 7) for (let x = 0; x < 1024 && !sea; x += 7) {
+      if ([-2, -1, 0, 1, 2].every((d) => g.map.isWater(x + d, y, 0) && g.map.isWater(x, y + d, 0))) sea = [x, y];
+    }
+    expect(sea).toBeTruthy();
+    const v = g.actors.get(0)!;
+    Object.assign(v, { objN: 412, baseObjN: 412, frameN: 0, x: sea![0], y: sea![1], z: 0, hp: 5, visible: true });
+    v.setDirection(0);
+    (g.combat as unknown as { hit: (a: unknown, d: number) => number }).hit(v, 50);
+    expect(v.objN).toBe(415);
+    expect(v.hp).toBe(10);
+    expect(g.log.some((l) => l.text.includes('clings to a raft'))).toBe(true);
+  });
+
   it.runIf(folder === 'ultima6')('boards a skiff, sails it, goes ashore; rides a horse', () => {
     const g = new Game(load());
     for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
