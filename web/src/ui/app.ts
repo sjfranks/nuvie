@@ -99,7 +99,10 @@ export class App {
     this.view = new MapView(game, canvas);
     this.view.light.className = 'light';
     this.modeTag.hidden = true;
-    box.append(canvas, this.view.light, this.modeTag, this.face);
+    this.zoomReset = btn('Zoom', () => this.setZoom(0), 'zoomreset');
+    this.zoomReset.setAttribute('aria-label', 'Back to the usual zoom');
+    this.zoomReset.hidden = true;
+    box.append(canvas, this.view.light, this.modeTag, this.face, this.zoomReset);
     this.status.className = 'clock';
     wrap.append(box);
     const divider = el('div', 'divider');
@@ -135,8 +138,41 @@ export class App {
       return this.view.squareAt(e.clientX - r.left, e.clientY - r.top);
     };
     let down: { id: number; sq: { x: number; y: number }; holding: boolean; timer: number } | null = null;
+    // Two fingers pinch the map: apart to come back in (never closer than the default), together to see more.
+    const fingers = new Map<number, { x: number; y: number }>();
+    let pinch: { dist: number; extra: number } | null = null;
+    const spread = (): number => {
+      const [a, b] = [...fingers.values()];
+      return Math.hypot(a.x - b.x, a.y - b.y) || 1;
+    };
+    canvas.addEventListener('pointerdown', (e) => {
+      fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (fingers.size === 2) {
+        // A second finger: a pinch, not a tap or a walk.
+        if (down) clearTimeout(down.timer);
+        down = null;
+        this.walk = null;
+        pinch = { dist: spread(), extra: this.zoomOut };
+      }
+    });
+    canvas.addEventListener('pointermove', (e) => {
+      if (!fingers.has(e.pointerId)) return;
+      fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pinch && fingers.size === 2) {
+        const base = this.baseCols();
+        const want = Math.round(((base + pinch.extra) * pinch.dist) / spread());
+        this.setZoom(Math.max(0, want - base));
+      }
+    });
+    const lift = (e: PointerEvent): void => {
+      fingers.delete(e.pointerId);
+      if (fingers.size < 2) pinch = null;
+    };
+    canvas.addEventListener('pointerup', lift);
+    canvas.addEventListener('pointercancel', lift);
     canvas.addEventListener('pointerdown', (e) => {
       e.preventDefault();
+      if (fingers.size > 1) return;
       canvas.setPointerCapture(e.pointerId);
       const sq = at(e);
       down = { id: e.pointerId, sq, holding: false, timer: 0 };
@@ -414,14 +450,30 @@ export class App {
 
   dispose: () => void;
 
-  /** As many squares across as keeps each a comfortable size for a finger. */
-  private layout(): void {
+  /** Squares added across by pinching out (even, so the party stays in the middle). */
+  private zoomOut = 0;
+  private zoomReset!: HTMLButtonElement;
+
+  /** The default zoom: as many squares across as keeps each a comfortable size for a finger. */
+  private baseCols(): number {
     const w = this.view.canvas.getBoundingClientRect().width || 352;
     // At least 11 squares, each at most 40 pixels; odd, so the party stands in the middle.
     let n = Math.floor(w / 32);
     if (n % 2 === 0) n--;
-    n = Math.max(11, Math.min(15, n));
+    return Math.max(11, Math.min(15, n));
+  }
+
+  private setZoom(extra: number): void {
+    const z = Math.min(24, extra - (extra % 2));
+    if (z === this.zoomOut) return;
+    this.zoomOut = z;
+    this.layout();
+  }
+
+  private layout(): void {
+    const n = this.baseCols() + this.zoomOut;
     if (n !== this.view.cols) this.view.resize(n, n);
+    this.zoomReset.hidden = this.zoomOut === 0;
     this.view.render();
   }
 
