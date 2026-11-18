@@ -171,3 +171,13 @@ label.field input { min-height: 40px; border: 2px solid #000; border-radius: 3px
 .zoomreset { position: absolute; right: 6px; bottom: 6px; min-height: 36px; padding: 0 10px; z-index: 2; }
 .view { touch-action: none; }
 .dragghost { position: fixed; width: 40px; height: 40px; margin: -48px 0 0 -20px; image-rendering: pixelated; pointer-events: none; z-index: 20; filter: drop-shadow(0 3px 3px #000a); }
+
+.worldmap { position: relative; width: 100%; overflow: auto; max-height: 62dvh; border: 2px solid #000; background: #000; -webkit-overflow-scrolling: touch; }
+.worldmap img { display: block; width: 100%; height: auto; }
+.worldmap img.drawn { image-rendering: pixelated; }
+.worldmap .inner { position: relative; width: 100%; }
+.worldmap.close .inner { width: 260%; }
+.worldmap .here { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; background: #e22; border: 2px solid #fff; box-shadow: 0 0 0 2px #000; animation: here 1.2s ease-in-out infinite; pointer-events: none; }
+@keyframes here { 50% { box-shadow: 0 0 0 7px #e228; } }
+.pick input[type=file] { display: none; }
+.sheet label.pick { flex: 1; display: flex; align-items: center; justify-content: center; min-height: var(--tap); border: 2px solid #000; border-radius: 3px; background: var(--parch); color: var(--ink); box-shadow: inset -2px -2px 0 #0003; text-align: center; padding: 0 8px; cursor: pointer; }

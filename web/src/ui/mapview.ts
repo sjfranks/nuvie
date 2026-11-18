@@ -555,6 +555,28 @@ export class MapView {
     return c;
   }
 
+  /** The whole surface, a square a pixel each (the journal's map, where no picture of the cloth map is given). */
+  world(): HTMLCanvasElement {
+    const g = this.game;
+    const avg = this.averages();
+    const n = 1024;
+    const c = document.createElement('canvas');
+    c.width = c.height = n;
+    const ctx = c.getContext('2d')!;
+    const img = ctx.createImageData(n, n);
+    const out = new Uint32Array(img.data.buffer);
+    // Water as the sea is drawn on the maps (its tiles' own colours average to near black).
+    const sea = 0xff000000 | (0x9b << 16) | (0x5d << 8) | 0x2b;
+    for (let y = 0; y < n; y++) {
+      for (let x = 0; x < n; x++) {
+        const t = g.map.tileNum(x, y, 0);
+        out[y * n + x] = g.tiles.original(t).water ? sea : avg[t];
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    return c;
+  }
+
   /** A tile as a picture (for the party's faces and what they carry). */
   tileImage(tileNum: number): HTMLCanvasElement {
     const c = document.createElement('canvas');

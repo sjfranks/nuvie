@@ -81,6 +81,11 @@ text size, the paper frame round the map, sounds and music. In a conversation th
 exchange; a Continue comes before the topics, and topics already asked - or leading to an answer already heard - are
 greyed and listed last. The app has its own red ankh icon for the Home Screen.
 
+The journal's Map tab shows the world with a marker where the party stands (or last stood on the surface). It draws
+the land from the game's files; or tap "Use a picture of the map" and choose a photo of the cloth map from the box -
+kept in this browser, never shipped - and the marker is placed on it. The three games' maps are measured (MAP_CAL in
+app.ts) for a photo of the whole map, frame and all.
+
 ## What is ported, and what is not
 
 Ported from the C++ (each file's header names its source):

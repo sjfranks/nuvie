@@ -11,6 +11,7 @@ import { OBJ } from '../game/u6tables.ts';
 import { USED_IN_PLACE } from '../game/usecode.ts';
 import { MD_IN_PLACE } from '../game/mdusecode.ts';
 import { REAGENTS, reagentCounts, reagentNames, words, type Spell } from '../game/magic.ts';
+import { kvDelete, kvGet, kvSet } from '../files/gamefiles.ts';
 import { Gypsy } from './gypsy.ts';
 import { ASK_NAME, INTRO, Intanya, QUESTIONS as QUESTIONS_SE, SE_ENDING } from './intanya.ts';
 import { interview, type Hero, type Step } from './freud.ts';
@@ -34,6 +35,22 @@ const btn = (label: string, on: () => void, cls = ''): HTMLButtonElement => {
   b.addEventListener('click', on);
   return b;
 };
+/**
+ * Where the world lies on a picture of each game's cloth map, as fractions of the picture: [offset, per square]
+ * across and down. Measured on the maps from the boxes (photographed whole, frame and all), by laying the world
+ * drawn from the game's files over them. A picture of another shape is taken to be the world edge to edge.
+ */
+const MAP_CAL: Record<string, { aspect: number; u: [number, number]; v: [number, number] }> = {
+  u6: { aspect: 2250 / 2245, u: [0.04, 0.00090332], v: [0.022, 0.00092578] },
+  md: { aspect: 2000 / 1160, u: [0.10329, 0.0007727], v: [-0.03913, 0.0010326] },
+  se: { aspect: 1225 / 1218, u: [0.035, 0.00090820], v: [0.035, 0.00090820] },
+};
+function mapCalibration(kind: string, aspect: number): { u: [number, number]; v: [number, number] } {
+  const c = MAP_CAL[kind];
+  if (c && Math.abs(aspect / c.aspect - 1) < 0.06) return c;
+  return { u: [0, 1 / 1024], v: [0, 1 / 1024] };
+}
+
 /** The battle speeds: how long each fighter's turn is shown. */
 const BATTLE_SPEEDS = [
   { name: 'slow', ms: 750 },
@@ -738,6 +755,7 @@ export class App {
       const from = (dy > 0 ? 'N' : dy < 0 ? 'S' : '') + (dx > 0 ? 'W' : dx < 0 ? 'E' : '');
       this.status.textContent += ` ${from ? `Wind ${from}` : 'Calm'}`;
     }
+    if (g.player.z === 0) this.surface = { x: g.player.x, y: g.player.y };
     // While someone talks, or a container stands open, the pane shows the log whatever was chosen.
     const pane: Pane = g.converse ? 'log' : this.pane;
     this.face.hidden = !(g.converse && g.speaker);
@@ -1401,14 +1419,84 @@ export class App {
     });
   }
 
+  /** Where the party last stood on the surface (the map shows the land, not what lies under it). */
+  private surface: { x: number; y: number } | null = null;
+
+  /**
+   * The journal's map: the player's own picture of the cloth map that came in the box, if they have given one (kept in
+   * this browser), else the land drawn from the game's files - with a marker where the Avatar is.
+   */
+  private worldMap(body: HTMLElement, redraw: () => void): void {
+    const g = this.game;
+    const p = g.player;
+    if (p.z === 0) this.surface = { x: p.x, y: p.y };
+    const box = el('div', 'worldmap');
+    const img = el('img');
+    img.alt = 'The world map';
+    const mark = el('i', 'here');
+    const inner = el('div', 'inner');
+    inner.append(img, mark);
+    box.append(inner);
+    const zoom = btn('Closer', () => {
+      box.classList.toggle('close');
+      zoom.textContent = box.classList.contains('close') ? 'Whole map' : 'Closer';
+      place();
+    });
+    const pick = el('label', 'pick');
+    const input = el('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    pick.append('Use a picture of the map', input);
+    input.addEventListener('change', () => {
+      const f = input.files?.[0];
+      if (f) void kvSet(`map:${g.kind}`, f).then(redraw);
+    });
+    const row = el('div', 'row');
+    row.append(zoom, pick);
+    const where = el('p', 'small', '');
+    body.append(box, where, row);
+    let cal: { u: [number, number]; v: [number, number] } = { u: [0, 1 / 1024], v: [0, 1 / 1024] };
+    const place = (): void => {
+      const s = this.surface;
+      mark.hidden = !s;
+      if (!s) return;
+      const u = cal.u[0] + s.x * cal.u[1];
+      const v = cal.v[0] + s.y * cal.v[1];
+      mark.style.left = `${u * 100}%`;
+      mark.style.top = `${v * 100}%`;
+      if (box.classList.contains('close')) requestAnimationFrame(() => mark.scrollIntoView({ block: 'center', inline: 'center' }));
+    };
+    where.textContent = p.z === 0 ? 'The marker shows where the party stands.' : 'The party is underground; the marker shows where they last stood on the surface.';
+    void kvGet<Blob>(`map:${g.kind}`).catch(() => undefined).then((blob) => {
+      if (blob) {
+        img.src = URL.createObjectURL(blob);
+        img.addEventListener('load', () => {
+          cal = mapCalibration(g.kind, img.naturalWidth / img.naturalHeight);
+          place();
+        }, { once: true });
+        const drop = btn('Use the drawn map', () => void kvDelete(`map:${g.kind}`).then(redraw));
+        row.append(drop);
+      } else {
+        img.src = this.view.world().toDataURL();
+        img.classList.add('drawn');
+        place();
+      }
+    });
+  }
+
   private journal(): void {
     const g = this.game;
     this.open('Journal', (body) => {
-      const draw = (tab: 'people' | 'read', person = -1): void => {
+      const draw = (tab: 'people' | 'read' | 'map', person = -1): void => {
         body.replaceChildren();
         const seg = el('div', 'seg');
-        seg.append(btn('People', () => draw('people'), tab === 'people' ? 'on' : ''), btn('Read', () => draw('read'), tab === 'read' ? 'on' : ''));
+        seg.append(
+          btn('People', () => draw('people'), tab === 'people' ? 'on' : ''),
+          btn('Read', () => draw('read'), tab === 'read' ? 'on' : ''),
+          btn('Map', () => draw('map'), tab === 'map' ? 'on' : ''),
+        );
         body.append(seg);
+        if (tab === 'map') return void this.worldMap(body, () => draw('map'));
         const j = g.journal.data;
         if (tab === 'read') {
           if (j.readings.length === 0) body.append(el('p', 'small', 'Signs and books read are kept here.'));
