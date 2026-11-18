@@ -62,8 +62,9 @@ button:disabled { opacity: .45; }
 .tabs button.news::after { content: ''; position: absolute; top: 4px; right: 4px; width: 6px; height: 6px; background: var(--key); }
 
 /* The pane's one row is the room left, never its content's height: what does not fit scrolls inside it. */
-.pane { flex: 1 1 0; min-height: calc(3 * var(--lh) + 2 * var(--edge) + 4px); display: flex; flex-direction: column; overflow: hidden; }
-.panebody { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 2px 4px; }
+.pane { position: relative; flex: 1 1 0; min-height: calc(3 * var(--lh) + 2 * var(--edge) + 4px); display: flex; flex-direction: column; overflow: hidden; }
+.panebody { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 2px 12px 2px 4px; scrollbar-width: none; }
+.panebody::-webkit-scrollbar { display: none; }
 
 .log p { margin: 0 0 var(--lh); white-space: pre-wrap; overflow-wrap: anywhere; }
 .log p:last-child { margin-bottom: 0; }
@@ -159,3 +160,44 @@ label.field input { min-height: 40px; border: 2px solid #000; border-radius: 3px
 .answers button { text-align: left; padding: 8px; min-height: 44px; white-space: normal; }
 .sheet p.speech { color: var(--key); }
 .answers.row { flex-direction: row; }
+
+.scrolltrack { position: absolute; right: 3px; top: var(--edge, 8px); bottom: var(--edge, 8px); width: 5px; border-radius: 3px; background: color-mix(in srgb, var(--muted) 30%, transparent); pointer-events: none; }
+.scrolltrack i { position: absolute; left: 0; right: 0; border-radius: 3px; background: var(--burn); }
+.member { box-sizing: border-box; min-height: 40px; }
+.opts button.heard { background: #d8cfb8; color: #7a7262; border-color: #7a7262; box-shadow: none; }
+
+/* No paper round the map (the menu's Map frame: off): the map takes the room the frame had. */
+:root.no-frame .viewwrap { --edge: 0px; border: 0 !important; border-image: none !important; padding: 0; background: #000; box-shadow: none; }
+.zoomreset { position: absolute; right: 6px; bottom: 6px; min-height: 36px; padding: 0 10px; z-index: 2; }
+.view { touch-action: none; }
+.dragghost { position: fixed; width: 40px; height: 40px; margin: -48px 0 0 -20px; image-rendering: pixelated; pointer-events: none; z-index: 20; filter: drop-shadow(0 3px 3px #000a); }
+
+.worldmap { position: relative; width: 100%; overflow: auto; max-height: 62dvh; border: 2px solid #000; background: #000; -webkit-overflow-scrolling: touch; }
+.worldmap img { display: block; width: 100%; height: auto; }
+.worldmap img.drawn { image-rendering: pixelated; }
+.worldmap .inner { position: relative; width: 100%; }
+.worldmap.close .inner { width: 260%; }
+.worldmap .here { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; background: #e22; border: 2px solid #fff; box-shadow: 0 0 0 2px #000; animation: here 1.2s ease-in-out infinite; pointer-events: none; }
+@keyframes here { 50% { box-shadow: 0 0 0 7px #e228; } }
+.pick input[type=file] { display: none; }
+.sheet label.pick { flex: 1; display: flex; align-items: center; justify-content: center; min-height: var(--tap); border: 2px solid #000; border-radius: 3px; background: var(--parch); color: var(--ink); box-shadow: inset -2px -2px 0 #0003; text-align: center; padding: 0 8px; cursor: pointer; }
+.sheet canvas.scene { display: block; width: 100%; aspect-ratio: 320 / 200; image-rendering: pixelated; border: 2px solid #000; margin-bottom: 8px; }
+.sheet canvas.scene.midgame { aspect-ratio: auto; height: auto; }
+
+/* A cutscene's words beneath it, in the speaker's colour on black as the game shows them. */
+.sheet p.caption {
+  background: #000;
+  margin: 0;
+  padding: 0.5em 0.7em;
+  min-height: 4.2em;
+  font-size: 0.95em;
+  line-height: 1.35;
+}
+
+/* A companion's way of fighting: seven choices, wrapping on a narrow screen. */
+.seg.modes { flex-wrap: wrap; }
+.seg.modes button { flex: 1 0 28%; }
+
+/* Solo mode: the one walking alone, and the way back to the party. */
+.row.soloing { align-items: center; justify-content: space-between; margin: 4px 0 8px; }
+.member.alone .name::after { content: ' (alone)'; color: var(--key); }

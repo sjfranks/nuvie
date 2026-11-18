@@ -231,6 +231,12 @@ export class Converse {
     return keywordsFrom(this.script, this.pos);
   }
 
+  /** Which answer a word said now leads to (where it begins in the script), or null. */
+  answerFor(word: string): number | null {
+    for (const grp of keywordGroupsFrom(this.script, this.pos)) if (grp.keys.some((k) => k !== '*' && checkKeywords(k, word))) return grp.at;
+    return null;
+  }
+
   /** Give the player's answer and run on. */
   reply(s: string): void {
     if (!this.ask || this.ended) return;
@@ -902,6 +908,31 @@ export function checkKeywords(keys: string, said: string): boolean {
   if (keys === '*') return true;
   const s = said.toLowerCase();
   return keys.split(',').some((k) => k.toLowerCase() === s.slice(0, k.length));
+}
+
+/**
+ * The keywords a script answers to from `pos` on, grouped by the answer they lead to: keywords listed together, or in
+ * blocks that fall through to one answer, give the same words. Each group is named by where its answer begins.
+ */
+export function keywordGroupsFrom(s: Uint8Array, pos: number): { keys: string[]; at: number }[] {
+  const out: { keys: string[]; at: number }[] = [];
+  let pending: string[] = [];
+  for (let i = pos; i < s.length && i < pos + 8000; i++) {
+    if (s[i] === OP.ENDANSWER) break;
+    if (s[i] !== OP.KEYWORDS) continue;
+    let j = i + 1;
+    let text = '';
+    while (j < s.length && isPrint(s[j])) text += String.fromCharCode(s[j++]);
+    if (text && (s[j] === OP.ANSWER || s[j] === OP.KEYWORDS)) {
+      for (const k of text.split(',')) if (k) pending.push(k.toLowerCase());
+      if (s[j] === OP.ANSWER) {
+        out.push({ keys: pending, at: j });
+        pending = [];
+      }
+      i = j - 1;
+    }
+  }
+  return out;
 }
 
 /** The keywords a script answers to from `pos` on, up to the end of that question's answers. */

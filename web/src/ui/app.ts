@@ -4,14 +4,26 @@
  * Held sideways, the map stands at the left and the rest beside it.
  */
 import type { Actor } from '../game/actors.ts';
-import { Game, type SaveState } from '../game/game.ts';
+import { Game, type Formation, type SaveState } from '../game/game.ts';
 import { invWeight } from '../game/inventory.ts';
 import type { Obj } from '../game/objects.ts';
 import { OBJ } from '../game/u6tables.ts';
 import { USED_IN_PLACE } from '../game/usecode.ts';
 import { MD_IN_PLACE } from '../game/mdusecode.ts';
 import { REAGENTS, reagentCounts, reagentNames, words, type Spell } from '../game/magic.ts';
+import { kvDelete, kvGet, kvSet } from '../files/gamefiles.ts';
+import { play } from './anim.ts';
+import { endingPicture, stillPicture } from './endings.ts';
+import { mdEndingScene } from './mdending.ts';
+import { u6EndingScene } from './u6ending.ts';
+import { u6IntroScene } from './u6intro.ts';
+import { mdIntroScene, mdOpeningScene } from './mdintro.ts';
+import { seTitleScene } from './seintro.ts';
+import { loadImages, loadMidgame, shapeRgba } from '../files/cutscene.ts';
+import type { Shape } from '../files/shape.ts';
+import { INTRO_U6 } from './intro6.ts';
 import { Gypsy } from './gypsy.ts';
+import { ASK_NAME, INTRO, Intanya, QUESTIONS as QUESTIONS_SE, SE_ENDING, SE_STORY } from './intanya.ts';
 import { interview, type Hero, type Step } from './freud.ts';
 import { MapView } from './mapview.ts';
 import { haveIcons } from './theme.ts';
@@ -33,6 +45,28 @@ const btn = (label: string, on: () => void, cls = ''): HTMLButtonElement => {
   b.addEventListener('click', on);
   return b;
 };
+/**
+ * Where the world lies on a picture of each game's cloth map, as fractions of the picture: [offset, per square]
+ * across and down. Measured on the maps from the boxes (photographed whole, frame and all), by laying the world
+ * drawn from the game's files over them. A picture of another shape is taken to be the world edge to edge.
+ */
+const MAP_CAL: Record<string, { aspect: number; u: [number, number]; v: [number, number] }> = {
+  u6: { aspect: 2250 / 2245, u: [0.04, 0.00090332], v: [0.022, 0.00092578] },
+  md: { aspect: 2000 / 1160, u: [0.10329, 0.0007727], v: [-0.03913, 0.0010326] },
+  se: { aspect: 1225 / 1218, u: [0.035, 0.00090820], v: [0.035, 0.00090820] },
+};
+function mapCalibration(kind: string, aspect: number): { u: [number, number]; v: [number, number] } {
+  const c = MAP_CAL[kind];
+  if (c && Math.abs(aspect / c.aspect - 1) < 0.06) return c;
+  return { u: [0, 1 / 1024], v: [0, 1 / 1024] };
+}
+
+/** The battle speeds: how long each fighter's turn is shown. */
+const BATTLE_SPEEDS = [
+  { name: 'slow', ms: 750 },
+  { name: 'normal', ms: 420 },
+  { name: 'fast', ms: 200 },
+];
 const esc = (s: string): string => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]!);
 
 /** Things a tap uses rather than walks onto. */
@@ -46,6 +80,16 @@ export interface AppHooks {
   /** Back to the first screen; `forget` drops the saved game. */
   leave(forget: boolean): void;
 }
+
+/** How the party may walk behind its leader (Nuvie's party_formation setting, and single file). */
+const FORMATIONS: [Formation, string][] = [['standard', 'standard'], ['column', 'column'], ['row', 'row'], ['delta', 'delta'], ['file', 'single file']];
+
+/** The ways one of the party may fight (U6 combat modes), and how each is told. */
+const FIGHT_MODES: [number, string][] = [[0x2, 'Command'], [0x3, 'Front'], [0x4, 'Rear'], [0x5, 'Flank'], [0x6, 'Berserk'], [0x7, 'Retreat'], [0x8, 'Assault']];
+const FIGHT_SAYS: Record<number, string> = {
+  0x2: 'fight as you command', 0x3: 'hold the front line', 0x4: 'keep to the rear', 0x5: 'go round the flank',
+  0x6: 'go berserk at the strongest foe', 0x7: 'keep out of harm\'s way', 0x8: 'attack the nearest foe',
+};
 
 export class App {
   private readonly view: MapView;
@@ -92,7 +136,10 @@ export class App {
     this.view = new MapView(game, canvas);
     this.view.light.className = 'light';
     this.modeTag.hidden = true;
-    box.append(canvas, this.view.light, this.modeTag, this.face);
+    this.zoomReset = btn('Zoom', () => this.setZoom(0), 'zoomreset');
+    this.zoomReset.setAttribute('aria-label', 'Back to the usual zoom');
+    this.zoomReset.hidden = true;
+    box.append(canvas, this.view.light, this.modeTag, this.face, this.zoomReset);
     this.status.className = 'clock';
     wrap.append(box);
     const divider = el('div', 'divider');
@@ -102,28 +149,76 @@ export class App {
     tabs.append(this.tabLog, this.tabParty, this.status, btn('Menu', () => this.menu()));
     divider.append(tabs);
     const pane = el('div', 'pane paper');
-    pane.append(this.body);
+    // A scroll bar of our own (phones hide theirs): where the view is in what there is.
+    this.thumb = el('i');
+    const track = el('div', 'scrolltrack');
+    track.append(this.thumb);
+    pane.append(this.body, track);
     const side = el('div', 'side');
     side.append(divider, pane, this.foot);
     this.root.append(wrap, side);
     host.replaceChildren(this.root);
     this.body.addEventListener('scroll', () => {
-      this.stick = this.body.scrollTop + this.body.clientHeight >= this.body.scrollHeight - 6;
+      if (this.pane === 'log') this.stick = this.body.scrollTop + this.body.clientHeight >= this.body.scrollHeight - 6;
+      this.drawThumb();
     });
     // The pane changes size (a conversation shrinks the map): the newest line stays in view.
-    new ResizeObserver(() => this.toBottom()).observe(this.body);
+    new ResizeObserver(() => {
+      if (this.pane === 'log') this.toBottom();
+      else this.sizeParty();
+      this.drawThumb();
+    }).observe(this.body);
 
     // A tap acts (tap()); a finger held down walks the party towards it while it stays, sliding to steer.
     const at = (e: PointerEvent): { x: number; y: number } => {
       const r = canvas.getBoundingClientRect();
       return this.view.squareAt(e.clientX - r.left, e.clientY - r.top);
     };
-    let down: { id: number; sq: { x: number; y: number }; holding: boolean; timer: number } | null = null;
+    let down: {
+      id: number; sq: { x: number; y: number }; holding: boolean; timer: number;
+      from: { x: number; y: number }; carry: Obj | null; ghost: HTMLCanvasElement | null;
+    } | null = null;
+    // Two fingers pinch the map: apart to come back in (never closer than the default), together to see more.
+    const fingers = new Map<number, { x: number; y: number }>();
+    let pinch: { dist: number; extra: number } | null = null;
+    const spread = (): number => {
+      const [a, b] = [...fingers.values()];
+      return Math.hypot(a.x - b.x, a.y - b.y) || 1;
+    };
+    canvas.addEventListener('pointerdown', (e) => {
+      fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (fingers.size === 2) {
+        // A second finger: a pinch, not a tap or a walk.
+        if (down) clearTimeout(down.timer);
+        down = null;
+        this.walk = null;
+        pinch = { dist: spread(), extra: this.zoomOut };
+      }
+    });
+    canvas.addEventListener('pointermove', (e) => {
+      if (!fingers.has(e.pointerId)) return;
+      fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pinch && fingers.size === 2) {
+        const base = this.baseCols();
+        const want = Math.round(((base + pinch.extra) * pinch.dist) / spread());
+        this.setZoom(Math.max(0, want - base));
+      }
+    });
+    const lift = (e: PointerEvent): void => {
+      fingers.delete(e.pointerId);
+      if (fingers.size < 2) pinch = null;
+    };
+    canvas.addEventListener('pointerup', lift);
+    canvas.addEventListener('pointercancel', lift);
     canvas.addEventListener('pointerdown', (e) => {
       e.preventDefault();
+      if (fingers.size > 1) return;
       canvas.setPointerCapture(e.pointerId);
       const sq = at(e);
-      down = { id: e.pointerId, sq, holding: false, timer: 0 };
+      // A thing within reach may be dragged: a finger that moves off it carries it.
+      const g = this.game;
+      const top = !g.converse && !this.mode ? [...(g.objects.list(sq.x, sq.y, g.player.z) ?? [])].reverse().find((o) => g.canDrag(o)) : undefined;
+      down = { id: e.pointerId, sq, holding: false, timer: 0, from: { x: e.clientX, y: e.clientY }, carry: top ?? null, ghost: null };
       const d = down;
       d.timer = window.setTimeout(() => {
         // Held: walking, not a tap - unless a command waits on a square, or someone is talking.
@@ -133,13 +228,31 @@ export class App {
       }, 280);
     });
     canvas.addEventListener('pointermove', (e) => {
-      if (down && e.pointerId === down.id) down.sq = at(e);
+      if (!down || e.pointerId !== down.id) return;
+      down.sq = at(e);
+      const d = down;
+      if (d.carry && !d.holding && !d.ghost && Math.hypot(e.clientX - d.from.x, e.clientY - d.from.y) > 14) {
+        // Dragging, not walking: the thing follows the finger.
+        clearTimeout(d.timer);
+        d.ghost = this.view.tileImage(this.game.objects.tileNum(d.carry));
+        d.ghost.className = 'dragghost';
+        document.body.append(d.ghost);
+      }
+      if (d.ghost) {
+        d.ghost.style.left = `${e.clientX}px`;
+        d.ghost.style.top = `${e.clientY}px`;
+      }
     });
     const up = (e: PointerEvent): void => {
       if (!down || e.pointerId !== down.id) return;
       const d = down;
       down = null;
       clearTimeout(d.timer);
+      if (d.ghost) {
+        d.ghost.remove();
+        if (e.type === 'pointerup' && d.carry && !this.busy) this.game.dragTo(d.carry, d.sq.x, d.sq.y);
+        return;
+      }
       if (!d.holding && e.type === 'pointerup') this.tap(d.sq);
       if (d.holding) {
         this.walk = null;
@@ -178,10 +291,24 @@ export class App {
       this.view.tick();
       this.view.render();
     }, 150));
+    // A fight's turns, one at a time, at the battle speed: each fighter is seen to act.
+    game.combat.paced = true;
+    this.timers.push(window.setInterval(() => {
+      const c = game.combat;
+      if (!c.waiting || performance.now() < this.turnAt) return;
+      const p = game.player;
+      let a = c.nextTurn();
+      // Turns far off the map need no watching.
+      while (a && (a.z !== p.z || Math.max(Math.abs(a.x - p.x), Math.abs(a.y - p.y)) > 8) && c.waiting) a = c.nextTurn();
+      this.turnAt = performance.now() + BATTLE_SPEEDS[this.battleSpeed].ms;
+      this.changed();
+      this.view.render();
+    }, 30));
     this.layout();
     this.changed();
     if (game.fresh && game.kind === 'u6') this.creation();
     if (game.fresh && game.kind === 'md') this.freud();
+    if (game.fresh && game.kind === 'se') this.intanya();
   }
 
   // ---- a new Avatar (intro.lua's create_character) ----
@@ -234,7 +361,82 @@ export class App {
       const go = el('div', 'row');
       go.append(btn('Sit before the gypsy', () => this.gypsy(name, female, face), 'primary'));
       body.append(go);
+      if (g.files.has('intro.shp')) {
+        const watch = el('div', 'row');
+        watch.append(btn('Watch the introduction first', () => this.introU6(0)));
+        body.append(watch);
+      }
     });
+  }
+
+  /** play_midgame_sequence: a scene's pictures (the Avatar as they are) and its words, a line at a time. */
+  private midgame(n: number): void {
+    const g = this.game;
+    const scenes = loadMidgame(g.files, `midgame${n.toString(16)}.lzc`, g.kind === 'md');
+    const pages: { text: string; pic: number }[] = [];
+    scenes.forEach((s, i) => s.text.forEach((t) => t && t !== '*END*' && pages.push({ text: t.replace(/\^/g, ' '), pic: i })));
+    if (!pages.length) return;
+    const draw = (k: number): void => {
+      if (k >= pages.length) return this.close();
+      const sc = scenes[pages[k].pic];
+      this.open(g.kind === 'md' ? 'Martian Dreams' : 'The Savage Empire', (body) => {
+        const c = document.createElement('canvas');
+        // The scene's own size: its background, drawn where its hot spot falls.
+        c.width = sc.images[0]?.w ?? 320;
+        c.height = sc.images[0]?.h ?? 200;
+        c.className = 'scene midgame';
+        const ctx = c.getContext('2d')!;
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, c.width, c.height);
+        const pal = this.view.palette;
+        const layer = (s: Shape | undefined): void => {
+          if (!s) return;
+          const tmp = document.createElement('canvas');
+          tmp.width = s.w;
+          tmp.height = s.h;
+          tmp.getContext('2d')!.putImageData(new ImageData(new Uint8ClampedArray(shapeRgba(s, pal)), s.w, s.h), 0, 0);
+          const bg = sc.images[0];
+          ctx.drawImage(tmp, (bg?.hx ?? 0) - (s.hx ?? 0), (bg?.hy ?? 0) - (s.hy ?? 0));
+        };
+        layer(sc.images[0]);
+        if (sc.images.length > 1) layer(sc.images[1 + (g.gender === 1 ? 1 : 0)]);
+        body.append(c, el('p', '', pages[k].text));
+        const row = el('div', 'row');
+        row.append(btn(k + 1 < pages.length ? 'Continue' : 'Close', () => {
+          this.onClose = null;
+          draw(k + 1);
+        }, 'primary'));
+        body.append(row);
+      });
+    };
+    draw(0);
+  }
+
+  /** Ultima VI's introduction, a page of its words over a still at a time; then the gypsy. */
+  private introU6(i: number): void {
+    const g = this.game;
+    if (i >= INTRO_U6.length) return this.creation();
+    const [text, [file, pal, layers]] = INTRO_U6[i];
+    let moving: ReturnType<typeof play> = null;
+    this.open('Ultima VI', (body) => {
+      // The scene moves as intro.lua plays it; a still where it cannot.
+      moving = play(g.files, ['palettes.int', pal], u6IntroScene(g.files, i));
+      const pic = moving?.canvas ?? stillPicture(g.files, file, ['palettes.int', pal], layers);
+      if (pic) {
+        pic.className = 'scene';
+        body.append(pic);
+      }
+      body.append(el('p', '', text));
+      const row = el('div', 'row');
+      const go = (next: () => void): void => {
+        moving?.stop();
+        this.onClose = null;
+        next();
+      };
+      row.append(btn('Skip', () => go(() => this.creation())), btn('Continue', () => go(() => this.introU6(i + 1)), 'primary'));
+      body.append(row);
+    });
+    this.onClose = () => moving?.stop();
   }
 
   /** Martian Dreams' new Avatar: Freud's interview aboard the capsule (intro.lua's create_character). */
@@ -243,6 +445,77 @@ export class App {
     const lines = g.sceneText('scenetxt.lzc', 5);
     if (lines.length < 60) return;
     const it = interview(lines, (lo, hi) => lo + g.random(hi - lo + 1));
+    // The introduction first, if wished (intro.lua's run_introduction): its words over each scene's picture.
+    const scenes: [number, string, number[][]][] = [[0, 'scene1.lzc', [[0, 0, 0, 24], [0, 1, 0, 24], [1, 0, 240, 151]]], [1, 'scene3.lzc', [[0, 0, 0, 24]]], [2, 'scene4a.lzc', [[0, 0, 0, 24]]]];
+    const intro: [string, string, number[][]][] = [];
+    for (const [item, file, layers] of scenes) for (const l of g.sceneText('scenetxt.lzc', item)) if (l.trim()) intro.push([l.replace(/\^/g, ' '), file, layers]);
+    const introPage = (i: number): void => {
+      if (i >= intro.length) return show(it.next(''));
+      const [text, file, layers] = intro[i];
+      this.open('Martian Dreams', (body) => {
+        const pic = stillPicture(g.files, file, ['md_title.pal', 0], layers);
+        if (pic) {
+          pic.className = 'scene';
+          body.append(pic);
+        }
+        body.append(el('p', '', text));
+        const row = el('div', 'row');
+        row.append(btn('Skip', () => show(it.next(''))), btn('Continue', () => introPage(i + 1), 'primary'));
+        body.append(row);
+      });
+    };
+    // The introduction in motion, on its own clock as run_introduction plays it, the words beneath; or page by page where it cannot play.
+    const film = (opening = false): void => {
+      if (opening) return openingFilm();
+      let moving: ReturnType<typeof play> = null;
+      const done = (): void => {
+        moving?.stop();
+        this.onClose = null;
+        show(it.next(''));
+      };
+      this.open('Martian Dreams', (body) => {
+        const caption = el('p', 'caption');
+        const row = el('div', 'row');
+        const skip = btn('Skip', done);
+        moving = play(g.files, ['md_title.pal', 0], mdIntroScene((n) => g.sceneText('scenetxt.lzc', n), () => loadImages(g.files, 'scene2.lzc')[0]?.[0] ?? null), {
+          text: (t, [r, gr, b]) => {
+            caption.textContent = t;
+            caption.style.color = `rgb(${r},${gr},${b})`;
+          },
+          end: () => {
+            skip.textContent = 'Continue';
+            skip.classList.add('primary');
+          },
+        });
+        if (!moving) return introPage(0);
+        moving.canvas.className = 'scene';
+        row.append(skip);
+        body.append(moving.canvas, caption, row);
+      });
+      this.onClose = () => moving?.stop();
+    };
+    // play_intro's opening, then on to the introduction.
+    const openingFilm = (): void => {
+      let moving: ReturnType<typeof play> = null;
+      const next = (): void => {
+        moving?.stop();
+        this.onClose = null;
+        film();
+      };
+      this.open('Martian Dreams', (body) => {
+        const row = el('div', 'row');
+        const go = btn('Skip', next);
+        moving = play(g.files, ['md_title.pal', 0], mdOpeningScene(), { end: () => {
+          go.textContent = 'Continue';
+          go.classList.add('primary');
+        } });
+        if (!moving) return film();
+        moving.canvas.className = 'scene';
+        row.append(go);
+        body.append(moving.canvas, row);
+      });
+      this.onClose = () => moving?.stop();
+    };
     const show = (r: IteratorResult<Step, Hero>): void => {
       if (r.done) {
         g.createHero({ ...r.value, face: 0 });
@@ -275,7 +548,114 @@ export class App {
         body.append(row);
       });
     };
-    show(it.next(''));
+    if (intro.length && g.files.has('scene1.lzc')) {
+      this.open('Martian Dreams', (body) => {
+        body.append(el('p', '', 'A new Avatar: the introduction, then Freud\'s questions.'));
+        const row = el('div', 'row');
+        row.append(btn('Skip the introduction', () => show(it.next(''))), btn('Watch the introduction', () => film(), 'primary'));
+        // The opening the game shows before its menu (play_intro), if wished.
+        const more = el('div', 'row');
+        more.append(btn('Watch the opening first', () => film(true)));
+        body.append(row, more);
+      });
+    } else show(it.next(''));
+  }
+
+  /** Savage Empire's new Avatar: Intanya the shaman's questions (intro.lua's create_new_character). */
+  private intanya(): void {
+    const g = this.game;
+    const shaman = new Intanya((lo, hi) => lo + g.random(hi - lo + 1));
+    let name = 'Avatar';
+    const page = (text: string, next: () => void): void => {
+      this.open('Intanya', (body) => {
+        body.append(el('p', '', text));
+        const row = el('div', 'row');
+        row.append(btn('Continue', next, 'primary'));
+        body.append(row);
+      });
+    };
+    const question = (): void => {
+      if (shaman.done) {
+        const [str, dex, int] = shaman.stats;
+        g.createHero({ name, female: false, face: 0, str, dex, int });
+        return page('Intanya\'s potion burns, then soothes. Your strength returns... and the Valley of Eodon awaits.', () => this.close());
+      }
+      this.open(`Intanya asks (${shaman.asked + 1} of 3)`, (body) => {
+        const t = QUESTIONS_SE[shaman.q];
+        const m = t.match(/^(.*?)(?:Will you|Do you) \(a\) (.*?),? or \(b\) (.*)$/);
+        body.append(el('p', '', m ? `${m[1]}` : t));
+        const list = el('div', 'answers');
+        list.append(btn(`(a) ${m ? m[2] : 'A'}`, () => (shaman.answer(true), question())), btn(`(b) ${m ? m[3] : 'B'}`, () => (shaman.answer(false), question())));
+        body.append(list);
+      });
+    };
+    const askName = (): void => {
+      this.open('Intanya', (body) => {
+        body.append(el('p', '', ASK_NAME));
+        const form = el('form');
+        form.className = 'row';
+        const input = el('input');
+        input.maxLength = 13;
+        input.placeholder = 'Your name';
+        const ok = btn('Answer', () => {}, 'primary');
+        ok.type = 'submit';
+        form.append(input, ok);
+        form.addEventListener('submit', (e) => {
+          e.preventDefault();
+          if (!input.value.trim()) return;
+          name = input.value.trim();
+          question();
+        });
+        body.append(form);
+        setTimeout(() => input.focus(), 50);
+      });
+    };
+    const begin = (): void => page(INTRO[0], () => page(INTRO[1], () => page(INTRO[2], askName)));
+    // The story so far, as the game's menu offers it: ten pictures with their words.
+    const story = (i: number): void => {
+      if (i >= SE_STORY.length) return begin();
+      this.open('The story so far', (body) => {
+        const pic = stillPicture(g.files, 'create.lzc', ['savage.pal', 1], [[5, 0, 0, 0], [5, i + 1, 120, 45]]);
+        if (pic) {
+          pic.className = 'scene';
+          body.append(pic);
+        }
+        body.append(el('p', '', SE_STORY[i]));
+        const row = el('div', 'row');
+        row.append(btn('Skip', begin), btn('Continue', () => story(i + 1), 'primary'));
+        body.append(row);
+      });
+    };
+    // The title first, in motion as intro_sequence plays it (where intro.lzc is there).
+    const title = (): void => {
+      let moving: ReturnType<typeof play> = null;
+      const next = (): void => {
+        moving?.stop();
+        this.onClose = null;
+        story(0);
+      };
+      this.open('The Savage Empire', (body) => {
+        const row = el('div', 'row');
+        const go = btn('Skip', next);
+        moving = g.files.has('intro.lzc') ? play(g.files, ['savage.pal', 0], seTitleScene(), { end: () => {
+          go.textContent = 'Continue';
+          go.classList.add('primary');
+        } }) : null;
+        if (!moving) return story(0);
+        moving.canvas.className = 'scene';
+        row.append(go);
+        body.append(moving.canvas, row);
+      });
+      this.onClose = () => moving?.stop();
+    };
+    if (g.files.has('create.lzc')) {
+      this.open('The Savage Empire', (body) => {
+        body.append(el('p', '', 'A new Avatar: the story so far, then Intanya\'s questions.'));
+        const row = el('div', 'row');
+        row.append(btn('Skip the story', begin), btn('The story so far', () => title(), 'primary'));
+        body.append(row);
+      });
+    } else begin();
   }
 
   private gypsy(name: string, female: boolean, face: number): void {
@@ -332,14 +712,30 @@ export class App {
 
   dispose: () => void;
 
-  /** As many squares across as keeps each a comfortable size for a finger. */
-  private layout(): void {
+  /** Squares added across by pinching out (even, so the party stays in the middle). */
+  private zoomOut = 0;
+  private zoomReset!: HTMLButtonElement;
+
+  /** The default zoom: as many squares across as keeps each a comfortable size for a finger. */
+  private baseCols(): number {
     const w = this.view.canvas.getBoundingClientRect().width || 352;
     // At least 11 squares, each at most 40 pixels; odd, so the party stands in the middle.
     let n = Math.floor(w / 32);
     if (n % 2 === 0) n--;
-    n = Math.max(11, Math.min(15, n));
+    return Math.max(11, Math.min(15, n));
+  }
+
+  private setZoom(extra: number): void {
+    const z = Math.min(24, extra - (extra % 2));
+    if (z === this.zoomOut) return;
+    this.zoomOut = z;
+    this.layout();
+  }
+
+  private layout(): void {
+    const n = this.baseCols() + this.zoomOut;
     if (n !== this.view.cols) this.view.resize(n, n);
+    this.zoomReset.hidden = this.zoomOut === 0;
     this.view.render();
   }
 
@@ -347,7 +743,7 @@ export class App {
 
   private tap(sq: { x: number; y: number }): void {
     const g = this.game;
-    if (g.converse) return;
+    if (g.converse || this.busy) return;
     clearTimeout(this.walkTimer);
     const p = g.player;
     const mode = this.mode;
@@ -432,6 +828,12 @@ export class App {
   private step(): void {
     const g = this.game;
     const w = this.walk;
+    if (w && this.busy) {
+      // The fighters are still taking their turns: the party's next step waits for them.
+      clearTimeout(this.walkTimer);
+      this.walkTimer = window.setTimeout(() => this.step(), 60);
+      return;
+    }
     if (!w || g.converse) {
       this.walk = null;
       this.mark();
@@ -553,6 +955,11 @@ export class App {
       });
     }
     if (g.won && !this.sheet) this.ending();
+    if (g.cutscene !== null && !this.sheet) {
+      const n = g.cutscene;
+      g.cutscene = null;
+      this.midgame(n);
+    }
     if (g.peer) {
       g.peer = false;
       this.open(g.kind === 'u6' ? 'Peer' : 'Map', (body) => {
@@ -574,6 +981,7 @@ export class App {
       const from = (dy > 0 ? 'N' : dy < 0 ? 'S' : '') + (dx > 0 ? 'W' : dx < 0 ? 'E' : '');
       this.status.textContent += ` ${from ? `Wind ${from}` : 'Calm'}`;
     }
+    if (g.player.z === 0) this.surface = { x: g.player.x, y: g.player.y };
     // While someone talks, or a container stands open, the pane shows the log whatever was chosen.
     const pane: Pane = g.converse ? 'log' : this.pane;
     this.face.hidden = !(g.converse && g.speaker);
@@ -616,7 +1024,18 @@ export class App {
       const lw = w.toLowerCase().replace(/'s$/, '');
       return lw.length >= 3 && keys.some((k) => k.length >= Math.min(4, lw.length) && lw.slice(0, k.length) === k);
     };
-    g.log.slice(-60).forEach((line, i, shown) => {
+    // In a conversation the window holds only this exchange: from what was last said to them (or their greeting).
+    let from = Math.max(0, g.log.length - 60);
+    if (c) {
+      from = Math.max(from, this.talkFrom);
+      for (let i = g.log.length - 1; i >= from; i--) {
+        if (g.log[i].kind === 'you') {
+          from = i;
+          break;
+        }
+      }
+    }
+    g.log.slice(from).forEach((line, i, shown) => {
       const p = el('p', line.kind);
       const text = line.text.replace(/^\n+|\n+$/g, '');
       if (!text) return;
@@ -630,17 +1049,77 @@ export class App {
     });
     log.addEventListener('click', (e) => {
       const say = (e.target as HTMLElement).dataset?.say;
-      if (say && g.asking()?.type === 'keyword') g.reply(say);
+      if (say && g.asking()?.type === 'keyword') {
+        this.optsAt = g.log.length;
+        g.reply(say);
+      }
     });
     const grew = g.log.length !== this.logLength;
     this.logLength = g.log.length;
     this.body.replaceChildren(log);
+    if (c) {
+      // A new exchange is read from its top; nothing to scroll down to find.
+      if (from !== this.exchangeFrom) {
+        this.exchangeFrom = from;
+        this.body.scrollTop = 0;
+      }
+      this.stick = false;
+      requestAnimationFrame(() => this.drawThumb());
+      return;
+    }
+    this.exchangeFrom = -1;
     if (grew) this.stick = true;
     this.toBottom();
   }
 
+  /** Where the conversation's exchange now shown begins in the log. */
+  private exchangeFrom = -1;
+  /** The log's length when the player last chose to see the topics: until then, Continue. */
+  private optsAt = -1;
+
+  private thumb!: HTMLElement;
+  /** When the next fighter may take their turn. */
+  private turnAt = 0;
+  private battleSpeed = (() => {
+    try {
+      const saved = localStorage.getItem('nuvie.battle');
+      const v = saved === null ? 1 : Number(saved);
+      return v >= 0 && v < BATTLE_SPEEDS.length ? v : 1;
+    } catch {
+      return 1;
+    }
+  })();
+
+  /** While fighters take their turns, the player waits. */
+  private get busy(): boolean {
+    return this.game.combat.waiting;
+  }
+
+  /** The scroll bar's thumb: shown only when there is more than fits. */
+  private drawThumb(): void {
+    const b = this.body;
+    const more = b.scrollHeight > b.clientHeight + 2;
+    this.thumb.parentElement!.hidden = !more;
+    if (!more) return;
+    const track = this.thumb.parentElement!.clientHeight;
+    const h = Math.max(16, (b.clientHeight / b.scrollHeight) * track);
+    this.thumb.style.height = `${h}px`;
+    this.thumb.style.top = `${(b.scrollTop / (b.scrollHeight - b.clientHeight)) * (track - h)}px`;
+  }
+
+  /** Party rows sized so four fill the pane and a fifth shows its top: there is more below. */
+  private sizeParty(): void {
+    const list = this.body.firstElementChild as HTMLElement | null;
+    if (!list || this.pane !== 'party') return;
+    const head = list.querySelector<HTMLElement>('.partyhead');
+    const room = this.body.clientHeight - (head?.offsetHeight ?? 0);
+    const rowH = Math.max(40, Math.floor(room / 4.4));
+    for (const r of list.querySelectorAll<HTMLElement>('.member')) r.style.height = `${rowH}px`;
+  }
+
   /** Keep the newest lines in view, unless the player has scrolled back to read. */
   private toBottom(): void {
+    requestAnimationFrame(() => this.drawThumb());
     if (!this.stick) return;
     this.body.scrollTop = this.body.scrollHeight;
     requestAnimationFrame(() => {
@@ -663,6 +1142,15 @@ export class App {
     const head = el('div', 'partyhead');
     head.append(el('span', '', g.date()), el('span', '', `Gold ${g.gold()}`));
     list.append(head);
+    // Split up: one walks alone until the party gathers again.
+    if (g.isSolo) {
+      const row = el('div', 'row soloing');
+      row.append(el('span', 'small', `${g.partyMemberName(g.solo!.id)} is alone.`), btn('Party mode', () => {
+        g.partyMode();
+        this.changed();
+      }, 'primary'));
+      list.append(row);
+    }
     for (const m of g.party) {
       const a = m.actor;
       const row = el('div', 'member');
@@ -673,11 +1161,14 @@ export class App {
       bar.append(fill);
       mid.append(el('div', 'name', m.name), bar);
       row.append(this.view.tileImage(g.objects.objToTile[a.objN] + 8), mid, el('div', '', `${a.hp}/${a.maxHp}`));
+      if (g.isSolo && a === g.solo) row.classList.add('alone');
       row.addEventListener('click', () => this.character(m.actor, m.name));
       list.append(row);
     }
-    list.append(el('p', 'small', 'Tap a member for their numbers and what they carry.'));
     this.body.replaceChildren(list);
+    this.body.scrollTop = 0;
+    this.sizeParty();
+    this.drawThumb();
   }
 
   private drawFoot(): void {
@@ -685,7 +1176,8 @@ export class App {
     const ask = g.asking();
     const opts = ask ? g.sayOptions() : [];
     // Rebuilt only when what it offers changes, so a text being typed is not lost.
-    const key = g.converse ? `say:${g.paused}:${ask?.type}:${opts.map((o) => o.say).join()}:${g.log.length}` : `cmd:${this.mode}`;
+    const gate = !!g.converse && !g.paused && ask?.type === 'keyword' && this.optsAt !== g.log.length;
+    const key = g.converse ? `say:${g.paused}:${gate}:${ask?.type}:${opts.map((o) => o.say + o.heard).join()}:${g.log.length}` : `cmd:${this.mode}`;
     if (key === this.footKey) return;
     this.footKey = key;
     if (!g.converse) {
@@ -718,9 +1210,20 @@ export class App {
     }
     const say = el('div', 'say');
     if (g.paused) say.append(btn('Continue', () => g.continueTalk(), 'primary'));
-    else if (ask) {
+    else if (gate) {
+      // They have said their piece: Continue, and then the topics.
+      say.append(btn('Continue', () => {
+        this.optsAt = g.log.length;
+        this.drawFoot();
+      }, 'primary'));
+    } else if (ask) {
       const list = el('div', 'opts');
-      for (const o of opts) list.append(btn(o.label, () => g.reply(o.say), opts.length <= 2 || o.say === 'bye' ? 'wide' : ''));
+      // What has not been asked first; what has, greyed, after.
+      const sorted = [...opts.filter((o) => !o.heard && o.say !== 'bye'), ...opts.filter((o) => o.heard && o.say !== 'bye'), ...opts.filter((o) => o.say === 'bye')];
+      for (const o of sorted) {
+        const cls = [opts.length <= 2 || o.say === 'bye' ? 'wide' : '', o.heard ? 'heard' : ''].filter(Boolean).join(' ');
+        list.append(btn(o.label, () => g.reply(o.say), cls));
+      }
       if (opts.length) say.append(list);
       if (ask.type !== 'char') {
         const form = el('form');
@@ -885,6 +1388,29 @@ export class App {
         const doll = this.doll(a, (o) => draw(picked === o ? null : o));
         if (doll) body.append(doll);
         body.append(stats);
+        // Walk alone as this one, or gather the party again (Player::set_solo_mode, Event::party_mode).
+        if (a.inParty && g.party.length > 1) {
+          const solo = el('div', 'row');
+          if (g.isSolo && g.solo === a) solo.append(btn('Party mode', () => {
+            if (g.partyMode()) this.close();
+            else draw(picked);
+          }));
+          else solo.append(btn(`Go on alone as ${name}`, () => {
+            if (g.goSolo(a)) this.close();
+          }));
+          body.append(solo);
+        }
+        // How they fight (the combat mode each keeps): the leader is always the player's to move.
+        if (g.kind !== 'se' && a.inParty && a !== g.party[0]?.actor) {
+          const modes = el('div', 'seg modes');
+          for (const [m, label] of FIGHT_MODES) modes.append(btn(label, () => {
+            a.combatMode = m;
+            g.say('sys', `${name} will ${FIGHT_SAYS[m]}.`);
+            draw(picked);
+            this.changed();
+          }, (a.combatMode || 0x3) === m ? 'on' : ''));
+          body.append(el('div', 'small', 'In a fight'), modes);
+        }
         const inv = g.objects.inventories[a.id];
         if (inv.length === 0) body.append(el('p', 'small', 'Carrying nothing.'));
         const add = (o: Obj, depth: number): void => {
@@ -1019,7 +1545,7 @@ export class App {
   /** The game is won: ending.lua's scenes, as pages of its words. */
   private ending(): void {
     const g = this.game;
-    if (g.kind === 'md') return this.mdEnding();
+    if (g.kind !== 'u6') return this.mdEnding();
     const name = g.playerName();
     const pages = [
       'Tremors shake the shrine as the Vortex Cube draws the Codex into the Ethereal Void. A glowing portal springs from the floor!',
@@ -1047,6 +1573,14 @@ export class App {
     this.music.update();
     const page = (i: number): void => {
       this.open(i < pages.length ? 'The Codex' : 'Congratulations', (body) => {
+        // The scene moves as ending.lua plays it; a still where it cannot.
+        const moving = play(g.files, ['endpal.lbm', 0], u6EndingScene(Math.min(i, pages.length - 1)));
+        stop = moving?.stop ?? null;
+        const pic = moving?.canvas ?? endingPicture(g.files, 'u6', Math.min(i, pages.length - 1), g.gender === 1);
+        if (pic) {
+          pic.className = 'scene';
+          body.append(pic);
+        }
         if (i < pages.length) body.append(el('p', '', pages[i]));
         else {
           body.append(
@@ -1057,6 +1591,7 @@ export class App {
         }
         const row = el('div', 'row');
         row.append(btn(i < pages.length ? 'Continue' : 'Close', () => {
+          stop?.();
           if (i < pages.length) {
             this.onClose = null; // the next page, not the end of it
             page(i + 1);
@@ -1065,23 +1600,34 @@ export class App {
         body.append(row);
       });
       this.onClose = () => {
+        stop?.();
         g.won = false;
         this.music.theme = null;
         this.music.update();
       };
     };
+    let stop: (() => void) | null = null;
     page(0);
   }
 
   /** Martian Dreams' ending (ending.lua): its lines from scenetxt.lzc, a page each. */
   private mdEnding(): void {
     const g = this.game;
-    const pages = g.sceneText('scenetxt.lzc', 3).filter((l) => l.trim());
+    const pages = g.kind === 'se' ? SE_ENDING : g.sceneText('scenetxt.lzc', 3).filter((l) => l.trim());
     const page = (i: number): void => {
       this.open(i < pages.length ? 'Home' : 'The end', (body) => {
-        body.append(el('p', '', i < pages.length ? pages[i] : `Well done, ${g.playerName()}. Thou mayest go on exploring Mars.`));
+        // Martian Dreams' ending moves, as its ending.lua plays it; Savage Empire's is still pictures.
+        const moving = g.kind === 'md' ? play(g.files, ['md_title.pal', 0], mdEndingScene(Math.min(i, pages.length - 1), g.gender === 1)) : null;
+        stop = moving?.stop ?? null;
+        const pic = moving?.canvas ?? endingPicture(g.files, g.kind as 'md' | 'se', i, g.gender === 1);
+        if (pic) {
+          pic.className = 'scene';
+          body.append(pic);
+        }
+        body.append(el('p', '', i < pages.length ? pages[i] : `Well done, ${g.playerName()}. Thou mayest go on exploring ${g.kind === 'se' ? 'the Valley of Eodon' : 'Mars'}.`));
         const row = el('div', 'row');
         row.append(btn(i < pages.length ? 'Continue' : 'Close', () => {
+          stop?.();
           if (i < pages.length) {
             this.onClose = null;
             page(i + 1);
@@ -1090,9 +1636,11 @@ export class App {
         body.append(row);
       });
       this.onClose = () => {
+        stop?.();
         g.won = false;
       };
     };
+    let stop: (() => void) | null = null;
     page(0);
   }
 
@@ -1152,14 +1700,84 @@ export class App {
     });
   }
 
+  /** Where the party last stood on the surface (the map shows the land, not what lies under it). */
+  private surface: { x: number; y: number } | null = null;
+
+  /**
+   * The journal's map: the player's own picture of the cloth map that came in the box, if they have given one (kept in
+   * this browser), else the land drawn from the game's files - with a marker where the Avatar is.
+   */
+  private worldMap(body: HTMLElement, redraw: () => void): void {
+    const g = this.game;
+    const p = g.player;
+    if (p.z === 0) this.surface = { x: p.x, y: p.y };
+    const box = el('div', 'worldmap');
+    const img = el('img');
+    img.alt = 'The world map';
+    const mark = el('i', 'here');
+    const inner = el('div', 'inner');
+    inner.append(img, mark);
+    box.append(inner);
+    const zoom = btn('Closer', () => {
+      box.classList.toggle('close');
+      zoom.textContent = box.classList.contains('close') ? 'Whole map' : 'Closer';
+      place();
+    });
+    const pick = el('label', 'pick');
+    const input = el('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    pick.append('Use a picture of the map', input);
+    input.addEventListener('change', () => {
+      const f = input.files?.[0];
+      if (f) void kvSet(`map:${g.kind}`, f).then(redraw);
+    });
+    const row = el('div', 'row');
+    row.append(zoom, pick);
+    const where = el('p', 'small', '');
+    body.append(box, where, row);
+    let cal: { u: [number, number]; v: [number, number] } = { u: [0, 1 / 1024], v: [0, 1 / 1024] };
+    const place = (): void => {
+      const s = this.surface;
+      mark.hidden = !s;
+      if (!s) return;
+      const u = cal.u[0] + s.x * cal.u[1];
+      const v = cal.v[0] + s.y * cal.v[1];
+      mark.style.left = `${u * 100}%`;
+      mark.style.top = `${v * 100}%`;
+      if (box.classList.contains('close')) requestAnimationFrame(() => mark.scrollIntoView({ block: 'center', inline: 'center' }));
+    };
+    where.textContent = p.z === 0 ? 'The marker shows where the party stands.' : 'The party is underground; the marker shows where they last stood on the surface.';
+    void kvGet<Blob>(`map:${g.kind}`).catch(() => undefined).then((blob) => {
+      if (blob) {
+        img.src = URL.createObjectURL(blob);
+        img.addEventListener('load', () => {
+          cal = mapCalibration(g.kind, img.naturalWidth / img.naturalHeight);
+          place();
+        }, { once: true });
+        const drop = btn('Use the drawn map', () => void kvDelete(`map:${g.kind}`).then(redraw));
+        row.append(drop);
+      } else {
+        img.src = this.view.world().toDataURL();
+        img.classList.add('drawn');
+        place();
+      }
+    });
+  }
+
   private journal(): void {
     const g = this.game;
     this.open('Journal', (body) => {
-      const draw = (tab: 'people' | 'read', person = -1): void => {
+      const draw = (tab: 'people' | 'read' | 'map', person = -1): void => {
         body.replaceChildren();
         const seg = el('div', 'seg');
-        seg.append(btn('People', () => draw('people'), tab === 'people' ? 'on' : ''), btn('Read', () => draw('read'), tab === 'read' ? 'on' : ''));
+        seg.append(
+          btn('People', () => draw('people'), tab === 'people' ? 'on' : ''),
+          btn('Read', () => draw('read'), tab === 'read' ? 'on' : ''),
+          btn('Map', () => draw('map'), tab === 'map' ? 'on' : ''),
+        );
         body.append(seg);
+        if (tab === 'map') return void this.worldMap(body, () => draw('map'));
         const j = g.journal.data;
         if (tab === 'read') {
           if (j.readings.length === 0) body.append(el('p', 'small', 'Signs and books read are kept here.'));
@@ -1219,6 +1837,33 @@ export class App {
         }
         this.close();
         this.layout();
+      });
+      const bare = document.documentElement.classList.contains('no-frame');
+      item(bare ? 'Map frame: off' : 'Map frame: paper', () => {
+        document.documentElement.classList.toggle('no-frame', !bare);
+        try {
+          localStorage.setItem('nuvie.frame', bare ? 'paper' : 'off');
+        } catch {
+          // Not kept.
+        }
+        this.close();
+        this.layout();
+      });
+      item(`Formation: ${FORMATIONS.find(([f]) => f === this.game.formation)?.[1] ?? 'standard'}`, () => {
+        const i = FORMATIONS.findIndex(([f]) => f === this.game.formation);
+        this.game.formation = FORMATIONS[(i + 1) % FORMATIONS.length][0];
+        this.close();
+        this.menu();
+      });
+      item(`Battle speed: ${BATTLE_SPEEDS[this.battleSpeed].name}`, () => {
+        this.battleSpeed = (this.battleSpeed + 1) % BATTLE_SPEEDS.length;
+        try {
+          localStorage.setItem('nuvie.battle', String(this.battleSpeed));
+        } catch {
+          // Not kept.
+        }
+        this.close();
+        this.menu();
       });
       item(this.sfx.enabled ? 'Sounds: on' : 'Sounds: off', () => {
         this.sfx.enabled = !this.sfx.enabled;

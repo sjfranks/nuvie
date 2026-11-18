@@ -69,6 +69,138 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     expect(g.party.length).toBe(4);
   });
 
+  it.runIf(folder === 'ultima6')('takes turns in a fight by movement points, and hands companions under command to the player', () => {
+    const g = new Game(load());
+    for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
+    const p = g.player;
+    const troll = g.combat.spawn(371, p.x + 6, p.y, p.z, 0, 8)!;
+    for (const m of g.party.slice(1)) m.actor.combatMode = 0x3; // front
+    // A quick Avatar and a slow troll: the Avatar acts more often.
+    p.dex = 30;
+    troll.dex = 6;
+    const acts = new Map<number, number>();
+    const c = g.combat as unknown as { perform: (a: { id: number }) => void };
+    const perform = c.perform.bind(g.combat);
+    c.perform = (a: { id: number }) => {
+      acts.set(a.id, (acts.get(a.id) ?? 0) + 1);
+      perform(a);
+    };
+    let mine = 0;
+    for (let i = 0; i < 20 && troll.alive && troll.objN; i++) {
+      g.pass();
+      mine++;
+    }
+    expect(acts.get(troll.id) ?? 0).toBeLessThan(mine);
+    expect(acts.get(troll.id) ?? 0).toBeGreaterThan(0);
+    // The companions fight by themselves at the front.
+    expect(g.party.slice(1).some((m) => (acts.get(m.actor.id) ?? 0) > 0)).toBe(true);
+    // Dupre under command: his turn comes to the player.
+    const dupre = g.party[1].actor;
+    dupre.combatMode = 0x2;
+    let handed = false;
+    for (let i = 0; i < 12 && !handed; i++) {
+      g.pass();
+      handed = g.player === dupre;
+    }
+    expect(handed).toBe(true);
+    expect(g.log.some((l) => l.text.endsWith("'s turn."))).toBe(true);
+    g.pass();
+  });
+
+  it.runIf(folder === 'ultima6')('fights a band of trolls with the party in each way of fighting', () => {
+    const g = new Game(load());
+    for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
+    const p = g.player;
+    const trolls = [0, 1, 2, 3].map((i) => g.combat.spawn(371, p.x + 5, p.y - 2 + i, p.z, 0, [3, 4, 5, 6][i])!).filter(Boolean);
+    expect(trolls.length).toBeGreaterThan(1);
+    const modes = [0x4, 0x5, 0x6, 0x7, 0x8];
+    g.party.slice(1).forEach((m, i) => (m.actor.combatMode = modes[i % modes.length]));
+    const start = new Map(g.party.map((m) => [m.actor.id, `${m.actor.x},${m.actor.y}`]));
+    for (let i = 0; i < 80 && trolls.some((t) => t.alive && t.objN); i++) {
+      const t = trolls.find((x) => x.alive && x.objN);
+      if (t && g.player === g.party[0].actor && g.attackAt(t.x, t.y)) continue;
+      g.pass();
+    }
+    // The companions moved of their own accord, and the fight went on without fault.
+    expect(g.party.slice(1).some((m) => start.get(m.actor.id) !== `${m.actor.x},${m.actor.y}`)).toBe(true);
+    expect(g.log.some((l) => /killed!/.test(l.text))).toBe(true);
+  });
+
+  it.runIf(folder === 'ultima6')('goes on alone as one of the party, and gathers them again', () => {
+    const g = new Game(load());
+    for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
+    const dupre = g.party[1].actor;
+    const others = g.party.filter((m) => m.actor !== dupre).map((m) => [m.actor, m.actor.x, m.actor.y] as const);
+    expect(g.goSolo(dupre)).toBe(true);
+    expect(g.player).toBe(dupre);
+    // Dupre walks; the rest stay where they are.
+    let walked = 0;
+    for (const [dx, dy] of [[0, 1], [0, 1], [0, 1], [1, 0], [-1, 0], [0, -1], [0, -1]]) if (g.move(dx, dy)) walked++;
+    expect(walked).toBeGreaterThan(0);
+    for (const [a, x, y] of others) expect([a.x, a.y]).toEqual([x, y]);
+    // Kept across a save.
+    const back = new Game(load(), JSON.parse(JSON.stringify(g.save())));
+    expect(back.player.id).toBe(dupre.id);
+    // Too far from the leader to gather; then near enough.
+    const leader = g.party[0].actor;
+    const [ox, oy] = [dupre.x, dupre.y];
+    dupre.x = leader.x + 9;
+    expect(g.partyMode()).toBe(false);
+    expect(g.log.at(-1)!.text).toBe('Not everyone is here.');
+    [dupre.x, dupre.y] = [ox, oy];
+    expect(g.partyMode()).toBe(true);
+    expect(g.player).toBe(leader);
+  });
+
+  it.runIf(folder === 'ultima6')('walks the party in each formation, falling into place behind the leader', () => {
+    const g = new Game(load());
+    for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
+    const p = g.player;
+    // Open ground, well away from the castle.
+    let spot: [number, number] | null = null;
+    for (let r = 20; r < 200 && !spot; r += 3) for (const [x, y] of [[p.x + r, p.y], [p.x, p.y + r]]) {
+      let ok = !spot;
+      for (let dy = -6; dy <= 6; dy++) for (let dx = -6; dx <= 6; dx++) ok &&= g.map.isPassable(x + dx, y + dy, 0);
+      if (ok) spot = [x, y];
+    }
+    expect(spot).toBeTruthy();
+    for (const f of ['standard', 'column', 'row', 'delta', 'file'] as const) {
+      g.relocate(spot![0], spot![1], 0);
+      g.formation = f;
+      for (let i = 0; i < 5; i++) g.move(0, -1);
+      for (let i = 1; i < g.party.length; i++) {
+        const a = g.party[i].actor;
+        if (f !== 'file') expect([f, a.x, a.y]).toEqual([f, ...g.formationSpot(i)]);
+        expect(Math.max(Math.abs(a.x - p.x), Math.abs(a.y - p.y))).toBeLessThanOrEqual(4);
+      }
+      // Turning, the party wheels round behind.
+      for (let i = 0; i < 4; i++) g.move(1, 0);
+      for (let i = 1; i < g.party.length; i++) expect(Math.max(Math.abs(g.party[i].actor.x - p.x), Math.abs(g.party[i].actor.y - p.y))).toBeLessThanOrEqual(4);
+    }
+    // Through the castle's doors and halls, in the standard formation, the party keeps together.
+    const h = new Game(load());
+    for (const a of h.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
+    const q = h.player;
+    let goal: [number, number] = [q.x, q.y];
+    for (const [dx, dy] of [[0, 24], [0, 18], [12, 12], [-12, 12], [16, 0], [-16, 0], [0, -16]]) {
+      const w = h.pathTo(q.x + dx, q.y + dy, true);
+      if (w && w.length >= 12) {
+        goal = [q.x + dx, q.y + dy];
+        break;
+      }
+    }
+    const from = [q.x, q.y];
+    let worst = 0;
+    for (let i = 0; i < 80 && (q.x !== goal[0] || q.y !== goal[1]); i++) {
+      const way = h.pathTo(goal[0], goal[1], true);
+      if (!way?.length) break;
+      h.move(way[0][0], way[0][1]);
+      for (const m of h.party) worst = Math.max(worst, Math.max(Math.abs(m.actor.x - q.x), Math.abs(m.actor.y - q.y)));
+    }
+    expect(Math.abs(q.y - from[1]) + Math.abs(q.x - from[0])).toBeGreaterThan(10);
+    expect(worst).toBeLessThanOrEqual(4);
+  });
+
   it.runIf(folder === 'ultima6')('casts spells from a readied book, using magic points and reagents', () => {
     const g = new Game(load());
     const avatar = g.player;
@@ -237,6 +369,70 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     expect(g.objects.all().some((o) => o.objN === 420 && Math.abs(o.x - p.x) <= 1 && Math.abs(o.y - p.y) <= 1)).toBe(true);
   });
 
+  it.runIf(folder === 'ultima6')('wears magic things, fires a charged staff, and wishes at a fountain', () => {
+    const g = new Game(load());
+    for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
+    const p = g.player;
+    const give = (n: number, q = 0) => {
+      const o = g.objects.create(n, 1, q);
+      g.objects.toInventory(o, p.id);
+      return o;
+    };
+    // The amulet of submission will not come off.
+    const amulet = give(76);
+    expect(g.ready(amulet, p)).toBe(true);
+    g.unready(amulet);
+    expect(amulet.loc).toBe('readied');
+    // An invisibility ring hides its wearer while worn.
+    const ring = give(258);
+    g.ready(ring, p);
+    expect(p.objFlags & 2).toBe(2);
+    g.unready(ring);
+    expect(p.objFlags & 2).toBe(0);
+    // The storm cloak stills magic.
+    const cloak = give(81);
+    for (const r of g.objects.inventories[p.id]) if (r.loc === 'readied' && g.readySlot(r) === g.readySlot(cloak)) g.unready(r);
+    g.ready(cloak, p);
+    expect(g.stormTurns).toBe(20);
+    g.unready(cloak);
+    expect(g.stormTurns).toBe(0);
+    // A staff charged with Light lets it loose.
+    for (const r of g.objects.inventories[p.id]) if (r.loc === 'readied' && (g.readySlot(r) === 3 || g.readySlot(r) === 4)) g.unready(r);
+    const staff = give(78);
+    staff.container = [g.objects.create(336, 1, 9)];
+    g.useObj(staff);
+    expect(g.log.at(-1)!.text).toBe('Not readied.');
+    g.ready(staff, p);
+    const light = g.lightTurns;
+    g.useObj(staff);
+    expect(staff.container.length).toBe(0);
+    expect(g.lightTurns).toBeGreaterThan(light);
+    // A fountain grants food, now and then.
+    const fountain = g.objects.create(234, 1, 0);
+    const before = g.objects.inventories[p.id].filter((o) => o.objN === 129).length;
+    let got = 0;
+    for (let i = 0; i < 40; i++) {
+      g.usecode.use(fountain);
+      g.askChoice!.then(0);
+      g.askText!.then('mutton');
+      got = g.objects.inventories[p.id].filter((o) => o.objN === 129).length - before;
+    }
+    expect(got).toBeGreaterThan(0);
+  });
+
+  it.runIf(folder === 'ultima6')('springs a trap set in a chest when it is opened', () => {
+    const g = new Game(load());
+    for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
+    const p = g.player;
+    const chest = g.objects.create(98, 1, 0);
+    chest.frameN = 1;
+    g.objects.toContainer(g.objects.create(337, 0, 0), chest);
+    g.objects.toInventory(chest, p.id);
+    g.useObj(chest);
+    expect(chest.container!.some((k) => k.objN === 337)).toBe(false);
+    expect(g.log.some((l) => ['Acid!', 'Poison!', 'Bomb!', 'Gas!'].includes(l.text))).toBe(true);
+  });
+
   it.runIf(folder === 'ultima6')('draws a silver serpent whole, its body following its head', () => {
     const g = new Game(load());
     const s = g.combat.spawn(413, 0x133 + 40, 0x160 + 40, 0, 2, 0)!;
@@ -395,6 +591,44 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     expect(g.objects.inventories[g.player.id].some((o) => o.objN === 132)).toBe(true);
   });
 
+  it.runIf(folder === 'savage')('searches a pouch, basket or pot looked at, tipping out what it holds', () => {
+    const g = new Game(load());
+    const pouch = g.objects.all().find((o) => [182, 183, 184].includes(o.objN) && o.loc === 'map' && o.container?.length && g.objects.get(o.x, o.y, o.z) === o)!;
+    expect(pouch).toBeTruthy();
+    const inside = [...pouch.container!];
+    g.look(pouch.x, pouch.y);
+    expect(g.log.at(-1)!.text).toMatch(/^Searching here, you find .+\.$/);
+    expect(pouch.container!.length).toBe(0);
+    for (const c of inside) expect([c.loc, c.x, c.y]).toEqual(['map', pouch.x, pouch.y]);
+    // Empty now, it has nothing more to give.
+    g.search(pouch);
+    expect(g.log.at(-1)!.text).toBe('Searching here, you find nothing.');
+    // A container can be filled again.
+    expect(g.objects.isContainer(183)).toBe(true);
+  });
+
+  it.runIf(folder === 'savage')('pulls a branch from a tree and fishes by water', () => {
+    const g = new Game(load());
+    const tree = g.objects.all().find((o) => o.objN >= 263 && o.objN <= 266 && o.loc === 'map' && g.canStand(o.x, o.y + 1, o.z))!;
+    expect(tree).toBeTruthy();
+    g.relocate(tree.x, tree.y + 1, tree.z);
+    g.useObj(tree);
+    expect(g.log.at(-1)!.text).toBe('You pulled a branch from the tree.');
+    const pole = g.objects.create(212, 1, 0);
+    g.objects.toInventory(pole, g.player.id);
+    let shore: [number, number] | null = null;
+    const p = g.player;
+    for (let r = 1; r < 120 && !shore; r++) for (let dx = -r; dx <= r && !shore; dx++) for (const dy of [-r, r]) {
+      const x = p.x + dx;
+      const y = p.y + dy;
+      if (g.canStand(x, y, p.z) && [[0, -1], [1, 0], [0, 1], [-1, 0]].some(([a, b]) => g.map.isWater(x + a, y + b, p.z))) shore = [x, y];
+    }
+    expect(shore).toBeTruthy();
+    g.relocate(shore![0], shore![1], p.z);
+    for (let i = 0; i < 60 && !g.objects.inventories[p.id].some((o) => o.objN === 213); i++) g.useObj(pole);
+    expect(g.objects.inventories[p.id].some((o) => o.objN === 213)).toBe(true);
+  });
+
   it.runIf(folder === 'martian')('pushes a wheelbarrow, drills rock, and runs the conveyor', () => {
     const g = new Game(load());
     const p = g.player;
@@ -495,6 +729,35 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     const a = g.player;
     expect([g.playerName(), g.gender, a.objN, a.level]).toEqual(['Nellie', 1, 344, 4]);
     expect(a.hp).toBe(a.strength * 2 + 96);
+  });
+
+  it.runIf(folder === 'ultima6')('leaves thrown daggers where they land, and a wrecked ship as a raft', () => {
+    const g = new Game(load());
+    for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
+    const p = g.player;
+    // A dagger thrown at a troll three squares off lands by it, there to be picked up.
+    const spot = [[3, 0], [-3, 0], [0, 3], [0, -3]].find(([dx, dy]) => g.canStand(p.x + dx, p.y + dy, p.z) && g.combat.clearLine(p.x, p.y, p.x + dx, p.y + dy, p.z))!;
+    const troll = g.combat.spawn(371, p.x + spot[0], p.y + spot[1], p.z, 0, 0xe)!;
+    for (const o of g.objects.inventories[p.id]) if (o.loc === 'readied') o.loc = 'inv';
+    const daggers = g.objects.create(38, 1, 0);
+    g.objects.toInventory(daggers, p.id);
+    g.ready(daggers, p);
+    g.combat.attack(p, troll);
+    expect(g.objects.inventories[p.id].some((o) => o.objN === 38)).toBe(false);
+    expect(g.objects.all().some((o) => o.objN === 38 && Math.max(Math.abs(o.x - troll.x), Math.abs(o.y - troll.y)) <= 3)).toBe(true);
+    // The party's ship, its hull gone, breaks up and leaves them on a raft.
+    let sea: [number, number] | null = null;
+    for (let y = 0; y < 1024 && !sea; y += 7) for (let x = 0; x < 1024 && !sea; x += 7) {
+      if ([-2, -1, 0, 1, 2].every((d) => g.map.isWater(x + d, y, 0) && g.map.isWater(x, y + d, 0))) sea = [x, y];
+    }
+    expect(sea).toBeTruthy();
+    const v = g.actors.get(0)!;
+    Object.assign(v, { objN: 412, baseObjN: 412, frameN: 0, x: sea![0], y: sea![1], z: 0, hp: 5, visible: true });
+    v.setDirection(0);
+    (g.combat as unknown as { hit: (a: unknown, d: number) => number }).hit(v, 50);
+    expect(v.objN).toBe(415);
+    expect(v.hp).toBe(10);
+    expect(g.log.some((l) => l.text.includes('clings to a raft'))).toBe(true);
   });
 
   it.runIf(folder === 'ultima6')('boards a skiff, sails it, goes ashore; rides a horse', () => {

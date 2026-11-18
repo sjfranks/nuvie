@@ -40,7 +40,7 @@ A new game of Ultima VI begins as the original's does, in the gypsy's wagon (int
 man or woman, one of six faces, and then the gypsy's questions of the eight virtues - four pairs, the winners in two
 pairs, then the last two - each answer adding to strength, dexterity or intelligence. The Avatar starts at level 3
 with magic twice their intelligence (SaveGame::update_objlist_for_new_game_u6). Close the sheet to keep the
-default Avatar. The animated intro itself (the lounge, the stones, the moongate) is not ported.
+default Avatar. The introduction can be watched first, in motion (below).
 
 ## The screen
 
@@ -72,6 +72,19 @@ default Avatar. The animated intro itself (the lounge, the stones, the moongate)
 - **Journal**: everyone spoken with, what each said to each thing asked, the words they answer to, and every sign
   and book read.
 - The game saves itself as you play. A keyboard works too: arrows walk, space passes, L/T/U/G choose a command.
+
+
+Touch: a tap acts, a finger held down walks; a thing within reach can be dragged - onto someone of the party to give it
+to them, or onto a free square nearby to move it. Two fingers pinch the map out to see more (the usual zoom is the
+closest; the Zoom button brings it back). The menu sets the battle speed (each fighter's turn is shown in turn), the
+text size, the paper frame round the map, sounds and music. In a conversation the window holds only the current
+exchange; a Continue comes before the topics, and topics already asked - or leading to an answer already heard - are
+greyed and listed last. The app has its own red ankh icon for the Home Screen.
+
+The journal's Map tab shows the world with a marker where the party stands (or last stood on the surface). It draws
+the land from the game's files; or tap "Use a picture of the map" and choose a photo of the cloth map from the box -
+kept in this browser, never shipped - and the marker is placed on it. The three games' maps are measured (MAP_CAL in
+app.ts) for a photo of the whole map, frame and all.
 
 ## What is ported, and what is not
 
@@ -132,16 +145,47 @@ until dawn. The ruby slippers, clicked thrice, offer the way home, and the
 ending's words follow (scenetxt.lzc); conversations run talk.lua's scripts - fixing the panels, opening the gates at
 Olympus Mons and the dream machine's door, the monster footprints, the end, waking from a dream. A new game begins
 with Freud's interview in the capsule (intro.lua's create_character): a name, father or mother, and the questions
-whose answers set strength, dexterity and intelligence. Not yet: the dream stages Nuvie left unfinished.
+whose answers set strength, dexterity and intelligence. The coal works run as worktype.lua has them (cokers dig coal onto the belt, stokers carry it to the furnace and,
+with the belt mended, power the towers); the mended belt laid over bare rollers, broken track replaced, the tower's
+cable fixed with pliers (rubber gloves on!), and the wrench on switches, drill and panels. The mid-game scenes
+(midgameN.lzc: pictures with the Avatar as they are, and their words) play where the story calls for them - the
+hatch, the power, the cable, the dream machine, the slippers. Mars itself as time passes (advance_time): by night on the surface those without warm enough clothes freeze; once
+the air grows thin each needs oxium (a blob an hour) or gasps for air; radium outside its lead box poisons; ice melts;
+the berries' powers fade; a tent keeps the party warm. In the dream, a step south off a cliff's edge is taken, wall or no, and the fall leaves the dreamer flat (crushing
+Your Mother below); dream teleporters of the second kind set the dreamer walking on the walls, and back. Not yet: the
+rest of what Nuvie left unfinished there (the direction-control squares).
 
-Savage Empire's usecode.lua has only a little in use, and that is ported: corn from a corn stalk, clay with a digging
-stick, and a soft pot shaped from clay.
+A new game of Savage Empire begins in Intanya's hut (intro.lua's create_new_character): a name, then three of the
+shaman's six questions, each answer adding to strength, dexterity or intelligence and choosing the next; its ending's
+words are ready should the game be won. Savage Empire's usecode.lua has only a little in use, and that is ported:
+corn from a corn stalk, clay with a digging stick, a soft pot shaped from clay, a branch pulled from a tree, and fish
+caught with a pole beside deep water. Its containers (init.lua: mortars, grinding stones, jars, pouches, baskets and pots) hold
+things, and looking at one on the ground searches it, as look.lua does: what it holds is tipped out beside it and
+named.
 
 **Combat** follows Ultima VI's rules as Nuvie's Lua has them: the hit roll (dexterity, or strength for clubs and
 maces, against the foe's dexterity), weapon damage less a roll against readied armour, half damage for the creatures
 that take it, poison, experience for evil foes slain, bodies that hold what was carried, ammunition, missile walls,
-and death - the Avatar wakes in Lord British's castle with the fallen raised. Simplified: each fighter acts once a
-turn (not by movement points), and thrown weapons are not lost. Monsters that know spells (mages, liches, dragons,
+and death - the Avatar wakes in Lord British's castle with the fallen raised. Turns go by movement points, as
+actor_update_all has them: each fighter gets their dexterity in points a turn, a step costs five (ten on the
+diagonal) and a blow ten, and whoever has the most for their dexterity goes next - so the quick act more often than
+the slow, the Avatar included. Each fights its own way (actor_wt_front, rear, flank, berserk, retreat, assault): the
+front line forms between the party and its foes, the rear keeps behind it, flankers go round the side, the berserk
+make for the strongest foe. Each companion's way is chosen on their sheet ("In a fight"); one set to Command is the
+player's to move on their turn (the map follows them, and the log says whose turn it is). Thrown spears, axes and
+daggers land where they were thrown, to be picked up again; a flask of oil bursts into flame; the triple crossbow
+looses three bolts; a wand now and then vanishes. A ship whose hull gives out breaks up, leaving the party on a raft.
+
+**Solo mode**: any one of the party can go on alone (their sheet: "Go on alone as ..."), as Player::set_solo_mode
+has it - the rest stay where they are, and stay out of any fight. Alone, no one may climb ladders, enter a dungeon or
+a moongate, board a boat or rest, and only the Avatar may talk. "Party mode" (in the party list) gathers them again,
+once everyone is within six squares of the leader and no fight is on.
+
+**Formation** (Menu): how the party walks behind its leader, as Party::reform_party lays it out - standard (one
+behind and to the left, then widening rows), column, row, delta (an open triangle), or single file. Each member steps
+towards their place, turned to the way the leader faces, keeping beside someone ahead of them; where no step brings
+them nearer (a doorway, a narrow path) they fall in behind in single file. Kept with the saved game.
+Monsters that know spells (mages, liches, dragons,
 wisps, gazers and the like) carry them as charges and now and then cast one instead of striking, as actor.lua has it.
 
 **Magic** has Magic.cpp's checks - a readied spellbook holding the spell, a level and magic points as high as its
@@ -171,6 +215,12 @@ has the quest; the gargish vocabulary teaches gargish; the vortex cube, at the C
 moonstones, ends the game: ending.lua's scenes told in its own words over the ending music, and how long the
 quest took. The crystal ball shows a far place, a spellbook opens the spell list, cannons fire down
 the way they face, and a lit powder keg blows up after a few turns (doors, kegs and anyone near).
+Magic things: a readied staff lets loose the spell charged into it (aim it if the spell needs aiming); an
+invisibility ring hides whoever wears it; the storm cloak brings a rain that stills all magic for a while; the
+amulet of submission will not come off once worn; and a fountain grants a wish, now and then, if the wish is for
+food, mutton, wine, fruit or mead. Looking at a holy brazier names its flame: truth, love or courage.
+A trapped door or chest springs its trap when opened - acid, poison, a fire blast or gas about the opener - unless
+Detect Trap found it first and Untrap took it away.
 
 **Rest** (the moon button): pass a turn, or camp 1-8 hours - not in towns, near foes or others, or on horseback.
 Each member eats a meal if the party has food, and those fed heal, once in twelve hours. On a ship the crew mends
@@ -194,8 +244,37 @@ Great creatures take more than one square: ships, dragons (head, wings and tail)
 two-square beasts, and the silver serpent, whose long body follows its head square by square and never turns back
 over its neck (U6Actor's surrounding objects).
 
-Not ported yet: the animated intro and ending pictures; Martian Dreams' and Savage Empire's music (Nuvie has none),
-the rest of their usecode, and Savage Empire's fighting (Nuvie has none to port).
+Martian Dreams and Savage Empire have their music too (midi.ts): their MIDI songs (music.lzc) through a port of
+Nuvie's OriginFXAdLibDriver with the games' own instruments (md.tim, savage.tim) - one of the longer songs at a time,
+another when it ends, since Nuvie never chose among them in play.
+
+The endings show their pictures with their words, in the ending's own palette (cutscene.ts reads the .shp and .lzc
+image libraries and the .lbm, .pal and .int palettes). Ultima VI's and Martian Dreams' endings move as their ending.lua
+scripts play them (anim.ts draws the sprites as ScriptCutscene does: hot spots, scaling, clipping, fading, the
+palette turning): in Ultima VI the red gates rise from the floor with the stones' colours cycling, the kings come
+and raise their lenses, the wall fades to streaming stars and the Codex wavers into view and opens; in Martian Dreams
+the capsule rockets from Mars and bobs in the sea, the photographer's flash goes off by the moongate, and the dust
+storm blows. Savage Empire's ending is still pictures, as its script has it.
+
+Ultima VI's introduction can be watched before the gypsy ("Watch the introduction first"): intro.lua's words, a page
+each, over its scenes in motion as the script plays them (u6intro.ts): the lounge, its television running through its
+programmes and the clock telling the real time; the storm at the window, with clouds, rain, lightning and the bolt
+among the stones, and the doors opening on it; the stones, the hand and the obsidian stone, the red gate rising and
+quivering and the Avatar walking into it; then the altar, the gargoyles closing in and swaying, the priest and his
+dagger, the gate in the dark, the rescue and the gate sinking. Each page goes on until Continue. It opens, as the game
+does, with its two logos fading in and out.
+
+Martian Dreams can show its opening first ("Watch the opening first": play_intro - the logos, the fairground,
+Lowell and his space cannon, the fuse and the explosion, the capsule's flight, the cabin, the flash on Mars, each
+credit flashing up white between), but not yet its Origin logo with the orchestra and fireworks. Martian Dreams offers its introduction before Freud, in motion as run_introduction plays it (mdintro.ts): one film
+on its own clock, scenetxt.lzc's words changing beneath it in each speaker's colour - Spector's study and the
+letter, the crosshairs marching across the map, the hike, Spector's lab with the moongate rising and the two
+stepping through, and Tesla's lab in 1895 with its sparks, Freud's blood, Mr Garrett and Nellie. Savage Empire offers
+its title in motion (seintro.ts: the two logos, the title rising over the jungle, the jungle sliding by in three
+layers under the credits), then its story so far before Intanya (ten pictures from create.lzc, still as its script
+has them).
+
+Not ported yet: the rest of Martian Dreams' and Savage Empire's usecode (what Nuvie leaves commented out), and Savage Empire's fighting (Nuvie has none to port).
 
 `tests/real.test.ts` runs on your copies put in `web/gamedata/ultima6/`, `savage/` and `martian/` (git-ignored).
 For each it loads a new game, saves and restores it, and talks with everyone who has a conversation (199 people in

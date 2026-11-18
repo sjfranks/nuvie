@@ -1,6 +1,7 @@
 /**
  * seusecode.ts - what using things does in Savage Empire, as far as Nuvie's data/scripts/se/usecode.lua goes: corn
- * from its stalk, clay with a digging stick, and a soft pot shaped from clay. (Its other uses are commented out there.)
+ * from its stalk, clay with a digging stick, a soft pot shaped from clay, fish on a pole and branches from trees.
+ * (Its other uses are commented out there.)
  */
 import type { Actor } from './actors.ts';
 import type { Game } from './game.ts';
@@ -12,6 +13,10 @@ const TEXT: Record<string, string> = {
   GOT_CORN: 'You got some corn from the plant.',
   USE_CLAY: 'You shaped a small, soft pot from the clay.',
   USE_DIGGING_STICK: 'You get some clay.',
+  USE_FISHING_POLE_NO_WATER: 'You need to stand next to deep water.',
+  USE_FISHING_POLE_FAIL: "You didn't get a fish.",
+  USE_FISHING_POLE_SUCCESS: 'You caught a fish!',
+  USE_TREE: 'You pulled a branch from the tree.',
 };
 
 const CORN_STALK = 61;
@@ -19,12 +24,17 @@ const CORN = 108;
 const DIGGING_STICK = 131;
 const SOFT_CLAY_POT = 132;
 const CLAY = 192;
+const TREE_BRANCH = 206;
+const FISHING_POLE = 212;
+const FISH = 213;
+/** The standing trees (usecode.lua's use_tree, which has them under a placeholder number). */
+const TREES = [263, 264, 265, 266];
 
 export class SeUseCode {
   constructor(private readonly g: Game) {}
 
   handles(o: Obj): boolean {
-    return [CORN_STALK, DIGGING_STICK, CLAY].includes(o.objN);
+    return [CORN_STALK, DIGGING_STICK, CLAY, FISHING_POLE, ...TREES].includes(o.objN);
   }
 
   use(o: Obj, a: Actor = this.g.player): void {
@@ -40,6 +50,14 @@ export class SeUseCode {
       if (o.qty > 1) o.qty--;
       else g.objects.unlink(o);
       if (this.give(user, SOFT_CLAY_POT, false)) this.say('USE_CLAY');
+    } else if (o.objN === FISHING_POLE) {
+      // use_fishing_pole, as its strings mean it: beside deep water, now and then a fish.
+      const water = [[0, -1], [1, 0], [0, 1], [-1, 0]].some(([dx, dy]) => g.map.isWater(user.x + dx, user.y + dy, user.z));
+      if (!water) this.say('USE_FISHING_POLE_NO_WATER');
+      else if (g.random(100) > 20) this.say('USE_FISHING_POLE_FAIL');
+      else if (this.give(user, FISH)) this.say('USE_FISHING_POLE_SUCCESS');
+    } else if (TREES.includes(o.objN)) {
+      if (this.give(user, TREE_BRANCH)) this.say('USE_TREE');
     }
     g.onChange();
   }

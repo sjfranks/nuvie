@@ -79,6 +79,8 @@ export class Actor {
   combatMode = 0;
   worktype = 0;
   moves = 0;
+  /** Tries at a scheduled walk that came to nothing. */
+  stuck = 0;
   visible = true;
   sched: Schedule[] = [];
   schedPos = -1;

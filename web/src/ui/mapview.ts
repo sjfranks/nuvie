@@ -31,7 +31,8 @@ export class MapView {
   private th = 0;
   private buf = new Uint8Array(0);
   private image: ImageData | null = null;
-  private readonly palette = new Uint8Array(768);
+  /** The game's palette, 8 bits each of red, green and blue. */
+  readonly palette = new Uint8Array(768);
   private readonly pal32 = new Uint32Array(256);
   private rotCounter = 0;
   private readonly ctx: CanvasRenderingContext2D;
@@ -465,6 +466,20 @@ export class MapView {
       c.fillStyle = `rgba(255,150,60,${glow * 0.09})`;
       c.fillRect(0, 0, W, H);
     }
+    // A storm (the storm cloak) rains on the map (MapWindow::drawRain).
+    if (this.game.kind === 'u6' && this.game.stormTurns > 0) {
+      c.globalCompositeOperation = 'source-over';
+      c.strokeStyle = 'rgba(170,190,230,0.55)';
+      c.lineWidth = Math.max(1, LP / 16);
+      c.beginPath();
+      for (let i = 0, n = (W * H) / (LP * LP) * 1.5; i < n; i++) {
+        const x = Math.random() * W;
+        const y = Math.random() * H;
+        c.moveTo(x, y);
+        c.lineTo(x - LP * 0.12, y + LP * 0.4);
+      }
+      c.stroke();
+    }
   }
 
   /** Shots in flight and blows landing (combat.ts), drawn into the picture; returns blows with no tile to show them. */
@@ -552,6 +567,28 @@ export class MapView {
     ctx.putImageData(img, 0, 0);
     ctx.fillStyle = '#fff';
     ctx.fillRect(half - 1, half - 1, 3, 3);
+    return c;
+  }
+
+  /** The whole surface, a square a pixel each (the journal's map, where no picture of the cloth map is given). */
+  world(): HTMLCanvasElement {
+    const g = this.game;
+    const avg = this.averages();
+    const n = 1024;
+    const c = document.createElement('canvas');
+    c.width = c.height = n;
+    const ctx = c.getContext('2d')!;
+    const img = ctx.createImageData(n, n);
+    const out = new Uint32Array(img.data.buffer);
+    // Water as the sea is drawn on the maps (its tiles' own colours average to near black).
+    const sea = 0xff000000 | (0x9b << 16) | (0x5d << 8) | 0x2b;
+    for (let y = 0; y < n; y++) {
+      for (let x = 0; x < n; x++) {
+        const t = g.map.tileNum(x, y, 0);
+        out[y * n + x] = g.tiles.original(t).water ? sea : avg[t];
+      }
+    }
+    ctx.putImageData(img, 0, 0);
     return c;
   }
 

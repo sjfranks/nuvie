@@ -10,6 +10,7 @@ import { installTheme } from './ui/theme.ts';
 const host = document.getElementById('app')!;
 try {
   if (localStorage.getItem('nuvie.text') === 'large') document.documentElement.classList.add('big-text');
+  if (localStorage.getItem('nuvie.frame') === 'off') document.documentElement.classList.add('no-frame');
 } catch {
   // Small text.
 }

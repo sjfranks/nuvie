@@ -8,7 +8,7 @@ import { Lib } from '../files/lib.ts';
 import { lzwDecompress, lzwFile } from '../files/lzw.ts';
 import { Actor, Actors, HYDRA, HYDRA_BODY, MANY_SQUARES, SHIP, STATUS_IN_PARTY, WT } from './actors.ts';
 import { Converse, ConverseLib, checkKeywords, type ConvAsk, type ConvWorld } from './converse.ts';
-import { Combat } from './combat.ts';
+import { CHARMED, Combat } from './combat.ts';
 import { FOODS, UseCode, USED_IN_PLACE } from './usecode.ts';
 import { Magic, type Spell } from './magic.ts';
 import type { SfxId } from '../audio/sfx.ts';
@@ -48,6 +48,8 @@ export interface Clock {
 export interface SayOption {
   label: string;
   say: string;
+  /** Already asked: this, or a word that gives the same answer. */
+  heard?: boolean;
 }
 
 /** What a saved game holds (kept in this browser). */
@@ -59,6 +61,10 @@ export interface SaveState {
   rest?: number;
   keg?: number;
   wind?: [number, number];
+  heard?: string[];
+  /** The one of the party walking alone, if any. */
+  solo?: number;
+  formation?: Formation;
   /** Martian Dreams: the Avatar is dreaming, the party waiting. */
   dream?: unknown;
   moonstones?: [number, number, number][];
@@ -109,6 +115,56 @@ const FOOD: ReadonlySet<number> = new Set([OBJ.BREAD, OBJ.MEAT_PORTION]);
 const LOCS: Loc[] = ['map', 'cont', 'inv', 'readied'];
 
 /** The direction (0 north, 1 east, 2 south, 3 west) a step faces. */
+export type Formation = 'standard' | 'column' | 'row' | 'delta' | 'file';
+
+/** Each member's place behind a leader facing north (Party::reform_party), the leader at 0,0. */
+export function formationOffsets(f: Formation, n: number): [number, number][] {
+  const out: [number, number][] = [[0, 0]];
+  if (f === 'column') {
+    let [x, y] = [0, 1];
+    for (let m = 1; m < n; m++) {
+      out.push([x, y++]);
+      if (y === 5) [x, y] = [x + 1, 0];
+    }
+  } else if (f === 'row') {
+    let [x, y] = [-1, 0];
+    for (let m = 1; m < n; m++) {
+      out.push([x--, y]);
+      if (x === -5) [x, y] = [0, y + 1];
+    }
+  } else if (f === 'delta') {
+    let [x, y] = [-1, 1];
+    for (let m = 1; m < n; m++) {
+      out.push([x, y]);
+      x = -x;
+      if (x === 0 || x < 0) {
+        x -= 1;
+        y++;
+      }
+      if (y === 5) {
+        y -= -x - 1;
+        x = 0;
+      }
+    }
+  } else {
+    // Standard (and single file's fallback): the first behind, or behind and to the left; then rows widening.
+    if (n > 1) out.push([n >= 3 ? -1 : 0, 1]);
+    let [x, y, maxX] = [1, 1, 1];
+    let even = false;
+    for (let m = 2; m < n; m++) {
+      out.push([x, y]);
+      x = x === 0 ? x - 2 : x < 0 ? -x : -x - 2;
+      if (x > maxX || (x < 0 && -x > maxX)) {
+        y++;
+        even = !even;
+        maxX++;
+        x = even ? 0 : -1;
+      }
+    }
+  }
+  return out;
+}
+
 export function facing(dx: number, dy: number): number {
   if (Math.abs(dx) > Math.abs(dy)) return dx > 0 ? 1 : 3;
   return dy > 0 ? 2 : 0;
@@ -188,6 +244,9 @@ export class Game implements ConvWorld {
   private asked = '';
   private said = '';
   private pending: Converse['events'] = [];
+
+  /** A mid-game scene to show (Martian Dreams' midgameN.lzc), or null. */
+  cutscene: number | null = null;
 
   /** Martian Dreams' usecode (usecode.lua). */
   readonly mdUse = new MdUseCode(this);
@@ -335,8 +394,69 @@ export class Game implements ConvWorld {
     return v && v.objN !== 0 && v.visible && VEHICLES.has(v.objN) ? v : null;
   }
 
+  /** One of the party the player moves in a fight, by their command (player_set_actor); else the leader. */
+  controlled: Actor | null = null;
+
+  /** One of the party walking alone (Player::set_solo_mode); the others stay where they are. */
+  solo: Actor | null = null;
+
   get player(): Actor {
+    const c = this.controlled;
+    if (c && c.inParty && c.alive && this.party.some((m) => m.actor === c)) return c;
+    const s = this.solo;
+    if (s && s.inParty && s.alive && this.party.some((m) => m.actor === s)) return s;
     return this.party[0].actor;
+  }
+
+  /** Whether the party is split, one walking alone. */
+  get isSolo(): boolean {
+    const s = this.solo;
+    return !!s && s.inParty && s.alive && this.party.some((m) => m.actor === s);
+  }
+
+  /** Go on alone as one of the party (Player::set_solo_mode). */
+  goSolo(a: Actor): boolean {
+    if (!this.party.some((m) => m.actor === a)) return false;
+    if (this.vehicle) {
+      this.say('sys', 'Not while aboard!');
+      this.onChange();
+      return false;
+    }
+    if (a.objFlags & CHARMED) {
+      this.say('sys', `${this.partyMemberName(a.id)} fails to respond.`);
+      this.onChange();
+      return false;
+    }
+    this.solo = a;
+    this.controlled = null;
+    this.say('sys', `Solo mode: ${this.partyMemberName(a.id)}.`);
+    this.onChange();
+    return true;
+  }
+
+  /** Back to the whole party, if all are near the leader and no fight is on (Event::party_mode). */
+  partyMode(): boolean {
+    if (!this.isSolo) {
+      this.solo = null;
+      return true;
+    }
+    const leader = this.party[0].actor;
+    if (this.combat.fighting) this.say('sys', 'Not in combat mode!');
+    else if (this.party.every((m) => m.actor.z === leader.z && Math.max(Math.abs(m.actor.x - leader.x), Math.abs(m.actor.y - leader.y)) <= 6)) {
+      this.solo = null;
+      this.say('sys', 'Party mode.');
+    } else this.say('sys', 'Not everyone is here.');
+    this.onChange();
+    return !this.solo;
+  }
+
+  /** What only the whole party may do (ladders, gates, boats, rest): refused, alone. */
+  private soloRefused(why = 'Not in solo mode.'): boolean {
+    if (!this.isSolo) return false;
+    this.say('sys', why);
+    this.sfx('blocked');
+    this.onChange();
+    return true;
   }
   playerActor(): Actor {
     return this.player;
@@ -375,6 +495,8 @@ export class Game implements ConvWorld {
     const i = this.party.findIndex((m) => m.actor === a);
     if (i <= 0) return;
     this.party.splice(i, 1);
+    if (this.solo === a) this.solo = null;
+    if (this.controlled === a) this.controlled = null;
     a.statusFlags &= ~STATUS_IN_PARTY;
     a.worktype = WT.MOTIONLESS;
   }
@@ -449,6 +571,7 @@ export class Game implements ConvWorld {
   advance(minutes: number): void {
     const c = this.clock;
     c.minute += minutes;
+
     // The wind changes every so often, to any way or none (Weather::change_wind_dir).
     this.windMinutes -= minutes;
     if (this.windMinutes <= 0) {
@@ -475,6 +598,8 @@ export class Game implements ConvWorld {
         this.updateMoongates();
       }
     }
+    // Martian Dreams' Mars as time passes: the cold, the air, radium, ice, berries.
+    if (this.kind === 'md') this.mdUse.tick(minutes);
   }
 
   /** Where the party is, for the journal: a rough bearing, the world having no place names in its files. */
@@ -514,6 +639,13 @@ export class Game implements ConvWorld {
       this.sfx('blocked');
       this.onChange();
       return false;
+    }
+    // Over a Martian Dreams cliff's edge, whatever lies below.
+    if (this.kind === 'md' && this.mdUse.cliff(dx, dy) && !this.actors.at(nx, ny, p.z)) {
+      p.x = nx;
+      p.y = ny;
+      this.endTurn();
+      return true;
     }
     // Martian Dreams' wheelbarrows, drills, rail cars and planks are pushed ahead (move_obj).
     const pushed = this.kind === 'md' && !this.actors.at(nx, ny, p.z) ? (this.objects.list(nx, ny, p.z) ?? []).find((o) => this.mdUse.pushable(o) && !this.objects.tileOf(o).passable) : undefined;
@@ -557,11 +689,78 @@ export class Game implements ConvWorld {
     p.y = ny;
     p.setDirection(facing(dx, dy));
     // Each companion takes the square the one ahead has left - but in a fight, each fights.
-    const fighting = this.combat.fighting;
-    for (let i = 1; i < this.party.length && !fighting; i++) {
+    // Alone, the rest stay put; in a fight, each fights.
+    if (!this.combat.fighting && !this.isSolo) this.follow(trail, other);
+    if (this.kind === 'u6') this.enterGate(nx, ny, p.z);
+    this.cost = dx !== 0 && dy !== 0 ? 10 : 5;
+    this.endTurn();
+    return true;
+  }
+
+  /** How the party walks behind its leader (Party::reform_party): Nuvie's four, or single file. */
+  formation: Formation = 'standard';
+
+  /**
+   * Where the i-th member should stand (Party::get_formation_coords): their place in the formation, turned to face
+   * the way the leader faces.
+   */
+  formationSpot(i: number): [number, number] {
+    const l = this.party[0].actor;
+    const [fx, fy] = formationOffsets(this.formation, this.party.length)[i] ?? [0, i];
+    switch (l.direction & 3) {
+      case 0:
+        return [l.x + fx, l.y + fy];
+      case 1:
+        return [l.x - fy, l.y + fx];
+      case 2:
+        return [l.x - fx, l.y - fy];
+      default:
+        return [l.x + fy, l.y - fx];
+    }
+  }
+
+  /**
+   * The party follows its leader (Party::follow, much simplified): each steps towards their place in the formation,
+   * keeping beside someone ahead of them in it; where no step brings them nearer (a doorway, a narrow path), they take
+   * the square the one ahead has left, in single file.
+   */
+  private follow(trail: { x: number; y: number }[], other: Actor | null): void {
+    const p = this.party[0].actor;
+    const free = (x: number, y: number): boolean => this.canStand(x, y, p.z);
+    for (let i = 1; i < this.party.length; i++) {
       const a = this.party[i].actor;
       if (a === other || a.z !== p.z) continue;
       const t = trail[i - 1];
+      const lost = Math.max(Math.abs(p.x - a.x), Math.abs(p.y - a.y)) > 3;
+      if (this.formation !== 'file' && !lost) {
+        const [tx, ty] = this.formationSpot(i);
+        if (a.x === tx && a.y === ty) continue;
+        const d2 = (x: number, y: number): number => (tx - x) ** 2 + (ty - y) ** 2;
+        // Beside the leader or one of those ahead in the formation, once moved.
+        const kept = (x: number, y: number): boolean => this.party.slice(0, i).some((m) => Math.max(Math.abs(m.actor.x - x), Math.abs(m.actor.y - y)) <= 1);
+        // A step nearer the place; and one more for one still short of it (follow_passA's second chance).
+        let moved = false;
+        for (let tries = 0; tries < 2 && (a.x !== tx || a.y !== ty); tries++) {
+          let best: [number, number] | null = null;
+          let bd = d2(a.x, a.y);
+          for (const [dx, dy] of [[0, -1], [1, 0], [0, 1], [-1, 0], [1, -1], [1, 1], [-1, 1], [-1, -1]]) {
+            const nx = a.x + dx;
+            const ny = a.y + dy;
+            const d = d2(nx, ny);
+            if (d < bd && free(nx, ny) && kept(nx, ny)) {
+              bd = d;
+              best = [nx, ny];
+            }
+          }
+          if (!best) break;
+          a.setDirection(facing(best[0] - a.x, best[1] - a.y));
+          [a.x, a.y] = best;
+          moved = true;
+        }
+        if (moved) continue;
+        if (Math.max(Math.abs(p.x - a.x), Math.abs(p.y - a.y)) <= 2 && kept(a.x, a.y)) continue;
+      }
+      // Single file: the square the one ahead has left.
       if (t.x === a.x && t.y === a.y) continue;
       if (Math.abs(t.x - a.x) > 2 || Math.abs(t.y - a.y) > 2 || !this.actors.at(t.x, t.y, p.z)) {
         a.setDirection(facing(t.x - a.x, t.y - a.y));
@@ -569,9 +768,6 @@ export class Game implements ConvWorld {
         a.y = t.y;
       }
     }
-    if (this.kind === 'u6') this.enterGate(nx, ny, p.z);
-    this.endTurn();
-    return true;
   }
 
   /** A turn goes by after something was done (the use code's). */
@@ -586,6 +782,7 @@ export class Game implements ConvWorld {
    */
   rest(hours: number): void {
     if (this.converse) return;
+    if (this.soloRefused('Rest - Not in solo mode!')) return;
     const p = this.player;
     const v = this.vehicle;
     const no = (why: string): void => {
@@ -668,7 +865,12 @@ export class Game implements ConvWorld {
     this.endTurn();
   }
 
+  /** What the player's last action cost in a fight's movement points: a step's, else a blow's (Actor::move, Actor::attack). */
+  private cost: number | null = null;
+
   private endTurn(): void {
+    if (this.combat.fighting) this.combat.spend(this.player, this.cost ?? 10);
+    this.cost = null;
     this.turns++;
     if (this.turns % 2 === 0) this.advance(1);
     if (this.lightTurns > 0) this.lightTurns--;
@@ -794,7 +996,7 @@ export class Game implements ConvWorld {
     }
   }
 
-  private stepActor(a: Actor, dx: number, dy: number): boolean {
+  stepActor(a: Actor, dx: number, dy: number): boolean {
     const nx = wrap(a.x + dx, a.z);
     const ny = wrap(a.y + dy, a.z);
     if (!this.canStand(nx, ny, a.z)) return false;
@@ -828,8 +1030,8 @@ export class Game implements ConvWorld {
         if (!(this.stepActor(a, dx, dy) || (dx !== 0 && this.stepActor(a, dx, 0)) || (dy !== 0 && this.stepActor(a, 0, dy)))) {
           const [rx, ry] = DIRS[this.random(4)];
           this.stepActor(a, rx, ry);
-          if (++a.moves > 40) {
-            a.moves = 0;
+          if (++a.stuck > 40) {
+            a.stuck = 0;
             if (!this.actors.at(a.dest.x, a.dest.y, a.dest.z)) Object.assign(a, a.dest);
             a.dest = null;
           }
@@ -861,6 +1063,9 @@ export class Game implements ConvWorld {
         case WT.FACE_WEST:
           if (a.direction !== a.worktype - WT.FACE_NORTH) a.setDirection(a.worktype - WT.FACE_NORTH);
           break;
+        default:
+          // Martian Dreams' miners: the cokers and stokers of the coal works (worktype.lua).
+          if (this.kind === 'md') this.mdUse.work(a);
       }
     }
   }
@@ -911,9 +1116,34 @@ export class Game implements ConvWorld {
       text = m ? m.name : a.met ? this.cleanName(this.lib.name(this.lib.scriptNum(a))) || this.tiles.look(this.objects.objToTile[a.objN], 0) : this.tiles.look(this.objects.objToTile[a.objN], 0);
     } else if (o && !(o.status & 0x02)) text = this.objects.look(o);
     else text = this.tiles.look(this.map.tileNum(x, y, p.z), 0);
-    this.say('sys', `Thou dost see ${text}.`);
+    // A holy brazier is named for the virtue it burns for (holy_flame).
+    if (!a && o && this.kind === 'u6' && o.objN === 206 && o.quality >= 1 && o.quality <= 3) {
+      this.say('sys', `The flame of ${['truth', 'love', 'courage'][o.quality - 1]}.`);
+      return this.onChange();
+    }
+    this.say('sys', this.kind === 'se' ? `You see ${text}.` : `Thou dost see ${text}.`);
     if (o && !a && READABLE.has(o.objN)) this.read(o);
+    // Savage Empire searches a container looked at, tipping out what it holds (look_obj, search).
+    if (o && !a && this.kind === 'se' && this.objects.isContainer(o.objN)) this.search(o);
     this.onChange();
+  }
+
+  /** init.lua's search: what a container on the map holds is put on the ground beside it, and named. */
+  search(o: Obj): void {
+    if (o.loc !== 'map') return;
+    const found = [...(o.container ?? [])];
+    if (!found.length) {
+      this.say('sys', 'Searching here, you find nothing.');
+      return;
+    }
+    const names = found.map((c) => this.objects.look(c));
+    for (const c of found) {
+      this.objects.unlink(c);
+      [c.x, c.y, c.z] = [o.x, o.y, o.z];
+      this.objects.add(c);
+    }
+    const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0];
+    this.say('sys', `Searching here, you find ${list}.`);
   }
 
   private read(o: Obj): void {
@@ -946,6 +1176,8 @@ export class Game implements ConvWorld {
 
   talkTo(a: Actor): void {
     if (this.converse) return;
+    // Alone, only the Avatar may talk (Event::talk).
+    if (this.isSolo && this.player.id !== 1 && this.soloRefused()) return;
     const c = a.statusFlags & 0x04 ? null : Converse.start(this, this.lib, a);
     if (!c) {
       this.say('sys', a.statusFlags & 0x04 ? 'No response.' : 'Funny, no response.');
@@ -1035,6 +1267,11 @@ export class Game implements ConvWorld {
     this.say('you', s || 'bye');
     this.asked = s || 'bye';
     this.said = '';
+    // What was asked, by the answer it leads to: every word that gives it is then heard.
+    if (c.ask.type === 'keyword') {
+      const at = c.answerFor(s);
+      if (at !== null) this.heard.add(`${c.npc.id}:${at}`);
+    }
     c.reply(s);
     this.pump();
   }
@@ -1078,8 +1315,15 @@ export class Game implements ConvWorld {
       if (has(w) && !seen.has(w) && this.partyContains(c.npc.id) === (w === 'leave')) out.push({ label: cap(w), say: w });
     }
     out.push({ label: 'Bye', say: 'bye' });
+    for (const o of out) {
+      const at = o.say === 'bye' ? null : c.answerFor(o.say);
+      o.heard = at !== null && this.heard.has(`${c.npc.id}:${at}`);
+    }
     return out;
   }
+
+  /** The answers heard, by person and where they begin in their script (kept with the game). */
+  heard = new Set<string>();
 
   // ---- using ----
 
@@ -1109,12 +1353,52 @@ export class Game implements ConvWorld {
         this.say('sys', 'Closed.');
       }
     } else {
+      this.springTraps(o);
       o.frameN -= 4;
       this.say('sys', 'Opened.');
     }
   }
 
+  /**
+   * Opening a trapped door or chest springs what was set in it (process_effects, actor_use_effect): acid on the
+   * opener, poison, a fire blast or a cloud of gas about them. The trap is spent.
+   */
+  springTraps(o: Obj, who: Actor = this.player): void {
+    if (this.kind !== 'u6' || !o.container) return;
+    for (const e of [...o.container].reverse()) {
+      if (e.objN !== 337) continue;
+      o.container.splice(o.container.indexOf(e), 1);
+      const kind = this.random(4);
+      const near = (): Actor[] =>
+        this.actors.list.filter((a) => a.alive && a.visible && a.objN && a.z === who.z && Math.abs(a.x - who.x) <= 1 && Math.abs(a.y - who.y) <= 1);
+      const poison = (a: Actor): void => {
+        a.statusFlags |= 0x08;
+        this.combat.flash(a.x, a.y, a.z, 'hit');
+      };
+      if (kind === 0) {
+        this.say('sys', 'Acid!');
+        this.combat.flash(who.x, who.y, who.z, 'hit');
+        this.sfx('hit');
+        this.combat.harm(who, this.random(20) + 1);
+      } else if (kind === 1) {
+        this.say('sys', 'Poison!');
+        poison(who);
+      } else if (kind === 2) {
+        this.say('sys', 'Bomb!');
+        this.sfx('quake');
+        for (const a of near()) {
+          this.combat.flash(a.x, a.y, a.z, 'miss', { tile: 0x17e, fromX: a.x, fromY: a.y });
+          this.combat.harm(a, this.random(20) + 1);
+        }
+      } else {
+        this.say('sys', 'Gas!');
+        for (const a of near()) poison(a);
+      }
+    }
+  }
+
   private useLadder(o: Obj, down: boolean): void {
+    if (this.soloRefused()) return;
     let x = o.x;
     let y = o.y;
     let z: number;
@@ -1201,10 +1485,17 @@ export class Game implements ConvWorld {
     } else if (READABLE.has(o.objN)) {
       this.say('sys', `Reading ${this.objects.look(o)}:`);
       this.read(o);
+    } else if (o.objN === 78 && this.kind === 'u6') {
+      // A staff is used, not searched: it holds its charges (use_staff).
+      this.usecode.use(o);
+      return;
     } else if (o.container && o.objN !== OBJ.EGG) {
       if (o.objN === OBJ.CHEST && o.frameN >= 2) this.say('sys', o.frameN === 3 ? 'Magically locked.' : 'Locked.');
       else {
-        if (o.objN === OBJ.CHEST) o.frameN = 0;
+        if (o.objN === OBJ.CHEST) {
+          if (o.frameN === 1) this.springTraps(o);
+          o.frameN = 0;
+        }
         this.openContainer = o;
         this.say('sys', o.container.length ? `Searching the ${name}.` : `The ${name} is empty.`);
       }
@@ -1233,7 +1524,40 @@ export class Game implements ConvWorld {
   // ---- getting and dropping ----
 
   /** Pick up what is on a square, or take `o` from an opened container; it goes to whoever has room. */
-  get(x: number, y: number, o: Obj | null = null): void {
+  /** Whether a thing on the map can be taken up and dragged: within reach, not fixed in place. */
+  canDrag(o: Obj): boolean {
+    const p = this.player;
+    return o.loc === 'map' && !(o.status & 0x02) && o.z === p.z && Math.max(Math.abs(o.x - p.x), Math.abs(o.y - p.y)) <= 1 &&
+      !this.objects.isDoor(o) && this.objects.weightOf(o) > 0 && !this.vehicle;
+  }
+
+  /**
+   * Set a dragged thing down (the original's Move): on someone of the party, it is theirs (as Get); else on a free
+   * square near enough to throw it to, in plain sight.
+   */
+  dragTo(o: Obj, x: number, y: number): void {
+    const p = this.player;
+    const who = this.actors.at(x, y, p.z);
+    if (who && who.inParty) return this.get(o.x, o.y, o, who);
+    if (x === o.x && y === o.y) return;
+    if (who || Math.max(Math.abs(x - p.x), Math.abs(y - p.y)) > 3 || !this.combat.clearLine(p.x, p.y, x, y, p.z) ||
+      !this.map.isPassable(x, y, p.z)) {
+      this.say('sys', 'Blocked.');
+      this.sfx('blocked');
+      this.onChange();
+      return;
+    }
+    if (!(o.status & STATUS_OK_TO_TAKE) && this.objects.weightOf(o) < 25.5 && this.objects.tileOf(o).passable) {
+      // Moving what is not yours is as taking it.
+      this.karma = Math.max(0, this.karma - 1);
+      o.status |= STATUS_OK_TO_TAKE;
+    }
+    this.objects.move(o, x, y, p.z);
+    this.say('sys', `Move ${this.objects.look(o)}.`);
+    this.endTurn();
+  }
+
+  get(x: number, y: number, o: Obj | null = null, to: Actor | null = null): void {
     const p = this.player;
     o ??= this.objects.get(x, y, p.z);
     if (!o || o.status & 0x02) {
@@ -1248,7 +1572,7 @@ export class Game implements ConvWorld {
       this.onChange();
       return;
     }
-    const taker = this.party.find((m) => this.invRoom(m.actor.id) >= w);
+    const taker = to ? (this.invRoom(to.id) >= w ? this.party.find((m) => m.actor === to) : undefined) : this.party.find((m) => this.invRoom(m.actor.id) >= w);
     if (!taker) {
       this.say('sys', `Get ${this.objects.look(o)}: too heavy for anyone to carry.`);
       this.onChange();
@@ -1260,7 +1584,7 @@ export class Game implements ConvWorld {
       this.karma = Math.max(0, this.karma - 1);
       o.status |= STATUS_OK_TO_TAKE;
       this.say('sys', `Get ${what}. Stealing!`);
-    } else this.say('sys', `Get ${what}.`);
+    } else this.say('sys', to ? `${taker.name} takes ${what}.` : `Get ${what}.`);
     // A moonstone taken from the ground no longer holds a moongate (U6UseCode::use_moonstone).
     if (o.objN === 73 && o.loc === 'map' && this.kind === 'u6') {
       this.moonstones[o.frameN & 7] = [0, 0, 0];
@@ -1289,6 +1613,7 @@ export class Game implements ConvWorld {
 
   /** Board a ship, skiff or raft beside the party: it becomes the party's vehicle, and the party goes aboard. */
   private board(o: Obj): void {
+    if (this.soloRefused()) return;
     const p = this.player;
     let centre = o;
     if (o.objN === SHIP) {
@@ -1595,6 +1920,7 @@ export class Game implements ConvWorld {
 
   /** Stepping into a moongate (U6UseCode::enter_moongate): a red one where its place says, a blue one where the moons do. */
   private enterGate(x: number, y: number, z: number): boolean {
+    if (this.isSolo) return false;
     const blue = this.objects.list(x, y, z)?.find((o) => o.objN === MOONGATE && o.x === x);
     if (blue) {
       // The moon nearer the top of the sky chooses the moonstone.
@@ -1668,6 +1994,7 @@ export class Game implements ConvWorld {
     // Two rings in Ultima VI; one pair of gloves in Martian Dreams.
     const ok =
       slot === 3 ? arms < 2 : slot === 4 ? arms === 0 : slot === 5 && this.kind === 'u6' ? worn.filter((w) => w === 5).length < 2 : !worn.includes(slot);
+    if (ok && this.kind === 'md' && !this.mdUse.ready(o, a, true)) return false;
     if (!ok) {
       this.say('sys', `${this.partyMemberName(a.id) || 'They'} cannot ready ${what}: take something off first.`);
       this.onChange();
@@ -1687,15 +2014,37 @@ export class Game implements ConvWorld {
     }
     item.loc = 'readied';
     this.say('sys', `${this.partyMemberName(a.id) || 'They'} readied ${what}.`);
+    if (this.kind === 'u6') this.u6Worn(item, a, true);
     this.onChange();
     return true;
   }
 
   unready(o: Obj): void {
     if (o.loc !== 'readied') return;
+    if (this.kind === 'md' && !this.mdUse.ready(o, this.actors.get(o.holder) ?? this.player, false)) return this.onChange();
+    // The amulet of submission will not come off (amulet_of_submission).
+    if (this.kind === 'u6' && o.objN === 76) {
+      this.say('sys', 'Magical energy prevents you from removing the amulet.');
+      return this.onChange();
+    }
     o.loc = 'inv';
     this.say('sys', `Unreadied ${this.objects.look(o)}.`);
+    if (this.kind === 'u6') this.u6Worn(o, this.actors.get(o.holder) ?? this.player, false);
     this.onChange();
+  }
+
+  /**
+   * What putting on or taking off a magic thing does in Ultima VI: an invisibility ring hides its wearer while one is
+   * worn (magic_ring), and the storm cloak stills magic about the party while worn (storm_cloak's TIMER_U6_STORM).
+   */
+  private u6Worn(o: Obj, a: Actor, on: boolean): void {
+    if (o.objN === 258) {
+      const worn = this.objects.inventories[a.id].some((r) => r.loc === 'readied' && r.objN === 258);
+      if (worn) a.objFlags |= 0x02;
+      else a.objFlags &= ~0x02;
+    } else if (o.objN === 81) {
+      this.stormTurns = on ? 20 : 0;
+    }
   }
 
   /** Hand something to another member of the party. */
@@ -1785,6 +2134,9 @@ export class Game implements ConvWorld {
       a.exp = 600;
       a.hp = h.str * 2 + 4 * 24;
       a.setDirection(a.direction);
+    } else {
+      // update_objlist_for_new_game_se: health twice the strength and the wits.
+      a.hp = h.str * 2 + h.int;
     }
     a.hp = Math.min(a.hp, a.maxHp) || a.maxHp;
     this.onChange();
@@ -1827,6 +2179,9 @@ export class Game implements ConvWorld {
       rest: this.restCounter,
       keg: this.kegTurns,
       wind: this.wind,
+      heard: [...this.heard],
+      solo: this.isSolo ? this.solo!.id : undefined,
+      formation: this.formation,
       dream: this.kind === 'md' ? this.mdUse.saveDream() : undefined,
       moonstones: this.moonstones,
       party: this.party.map((m) => ({ id: m.actor.id, name: m.name })),
@@ -1846,6 +2201,9 @@ export class Game implements ConvWorld {
     this.turns = s.turns;
     this.lightTurns = s.light ?? 0;
     if (s.wind) this.wind = s.wind;
+    if (s.heard) this.heard = new Set(s.heard);
+    if (s.solo !== undefined) this.solo = this.actors.get(s.solo) ?? null;
+    if (s.formation) this.formation = s.formation;
     if (this.kind === 'md') this.mdUse.loadDream(s.dream);
     this.restCounter = s.rest ?? 0;
     this.kegTurns = s.keg ?? 0;

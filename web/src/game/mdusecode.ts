@@ -17,6 +17,10 @@ type OnEntry = On | Record<number, OnTo>;
 
 const BERRY = 73;
 const OXIUM = 131;
+/** clothing_get_warmth_rating's table: how warm each thing worn keeps its wearer. */
+const WARMTH = new Map<number, number>([[1, 1], [2, 2], [3, 3], [4, 3], [5, 2], [6, 1], [7, 1], [8, 2], [9, 1], [10, 1], [11, 2], [14, 4], [13, 3],
+  [17, 2], [18, 3], [19, 3], [20, 4], [21, 4], [22, 3], [23, 5], [90, 12], [25, 2], [26, 2], [27, 2], [28, 3], [29, 3], [30, 3], [33, 1],
+  [34, 1], [35, 1], [36, 2], [37, 3], [38, 1], [39, 3]]);
 /** player.lua's map_entrance_tbl: where each mine or cave mouth leads, by its quality. */
 const ENTRANCES: [number, number, number][] = [
   [0x43, 0x51, 1], [0x80, 0x8d, 0], [0x76, 0xf2, 3], [0x7a, 0x0c, 3], [0x9a, 0x41, 4], [0x2b2, 0x1cc, 0], [0x73, 0x40, 4],
@@ -87,6 +91,10 @@ export class MdUseCode {
       case 119: case 128: return { 129: spray, 261: spray };
       case 124: case 235: return { 179: oil, 227: oil, 421: oil, 152: oil, 219: oil, 222: oil, 0: (_o, t, a, x, y) => this.dreamDoor(t, a, x, y) };
       case 88: return { 84: () => this.dreamQuestDone(0x57, 6) };
+      case 144: return { 192: (b, r) => this.belt(b, r as Obj) };
+      case 52: return { 404: { 405: (_h, t, broken) => this.fixTrack(t, broken) } };
+      case 53: return { 199: { 201: (_p, s, tw, a) => this.cable(s, tw, a), 215: (_p, s, tw, a) => this.cable(s, tw, a) } };
+      case 135: return { 411: (_w, t) => this.wrench(t as Obj), 440: (_w, t) => this.wrench(t as Obj), 458: (_w, t) => this.wrench(t as Obj) };
       case 296: return { 288: (_g, t) => this.headgear(t as Obj), 289: (_g, t) => this.headgear(t as Obj) };
       case 231: return { 130: (_t, geode, a) => this.geode(geode as Obj, a), 298: () => this.gong() };
       case 129: case 261: return { 0: (gun, t, a) => this.spray(gun, t, a) };
@@ -239,6 +247,7 @@ export class MdUseCode {
         then: (i) => {
           g.askChoice = null;
           if (i === 0) g.won = true; // play_end_sequence
+          else g.cutscene = 13;
           g.onChange();
         },
       };
@@ -348,7 +357,11 @@ export class MdUseCode {
     } else if (door.frameN < 4) {
       door.frameN = (door.frameN & 2) + 9;
       frame = 1;
-    } else door.frameN = (door.frameN & 2) + 1;
+    } else {
+      door.frameN = (door.frameN & 2) + 1;
+      // The minotaur let out of the shop ends Tiffany's dream.
+      if (this.dream?.stage === 0x44 && this.minotaurOut(door.z)) return this.tiffanyDone();
+    }
     for (const s of switches) s.frameN = frame;
     g.sfx('success');
   }
@@ -458,6 +471,7 @@ export class MdUseCode {
 
   private sleep(hours: number): void {
     const g = this.g;
+    this.warm = true;
     if (g.restCounter === 0 && hours > 4) {
       for (const m of g.party) m.actor.hp = Math.min(m.actor.maxHp, m.actor.hp + this.rand(3, 8) + this.rand(3, 8) * Math.floor(hours / 2));
       g.restCounter = 6;
@@ -476,6 +490,7 @@ export class MdUseCode {
         this.say('FEELS_BETTER', m.name);
       } else a.hp = Math.max(5, a.hp - (hours * 2 + 5));
     }
+    this.warm = false;
     g.say('sys', `The party rests for ${hours} hour${hours === 1 ? '' : 's'}.`);
     this.obelisks(dreamers);
     g.onChange();
@@ -547,6 +562,15 @@ export class MdUseCode {
     for (const o of g.objects.list(p.x, p.y, p.z) ?? []) {
       const n = o.objN;
       if (n === 461 && this.dream) return this.teleporter(o);
+      if (n === 462 && this.dream) {
+        // OBJ_DREAM_TELEPORTER1: walking on the walls, or back on one's feet.
+        if (o.quality === 0) this.restoreLook();
+        else {
+          p.objN = g.gender === 1 ? 319 : 318;
+          p.frameN = 0;
+        }
+        continue;
+      }
       if (!(n === 175 || n === 163 || n === 180 || n === 178 || (n === 197 && o.frameN === 3) || n === 210)) continue;
       if (n === 197) {
         if (!((g.actors.get(0x73)?.talkFlags ?? 0) & (1 << 4))) {
@@ -761,6 +785,7 @@ export class MdUseCode {
     }
     this.dream = { seat: [p.x, p.y, p.z], companions, hp: p.hp, stage: 0, back: null };
     p.hp = p.maxHp;
+    g.cutscene = 4;
     g.relocate(quality === 1 ? 0x64 : 0x93, quality === 1 ? 0x3b : 0x34, 2);
     g.say('sys', 'You drift into a dream...');
   }
@@ -783,7 +808,16 @@ export class MdUseCode {
       this.wake();
       return true;
     }
-    if (d.stage !== 0 && stage === 0x40) this.say('YOU_FALL_OFF_THE_CLIFF');
+    // The stage left (dreamworld_cleanup_tbl): back on one's feet after the cliff.
+    if (d.stage === 0x40 && stage !== 0xa5 && stage !== 0xe5) this.restoreLook();
+    if (d.stage !== 0 && stage === 0x40) {
+      // fall_from_cliff: flat on the ground, and Your Mother above crushed with the fall.
+      this.say('YOU_FALL_OFF_THE_CLIFF');
+      const p = g.player;
+      p.objN = g.gender === 1 ? 0x127 : 0x126;
+      p.frameN = 0;
+      for (const a of g.actors.list) if (a.objN === 391 && a.alive && a.x === p.x && a.y >= p.y - 8 && a.y <= p.y && a.z === p.z) g.combat.harm(a, a.hp);
+    }
     d.back = [o.quality, o.qty];
     g.relocate(o.quality, o.qty, g.player.z);
     if (stage !== 0xe5) {
@@ -795,6 +829,23 @@ export class MdUseCode {
       d.stage = stage;
     }
     return true;
+  }
+
+  /** The dreamer as they were (cleanup_cliff_fall, and the end of walking on walls). */
+  private restoreLook(): void {
+    const p = this.g.player;
+    const base = this.g.gender === 1 ? 344 : 343;
+    if (p.objN !== base) {
+      p.objN = base;
+      p.setDirection(p.direction);
+    }
+  }
+
+  /** player_before_move_action: a step south off a cliff's edge (tiles 384 to 387) is taken, wall or no. */
+  cliff(dx: number, dy: number): boolean {
+    const p = this.g.player;
+    const t = this.g.map.tileNum(p.x, p.y, p.z);
+    return dx === 0 && dy === 1 && t >= 384 && t <= 387;
   }
 
   /** setup_tiffany_stage: the shop of pitchers and the minotaur. */
@@ -871,6 +922,7 @@ export class MdUseCode {
     const hour = c.hour + 1;
     g.advance(60 - c.minute + (hour >= 8 ? 24 - hour + 8 : 8 - hour) * 60);
     const p = g.player;
+    this.restoreLook();
     for (const o of [...g.objects.inventories[p.id]]) g.objects.unlink(o);
     for (const o of [...g.objects.inventories[0]]) {
       g.objects.unlink(o);
@@ -1024,6 +1076,352 @@ export class MdUseCode {
     }
   }
 
+  // ---- time passing: the cold, the thin air, radium, ice, berries (actor.lua's advance_time) ----
+
+  /** The party is camped (or otherwise kept warm): no cold, no air used. */
+  warm = false;
+  private cold = new Set<number>();
+  private lastHour = -1;
+
+  /** A minute's worth of Mars, for each minute passed. */
+  tick(minutes: number): void {
+    const g = this.g;
+    for (let i = 0; i < Math.min(minutes, 30); i++) this.minute();
+    if (g.clock.hour !== this.lastHour) {
+      if (this.lastHour >= 0) this.hour();
+      this.lastHour = g.clock.hour;
+    }
+  }
+
+  private needsAir(a: Actor): boolean {
+    return a.id !== 6 && this.hasFlag(0x10, 5) && !this.dream && !this.warm;
+  }
+
+  private setHypoxia(a: Actor, on: boolean): void {
+    const was = !!(a.objFlags & 0x40);
+    if (was === on) return;
+    a.objFlags = on ? a.objFlags | 0x40 : a.objFlags & ~0x40;
+    this.say(on ? 'GASPS_FOR_AIR' : 'BREATHES_EASIER', this.g.partyMemberName(a.id) || this.g.lookActor(a));
+  }
+
+  private minute(): void {
+    const g = this.g;
+    const h = g.clock.hour;
+    if (this.dream) return;
+    for (const m of g.party) {
+      const a = m.actor;
+      if (!a.alive || a.statusFlags & 0x04) continue;
+      const inv = g.objects.inventories[a.id];
+      this.setHypoxia(a, this.needsAir(a) && !inv.some((o) => o.objN === OXIUM));
+      // The cold: by night without warm clothes, out on the surface.
+      const warmth = inv.filter((o) => o.loc === 'readied').reduce((n, o) => n + (WARMTH.get(o.objN) ?? 0), 0);
+      let cold = 0;
+      if (!this.warm && a.z === 0 && a.id !== 6) {
+        if (h <= 3 || h >= 22) cold = warmth >= 10 ? 1 : 2;
+        else if ((h <= 6 || h >= 18) && warmth < 10) cold = 1;
+      }
+      if (!cold) {
+        if (this.cold.delete(a.id)) this.say('FEELS_WARMER', m.name);
+      } else {
+        this.cold.add(a.id);
+        if (this.rand(0, 1) === 1 || cold === 2) {
+          this.say('IS_FREEZING', m.name);
+          g.combat.harm(a, this.rand(1, 2) + (cold === 2 && this.rand(0, 1) ? this.rand(1, 2) : 0));
+        }
+      }
+      // Radium carried outside its lead box poisons; ice melts; the berries' powers fade.
+      for (const o of [...inv, ...inv.flatMap((c) => c.container ?? [])]) {
+        if ((o.objN === 448 || (o.objN === 449 && a.id !== 6)) && o.parentObj?.objN !== 139 && !(a.statusFlags & 0x08)) {
+          a.statusFlags |= 0x08;
+          this.say('IS_POISONED', m.name);
+        } else if ((o.objN === 160 && o.frameN > 1) || o.objN === 256) {
+          if (this.rand(0, 100) < 10) {
+            this.say('SOME_ICE_HAS_MELTED');
+            if (o.objN === 160) o.frameN = 1;
+            else g.objects.unlink(o);
+          }
+        }
+      }
+      const b = this.berries.get(a.id);
+      if (b) {
+        for (let k = 0; k < 3; k++) {
+          if (b[k] > 0 && this.rand(1, Math.max(1, a.intelligence * 4)) === 1) {
+            b[k]--;
+            this.say('A_PSYCHIC_POWER_FADES');
+          }
+        }
+      }
+      if (this.frenzy.has(a.id) && !g.combat.fighting) this.frenzy.delete(a.id);
+    }
+  }
+
+  /** On the hour: each breathes a blob of oxium where the air is thin. */
+  private hour(): void {
+    const g = this.g;
+    for (const m of g.party) {
+      const a = m.actor;
+      if (!this.needsAir(a) || a.statusFlags & 0x04) continue;
+      const ox = g.objects.inventories[a.id].find((o) => o.objN === OXIUM);
+      if (ox) {
+        if (ox.qty > 1) ox.qty--;
+        else g.objects.unlink(ox);
+      }
+      this.setHypoxia(a, !g.objects.inventories[a.id].some((o) => o.objN === OXIUM));
+    }
+  }
+
+  // ---- the coal works' people (worktype.lua) and its repairs ----
+
+  private objAt(x: number, y: number, z: number, n: number): Obj | undefined {
+    return (this.g.objects.list(x, y, z) ?? []).find((o) => o.objN === n);
+  }
+
+  /** The cokers dig coal onto the belt; the stokers carry it from the belt's end to the furnace; in the dreams, Your Mother and the minotaur. */
+  work(a: Actor): void {
+    const g = this.g;
+    const { x, y, z } = a;
+    switch (a.worktype) {
+      case 0x15: { // worktype_15_your_mother: down upon you, a cuff for whoever is nearest
+        if (g.stepActor(a, 0, 1)) break;
+        const t = g.combat.findTarget(a);
+        if (t && Math.max(Math.abs(t.x - x), Math.abs(t.y - y)) <= 1) g.combat.hurt(a, t, this.rand(1, 6));
+        break;
+      }
+      case 0x16: // worktype_16_minotaur
+        this.minotaur(a);
+        break;
+      case 0x99: // coker to the coal vein
+        if (!g.stepActor(a, 0, -1) && this.objAt(x, y - 1, z, 446)) a.worktype = 0x9a;
+        break;
+      case 0x9a: // coker drops coal on the belt
+        if (this.objAt(x, y + 1, z, 188)) {
+          const coal = g.objects.create(447, 1, 0);
+          [coal.x, coal.y, coal.z] = [x, y + 1, z];
+          g.objects.add(coal);
+        } else if (!this.objAt(x, y + 1, z, 192)) {
+          g.stepActor(a, 0, 1);
+          break;
+        }
+        a.worktype = 0x9b;
+        break;
+      case 0x9b: // coker waits for the coal to move away
+        if (!this.objAt(x, y + 1, z, 447) && !this.objAt(x, y + 1, z, 192)) a.worktype = 0x99;
+        break;
+      case 0x9c: // stoker back to the belt
+        if (!this.objAt(x, y + 2, z, 191)) g.stepActor(a, 0, 1);
+        else a.worktype = 0x9d;
+        break;
+      case 0x9d: { // stoker waits for coal
+        let coal = this.objAt(x, y + 1, z, 447);
+        if (!coal) break;
+        while (coal) {
+          g.objects.unlink(coal);
+          coal = this.objAt(x, y + 1, z, 447);
+        }
+        a.worktype = 0x9e;
+        break;
+      }
+      case 0x9e: // stoker to the furnace
+        if (g.stepActor(a, 0, -1)) break;
+        if (this.objAt(x, y - 1, z, 233) || this.objAt(x + 1, y - 1, z, 233)) {
+          if (!this.hasFlag(0x72, 2)) this.power();
+          else if (!this.hasFlag(0x73, 2) || this.hasFlag(0x71, 3)) {
+            if (this.hasFlag(0x71, 3)) {
+              this.flag(0x73, 2, false);
+              this.flag(0x71, 3, false);
+            }
+            this.flag(0x73, 2);
+            this.towers(true);
+            g.cutscene = 2;
+          }
+          a.worktype = 0x9c;
+        }
+        break;
+    }
+  }
+
+  /** The minotaur charges the red cape - carried, or dropped in the shop - smashing pitchers as it goes. */
+  private minotaur(a: Actor): void {
+    const g = this.g;
+    const d = this.dream;
+    if (d?.stage === 0x60) {
+      g.combat.hurt(a, a, a.hp);
+      return;
+    }
+    const p = g.player;
+    let target: { x: number; y: number; who?: Actor } | null = null;
+    if (g.objects.inventories[p.id].some((o) => o.objN === 162)) target = { x: p.x, y: p.y, who: p };
+    else {
+      const cape = g.objects.all().find((o) => o.objN === 162 && o.loc === 'map' && o.z === 2 && o.x >= 0x21 && o.x < 0x3d && o.y >= 0x33 && o.y < 0x43);
+      if (cape) target = { x: cape.x, y: cape.y };
+    }
+    const smash = (): void => {
+      for (const o of [...(g.objects.list(a.x, a.y, a.z) ?? [])]) if (o.objN === 217 || o.objN === 218) g.objects.unlink(o);
+    };
+    if (!target) {
+      // worktype_stomp_around
+      const [dx, dy] = [[0, -1], [1, 0], [0, 1], [-1, 0]][this.rand(0, 3)];
+      g.stepActor(a, dx, dy);
+      smash();
+      return;
+    }
+    if (Math.max(Math.abs(target.x - a.x), Math.abs(target.y - a.y)) <= 1) {
+      if (target.who) return void g.combat.attack(a, target.who);
+      if (!this.hasFlag(0x54, 6) && a.x >= 0x37 && a.y <= 0x37) return this.tiffanyDone();
+    }
+    g.combat.step(a, target.x, target.y);
+    g.sfx('quake');
+    smash();
+  }
+
+  /** complete_tiffany_stage */
+  private tiffanyDone(): void {
+    const t = this.g.actors.get(0x54);
+    if (!t) return;
+    this.finishDreamQuest(t);
+    t.talkFlags |= 1 << 1;
+    this.g.talkTo(t);
+    this.wakeAfterTalk = true;
+  }
+
+  /** has_minotaur_left_the_shop */
+  private minotaurOut(z: number): boolean {
+    return !this.hasFlag(0x54, 6) && this.g.actors.list.some((a) => a.objN === 398 && a.alive && a.z === z && a.x >= 0x37 && a.y <= 0x37);
+  }
+
+  /** ready_obj: the throw rug worn becomes a red cape; winged shoes lay a bridge in the dream, and will not come off. */
+  ready(o: Obj, a: Actor, readying: boolean): boolean {
+    const g = this.g;
+    if (readying) {
+      if (o.objN === 161) o.objN = 162;
+      else if (o.objN === 136) this.say('THE_TONGS_WILL_NOW_PROTECT_YOUR_HANDS');
+      else if (o.objN === 15 && a.z === 2) {
+        const bridge = g.objects.create(146, 1, 0);
+        [bridge.x, bridge.y, bridge.z] = [0xc9, 0x9b, 2];
+        g.objects.add(bridge);
+      }
+      return true;
+    }
+    if (o.objN === 15) {
+      this.say('THEY_WONT_COME_OFF');
+      return false;
+    }
+    return true;
+  }
+
+  /** activate_tower_electricity: the towers by the works light, their cables live. */
+  private towers(on: boolean): void {
+    for (const o of this.g.objects.all()) {
+      if (o.loc !== 'map' || o.z !== 0 || o.x < 0x3d0 || o.x > 0x3f0 || o.y < 0x1d0 || o.y > 0x1e7) continue;
+      if (o.objN === 201 && on) o.frameN |= 4;
+      else if (o.objN === 214 && on) o.objN = 215;
+    }
+  }
+
+  /** use_fixed_belt_on_bare_rollers: the mended belt laid over the rollers, a join every five. */
+  private belt(beltObj: Obj, rollers: Obj): void {
+    const g = this.g;
+    let start: Obj | undefined;
+    for (let r: Obj | undefined = rollers; r; r = this.objAt(r.x - 1, r.y, r.z, r.objN)) {
+      if (r.frameN === 0) {
+        start = r;
+        break;
+      }
+    }
+    if (!start) return this.say('OOOPS_THESE_ROLLERS_CAN_NEVER_BE_FIXED');
+    let i = 4;
+    for (let r: Obj | undefined = start; r; ) {
+      const next = this.objAt(r.x + 1, r.y, r.z, 192);
+      r.objN = 188;
+      if (i === 0) {
+        i = 4;
+        const join = g.objects.create(189, 1, 0);
+        [join.x, join.y, join.z] = [r.x, r.y, r.z];
+        g.objects.add(join);
+      } else i--;
+      r = next;
+    }
+    g.objects.unlink(beltObj);
+    this.flag(0x72, 2);
+  }
+
+  private fixTrack(t: Obj, broken: Obj): void {
+    this.say('WHICH_SECTION_OF_RAIL_NEEDS_FIXING');
+    this.g.objects.unlink(t);
+    broken.objN = 414;
+  }
+
+  /** use_pliers_on_spool_to_tower: new cable for the tower - with rubber gloves on. */
+  private cable(spool: Obj, tower: Obj, a: Actor): void {
+    const g = this.g;
+    if (Math.max(Math.abs(a.x - tower.x), Math.abs(a.y - tower.y)) > 1) return this.say('THE_WORK_IS_TO_PRECISE_TO_PERFORM_TELEKINETICALLY');
+    if (!this.hasFlag(0x73, 2) || this.hasFlag(0x71, 3)) return this.say('THE_CABLE_DOES_NOT_NEED_REPLACEMENT');
+    const gloves = g.objects.inventories[a.id].some((o) => o.loc === 'readied' && o.objN === 38);
+    if (!gloves) {
+      g.combat.hurt(a, a, this.rand(0, Math.floor(a.maxHp / 2)));
+      const spector = g.actors.get(2);
+      if (spector && spector.alive && spector.z === a.z && Math.abs(spector.x - a.x) < 6 && Math.abs(spector.y - a.y) < 6) {
+        spector.talkFlags |= 1 << 2;
+        g.talkTo(spector);
+      }
+      return;
+    }
+    g.objects.unlink(spool);
+    this.flag(0x73, 4);
+    g.cutscene = 3;
+    for (const o of [...g.objects.all()]) {
+      if (o.loc !== 'map' || o.z !== 0) continue;
+      if (o.objN === 215 && o.x >= 0x3d0 && o.x < 0x3f0 && o.y >= 0x1d0 && o.y < 0x1e1) o.objN = 214;
+      else if (o.objN === 315) g.objects.unlink(o);
+    }
+  }
+
+  /** The wrench: a turntable's switch loosened or fastened, a drill fixed to its cart, a panel loosened or fastened. */
+  private wrench(t: Obj): void {
+    const g = this.g;
+    if (t.objN === 411) {
+      if (t.quality === 1) {
+        const tt = t.loc === 'map' ? this.objAt(t.x - 1, t.y - 1, t.z, 413) : undefined;
+        if (!tt) return this.say('THIS_SWITCH_CANNOT_BE_FIXED');
+        t.frameN = tt.frameN;
+        t.quality = 0;
+        return this.say('THE_SWITCH_IS_FASTENED');
+      }
+      this.say('THE_SWITCH_IS_LOOSE');
+      t.quality = 1;
+    } else if (t.objN === 440) {
+      const cart = t.loc === 'map' ? this.objAt(t.x, t.y, t.z, 439) : undefined;
+      if (!cart) return this.say('THE_DRILL_MUST_BE_INSTALLED_ONTO_A_DRILL_CART');
+      const drill = g.objects.create(441, 1, 0);
+      drill.frameN = 1;
+      [drill.x, drill.y, drill.z] = [t.x, t.y, t.z];
+      g.objects.unlink(t);
+      g.objects.unlink(cart);
+      g.objects.add(drill);
+      this.say('THE_DRILLS_POWER_IS_CONNECTED');
+    } else if (t.objN === 458) {
+      if (t.loc !== 'map') return this.say('IT_HAS_NO_EFFECT');
+      if (t.quality === 0) {
+        t.quality = 1;
+        return this.say('THE_PANEL_IS_LOOSE');
+      }
+      if (t.quality & 2) return this.say('IT_MUST_BE_REPAIRED_FIRST');
+      const cab = this.objAt(t.x, t.y, t.z, 457);
+      if (!cab) return this.say('PANELS_ARE_ONLY_INSTALLED_ONTO_CABINETS');
+      const q = cab.quality;
+      const n = t.qty;
+      if ((q === 0 && n !== 0) || (q !== 0 && q <= 3 && n === 0 && t.frameN !== q - 1) || (q !== 0 && (q > 3 || n !== 0) && q !== n)) {
+        return this.say('THIS_CABINET_REQUIRES_A_DIFFERENT_TYPE_OF_PANEL');
+      }
+      t.quality--;
+      this.say('THE_PANEL_IS_FASTENED');
+      if (t.quality === 3) {
+        this.flag(0x74, 3);
+        if (this.hasFlag(0x74, 0)) this.flag(0x60, 2);
+      }
+    }
+  }
+
   // ---- digging and shovelling ----
 
   /** use_tool_on_ground: dirt or ice dug out to a hole, the pile beside the digger. */
@@ -1133,6 +1531,7 @@ export class MdUseCode {
       tesla.talkFlags |= 1 << 2;
       return g.talkTo(tesla);
     }
+    this.g.cutscene = 1;
     tesla.talkFlags |= 1 << 5;
     h.objN = 428;
     h.frameN = 0;
