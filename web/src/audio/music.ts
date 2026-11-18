@@ -126,7 +126,7 @@ export class Music {
     if (this.theme) return this.theme;
     if (g.kind !== 'u6') return 'random';
     if (g.vehicle) return 'boat';
-    if (g.combat.fighting) return 'combat';
+    if (g.combat.mode) return 'combat';
     const z = g.player.z;
     return z === 0 ? 'random' : z === 5 ? 'gargoyle' : 'dungeon';
   }

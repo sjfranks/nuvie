@@ -270,6 +270,14 @@ export class MapView {
     if (x > 0 && y > 0 && t.dblWidth && t.dblHeight) this.drawPart(tiles.get(n - 1), x - 1, y - 1, top);
   }
 
+  /** Whether a square of the world is on the map now and in the party's sight. */
+  canSee(x: number, y: number, z: number): boolean {
+    if (z !== this.game.player.z) return false;
+    const vx = wrap(x - this.curX, z);
+    const vy = wrap(y - this.curY, z);
+    return vx >= 0 && vy >= 0 && vx < this.cols && vy < this.rows && this.seen(vx, vy);
+  }
+
   private seen(vx: number, vy: number): boolean {
     return this.tmp[(vy + BORDER) * this.tw + vx + BORDER] !== 0;
   }

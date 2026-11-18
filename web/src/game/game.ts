@@ -65,6 +65,7 @@ export interface SaveState {
   /** The one of the party walking alone, if any. */
   solo?: number;
   formation?: Formation;
+  combat?: boolean;
   /** Martian Dreams: the Avatar is dreaming, the party waiting. */
   dream?: unknown;
   moonstones?: [number, number, number][];
@@ -441,7 +442,7 @@ export class Game implements ConvWorld {
       return true;
     }
     const leader = this.party[0].actor;
-    if (this.combat.fighting) this.say('sys', 'Not in combat mode!');
+    if (this.combat.mode) this.say('sys', 'Not in combat mode!');
     else if (this.party.every((m) => m.actor.z === leader.z && Math.max(Math.abs(m.actor.x - leader.x), Math.abs(m.actor.y - leader.y)) <= 6)) {
       this.solo = null;
       this.say('sys', 'Party mode.');
@@ -697,7 +698,7 @@ export class Game implements ConvWorld {
     p.setDirection(facing(dx, dy));
     // Each companion takes the square the one ahead has left - but in a fight, each fights.
     // Alone, the rest stay put; in a fight, each fights.
-    if (!this.combat.fighting && !this.isSolo) this.follow(trail, other);
+    if (!this.combat.mode && !this.isSolo) this.follow(trail, other);
     if (this.kind === 'u6') this.enterGate(nx, ny, p.z);
     this.cost = dx !== 0 && dy !== 0 ? 10 : 5;
     this.endTurn();
@@ -876,7 +877,7 @@ export class Game implements ConvWorld {
   private cost: number | null = null;
 
   private endTurn(): void {
-    if (this.combat.fighting) this.combat.spend(this.player, this.cost ?? 10);
+    if (this.kind !== 'se') this.combat.spend(this.player, this.cost ?? 10);
     this.cost = null;
     this.turns++;
     if (this.turns % 2 === 0) this.advance(1);
@@ -2231,6 +2232,7 @@ export class Game implements ConvWorld {
       wind: this.wind,
       heard: [...this.heard],
       solo: this.isSolo ? this.solo!.id : undefined,
+      combat: this.combat.mode || undefined,
       formation: this.formation,
       dream: this.kind === 'md' ? this.mdUse.saveDream() : undefined,
       moonstones: this.moonstones,
@@ -2254,6 +2256,7 @@ export class Game implements ConvWorld {
     if (s.heard) this.heard = new Set(s.heard);
     if (s.solo !== undefined) this.solo = this.actors.get(s.solo) ?? null;
     if (s.formation) this.formation = s.formation;
+    if (s.combat) this.combat.mode = true;
     if (this.kind === 'md') this.mdUse.loadDream(s.dream);
     this.restCounter = s.rest ?? 0;
     this.kegTurns = s.keg ?? 0;

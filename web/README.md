@@ -26,9 +26,9 @@ is in this repository; the demo world uses the same colours with a plain frame.
 **Music** (Ultima VI) is the game's own: its `.m` songs played by a port of AdPlug's Ultima 6 player (`u6m.cpp`) on
 DOSBox's FM synthesiser compiled to WebAssembly ([@malvineous/opl](https://github.com/Malvineous/opljs)), changing as
 the original's does - a song of the land, the battle song in a fight, the hornpipe aboard ship, the dungeon's below.
-It starts at the first touch, and Menu turns it off and on. **Sound effects** are the PC speaker's, made as the
+It starts at the first touch, and the settings turn it off and on. **Sound effects** are the PC speaker's, made as the
 original made them (Nuvie's `PCSpeakerStream.cpp`): blocked, the swing and hit of a blow, casting by circle, failure,
-Kal Lor, the death dirge, the tremor and the hail; Menu turns them off and on.
+Kal Lor, the death dirge, the tremor and the hail; the settings turn them off and on.
 
 **Night** is a modern take, not the original's black that closes in square by square: a soft blue dusk over the map,
 deeper underground, with smooth pools of light round the party, and warm firelight from lamps, braziers and torches.
@@ -76,8 +76,10 @@ default Avatar. The introduction can be watched first, in motion (below).
 
 Touch: a tap acts, a finger held down walks; a thing within reach can be dragged - onto someone of the party to give it
 to them, or onto a free square nearby to move it. Two fingers pinch the map out to see more (the usual zoom is the
-closest; the Zoom button brings it back). The menu sets the battle speed (each fighter's turn is shown in turn), the
-text size, the paper frame round the map, sounds and music. In a conversation the window holds only the current
+closest; the Zoom button brings it back). The disk (the last button, as in the original) saves, and has the settings:
+the battle speed (each turn in sight shown in turn - slow, normal, fast - or none shown, as the original and Nuvie
+do), the text size, the paper frame round the map, the formation, sounds and music. Journal is at the top. The log
+keeps to its newest line unless scrolled back to read. In a conversation the window holds only the current
 exchange; a Continue comes before the topics, and topics already asked - or leading to an answer already heard - are
 greyed and listed last. The app has its own red ankh icon for the Home Screen.
 
@@ -176,12 +178,21 @@ player's to move on their turn (the map follows them, and the log says whose tur
 daggers land where they were thrown, to be picked up again; a flask of oil bursts into flame; the triple crossbow
 looses three bolts; a wand now and then vanishes. A ship whose hull gives out breaks up, leaving the party on a raft.
 
+**Combat mode** is the player's to begin and break off (the crossed swords beside Attack: Event::toggle_combat), as in
+the original: in it each of the party fights their own way; out of it they follow the leader. Creatures fight
+whether or not, taking their turns by movement points; the button flashes when foes are in sight and the party is not
+in combat mode. Not alone, nor aboard a boat.
+
+People go to bed at night: arrived where their schedule sends them to sleep, they lie in the bed there (or on the
+floor), and get up in the morning (U6Actor::wt_sleep). A mouse - Sherry - goes through mouseholes, bars and
+portcullises (U6Actor::check_move).
+
 **Solo mode**: any one of the party can go on alone (their sheet: "Go on alone as ..."), as Player::set_solo_mode
 has it - the rest stay where they are, and stay out of any fight. Alone, no one may climb ladders, enter a dungeon or
 a moongate, board a boat or rest, and only the Avatar may talk. "Party mode" (in the party list) gathers them again,
 once everyone is within six squares of the leader and no fight is on.
 
-**Formation** (Menu): how the party walks behind its leader, as Party::reform_party lays it out - standard (one
+**Formation** (settings): how the party walks behind its leader, as Party::reform_party lays it out - standard (one
 behind and to the left, then widening rows), column, row, delta (an open triangle), or single file. Each member steps
 towards their place, turned to the way the leader faces, keeping beside someone ahead of them; where no step brings
 them nearer (a doorway, a narrow path) they fall in behind in single file. Kept with the saved game.

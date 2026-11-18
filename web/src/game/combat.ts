@@ -806,8 +806,27 @@ export class Combat {
 
   // ---- turns, by movement points (actor_update_all) ----
 
-  /** Whether the party fights now: foes near (Party::in_combat_mode), worked out once a step. */
+  /**
+   * The party's combat mode (Party::in_combat_mode), begun and broken off by the player: in it each of the party fights
+   * their own way; out of it they follow. Creatures fight whatever the party does.
+   */
+  mode = false;
+  /** The combat mode as it stood at the start of this round of turns. */
   private inFight = false;
+
+  /** Begin combat, or break it off (Event::toggle_combat). Returns whether combat mode is now on. */
+  toggle(): boolean {
+    const g = this.g;
+    if (g.kind === 'se') return false;
+    if (g.isSolo) g.say('sys', 'Not in solo mode.');
+    else if (g.vehicle) g.say('sys', 'Not while aboard!');
+    else {
+      this.mode = !this.mode;
+      g.say('sys', this.mode ? 'Begin combat!' : 'Break off combat!');
+    }
+    g.onChange();
+    return this.mode;
+  }
   /** Turns wait to be taken before the player's next (shown one at a time when paced). */
   waiting = false;
   /** Actions taken since the player's last, against a script that never hands back. */
@@ -843,6 +862,7 @@ export class Combat {
     const p = this.g.player;
     if (!this.standing(a) || a.z !== p.z) return false;
     if (Math.max(Math.abs(a.x - p.x), Math.abs(a.y - p.y)) > 16) return false;
+    if (a === this.g.player) return true;
     return a.inParty ? this.inFight : FIGHTING.has(a.worktype);
   }
 
@@ -853,6 +873,8 @@ export class Combat {
     for (const a of g.actors.list) {
       if (a.z === p.z && a.objN !== 0 && a.alive && Math.max(Math.abs(a.x - p.x), Math.abs(a.y - p.y)) <= 16) {
         this.updateFlags(a);
+        // Those asleep in a fight (a spell, Zu Ylem) may wake; not those abed for the night.
+        if (a.inParty || FIGHTING.has(a.worktype)) this.asleep(a);
         const dex = Math.max(1, a.dex);
         a.moves = a.moves >= 0 ? dex : Math.min(dex, a.moves + dex);
       }
@@ -881,29 +903,13 @@ export class Combat {
     return chosen;
   }
 
-  /** The player has acted: the turns after theirs (all at once, or one at a time when paced). */
+  /** The player has acted: the turns after theirs, by movement points (shown one at a time when paced). */
   round(): void {
     const g = this.g;
     if (g.kind === 'se') return; // Nuvie has no Savage Empire fighting to port
-    this.inFight = this.fighting;
-    if (!this.inFight) {
-      // Out of a fight, those who would fight close in, a step each.
-      this.waiting = false;
-      if (g.controlled) g.controlled = null;
-      const p = g.player;
-      for (const a of g.actors.list) {
-        if (a.z === p.z && a.objN !== 0 && a.alive && Math.max(Math.abs(a.x - p.x), Math.abs(a.y - p.y)) <= 16) this.updateFlags(a);
-      }
-      if (this.timeStop > 0) {
-        this.timeStop--;
-        return;
-      }
-      for (const a of g.actors.list) {
-        if (a.inParty || !this.takesTurns(a) || this.asleep(a) || a.statusFlags & PARALYZED) continue;
-        this.perform(a);
-      }
-      return;
-    }
+    if (this.mode && (g.isSolo || g.vehicle)) this.mode = false;
+    this.inFight = this.mode;
+    if (!this.inFight && g.controlled) g.controlled = null;
     this.spentSteps = 0;
     this.waiting = true;
     if (!this.paced) while (this.waiting) this.nextTurn();

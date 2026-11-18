@@ -223,7 +223,7 @@ export class MdUseCode {
   }
 
   private redBerry(o: Obj, a: Actor): void {
-    if (!this.g.combat.fighting) return this.say('THAT_WOULD_BE_A_WASTE_OUTSIDE_OF_COMBAT');
+    if (!this.g.combat.mode) return this.say('THAT_WOULD_BE_A_WASTE_OUTSIDE_OF_COMBAT');
     if (!this.frenzy.has(a.id)) this.say('ENTERS_A_BATTLE_FRENZY', this.g.partyMemberName(a.id) || 'You');
     this.frenzy.add(a.id);
     this.one(o);
@@ -439,7 +439,7 @@ export class MdUseCode {
         if (thing) return fail('TENT_OBJ_IN_THE_WAY', g.objects.name(thing));
       }
     }
-    if (g.combat.fighting) return fail('NOT_WHILE_IN_COMBAT_MODE');
+    if (g.combat.mode) return fail('NOT_WHILE_IN_COMBAT_MODE');
     const near = (a: Actor, r: number): boolean => a.z === at.z && Math.abs(a.x - at.x) < r && Math.abs(a.y - at.y) < r;
     if (g.combat.foes(40).length) return fail('NOT_WHILE_FOES_ARE_NEAR');
     const npc = g.actors.list.find((a) => a.alive && a.objN && a.visible && !a.inParty && !(a.statusFlags & 0x04) && near(a, 6));
@@ -1151,7 +1151,7 @@ export class MdUseCode {
           }
         }
       }
-      if (this.frenzy.has(a.id) && !g.combat.fighting) this.frenzy.delete(a.id);
+      if (this.frenzy.has(a.id) && !g.combat.mode) this.frenzy.delete(a.id);
     }
   }
 

@@ -49,6 +49,7 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
 
   it.runIf(folder === 'ultima6')('hatches the opening gargoyles, and fights to the death', () => {
     const g = new Game(load());
+    g.combat.mode = true; // the party in combat mode
     const gargoyles = g.actors.list.filter((a) => a.id >= 203 && a.objN === 363);
     expect(gargoyles.length).toBe(3);
     expect(gargoyles.every((a) => g.combat.hostile(a))).toBe(true);
@@ -71,6 +72,7 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
 
   it.runIf(folder === 'ultima6')('takes turns in a fight by movement points, and hands companions under command to the player', () => {
     const g = new Game(load());
+    g.combat.mode = true; // the party in combat mode
     for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
     const p = g.player;
     const troll = g.combat.spawn(371, p.x + 6, p.y, p.z, 0, 8)!;
@@ -109,6 +111,7 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
 
   it.runIf(folder === 'ultima6')('fights a band of trolls with the party in each way of fighting', () => {
     const g = new Game(load());
+    g.combat.mode = true; // the party in combat mode
     for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
     const p = g.player;
     const trolls = [0, 1, 2, 3].map((i) => g.combat.spawn(371, p.x + 5, p.y - 2 + i, p.z, 0, [3, 4, 5, 6][i])!).filter(Boolean);
@@ -233,6 +236,32 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     [sherry.x, sherry.y] = [hole.x + dx, hole.y + dy];
     expect(g.move(-dx, -dy)).toBe(true);
     expect([sherry.x, sherry.y]).toEqual([hole.x, hole.y]);
+  });
+
+  it.runIf(folder === 'ultima6')('begins and breaks off combat at the player\'s word, creatures fighting either way', () => {
+    const g = new Game(load());
+    for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
+    expect(g.combat.mode).toBe(false);
+    const p = g.player;
+    const troll = g.combat.spawn(371, p.x + 2, p.y, p.z, 0, 8)!;
+    // Out of combat mode the companions only follow, but the troll still comes on and strikes.
+    const acts = new Map<number, number>();
+    const c = g.combat as unknown as { perform: (a: { id: number }) => void };
+    const perform = c.perform.bind(g.combat);
+    c.perform = (a: { id: number }) => {
+      acts.set(a.id, (acts.get(a.id) ?? 0) + 1);
+      perform(a);
+    };
+    for (let i = 0; i < 12; i++) g.pass();
+    expect(acts.get(troll.id) ?? 0).toBeGreaterThan(0);
+    expect(g.party.slice(1).every((m) => !acts.has(m.actor.id))).toBe(true);
+    // Begun: the companions fight.
+    expect(g.combat.toggle()).toBe(true);
+    expect(g.log.at(-1)!.text).toBe('Begin combat!');
+    for (let i = 0; i < 6; i++) g.pass();
+    expect(g.party.slice(1).some((m) => acts.has(m.actor.id))).toBe(true);
+    expect(g.combat.toggle()).toBe(false);
+    expect(g.log.at(-1)!.text).toBe('Break off combat!');
   });
 
   it.runIf(folder === 'ultima6')('casts spells from a readied book, using magic points and reagents', () => {
@@ -498,6 +527,7 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
 
   it.runIf(folder === 'martian')('fights by Martian Dreams\' rules: guns, rounds, wounds', () => {
     const g = new Game(load());
+    g.combat.mode = true; // the party in combat mode
     const p = g.player;
     const nellie = g.party.find((m) => m.name === 'Nellie Bly')!.actor;
     const gun = g.objects.inventories[nellie.id].find((o) => o.objN === 41)!;
