@@ -6,6 +6,8 @@
  */
 import type { Game } from '../game/game.ts';
 import { createOpl, type OplChip } from './opl.ts';
+import { Lib } from '../files/lib.ts';
+import { MidiSong } from './midi.ts';
 import { U6Music } from './u6m.ts';
 
 const GROUPS: Record<string, string[]> = {
@@ -22,6 +24,10 @@ export class Music {
   private ctx: AudioContext | null = null;
   private chip: OplChip | null = null;
   private song: U6Music | null = null;
+  /** Martian Dreams' or Savage Empire's song, with its own timing. */
+  private midi: MidiSong | null = null;
+  private midiLeft = 0;
+  private intLeft = 0;
   private group = '';
   private tickLeft = 0;
   private gain: GainNode | null = null;
@@ -42,7 +48,36 @@ export class Music {
 
   /** Whether this copy has music (Ultima 6 does). */
   get available(): boolean {
-    return this.game.kind === 'u6' && this.game.files.has('brit.m');
+    const f = this.game.files;
+    if (this.game.kind === 'u6') return f.has('brit.m');
+    return f.has('music.lzc') && f.has(this.game.kind === 'md' ? 'md.tim' : 'savage.tim');
+  }
+
+  /**
+   * The other two games' songs (music.lzc, by number): Nuvie never chose among them in play, so the land's music is any
+   * of the longer ones, a new one when each ends.
+   */
+  private playMidi(group: string): void {
+    const g = this.game;
+    const tim = new Lib(g.files.get(g.kind === 'md' ? 'md.tim' : 'savage.tim')!, 4, true).item(1);
+    if (!tim || !this.chip) return;
+    let data: Uint8Array | null = null;
+    if (group === 'end' && g.kind === 'md') data = new Lib(g.files.get('mdd_mus.lzc') ?? new Uint8Array(), 4, true).item(11);
+    if (!data) {
+      const lib = new Lib(g.files.get('music.lzc')!, 4, true);
+      const songs: Uint8Array[] = [];
+      for (let i = 0; i < 32; i++) {
+        const it = lib.item(i);
+        if (it && it.length > 4000 && it[0] === 0x4d) songs.push(it);
+      }
+      data = songs[Math.floor(Math.random() * songs.length)] ?? null;
+    }
+    if (!data) return;
+    this.group = group;
+    this.song = null;
+    this.midi = new MidiSong(data, this.chip, tim);
+    this.midiLeft = 0;
+    this.intLeft = 0;
   }
 
   /** The page's sound, made at the first touch (browsers allow it only then); effects play through it too. */
@@ -89,6 +124,7 @@ export class Music {
   private wanted(): string {
     const g = this.game;
     if (this.theme) return this.theme;
+    if (g.kind !== 'u6') return 'random';
     if (g.vehicle) return 'boat';
     if (g.combat.fighting) return 'combat';
     const z = g.player.z;
@@ -103,6 +139,7 @@ export class Music {
   }
 
   private play(group: string): void {
+    if (this.game.kind !== 'u6') return this.playMidi(group);
     const names = GROUPS[group];
     const name = names[Math.floor(Math.random() * names.length)];
     const file = this.game.files.get(name);
@@ -112,10 +149,42 @@ export class Music {
     this.tickLeft = 0;
   }
 
+  /** A MIDI song: its events when they fall due, and the driver's 60-a-second slides and vibrato between. */
+  private fillMidi(L: Float32Array, R: Float32Array, rate: number): void {
+    const chip = this.chip!;
+    const song = this.midi!;
+    for (let i = 0; i < L.length; ) {
+      if (this.midiLeft <= 0) {
+        if (!song.update()) {
+          // The song ends: another (a theme starts again).
+          if (this.group === 'random') this.playMidi('random');
+          else song.rewind();
+          return this.fillMidi(L.subarray(i), R.subarray(i), rate);
+        }
+        this.midiLeft += rate / song.refresh;
+      }
+      if (this.intLeft <= 0) {
+        song.interrupt();
+        this.intLeft += rate / 60;
+      }
+      // The chip makes at least two samples a call: a shorter wait runs a sample long.
+      const n = Math.min(L.length - i, Math.max(2, Math.min(512, Math.ceil(this.midiLeft), Math.ceil(this.intLeft))));
+      const s = chip.generate(Math.max(2, n));
+      for (let k = 0; k < n; k++) {
+        L[i + k] = s[k * 2] / 32768;
+        R[i + k] = s[k * 2 + 1] / 32768;
+      }
+      i += n;
+      this.midiLeft -= n;
+      this.intLeft -= n;
+    }
+  }
+
   private fill(out: AudioBuffer): void {
     const L = out.getChannelData(0);
     const R = out.getChannelData(1);
     const chip = this.chip;
+    if (chip && this.midi) return this.fillMidi(L, R, out.sampleRate);
     if (!chip || !this.song) {
       L.fill(0);
       R.fill(0);

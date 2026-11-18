@@ -209,8 +209,12 @@ Great creatures take more than one square: ships, dragons (head, wings and tail)
 two-square beasts, and the silver serpent, whose long body follows its head square by square and never turns back
 over its neck (U6Actor's surrounding objects).
 
-Not ported yet: the animated intro and ending pictures; Martian Dreams' and Savage Empire's music (Nuvie has none),
-the rest of their usecode, and Savage Empire's fighting (Nuvie has none to port).
+Martian Dreams and Savage Empire have their music too (midi.ts): their MIDI songs (music.lzc) through a port of
+Nuvie's OriginFXAdLibDriver with the games' own instruments (md.tim, savage.tim) - one of the longer songs at a time,
+another when it ends, since Nuvie never chose among them in play.
+
+Not ported yet: the animated intro and ending pictures;
+the rest of Martian Dreams' and Savage Empire's usecode, and Savage Empire's fighting (Nuvie has none to port).
 
 `tests/real.test.ts` runs on your copies put in `web/gamedata/ultima6/`, `savage/` and `martian/` (git-ignored).
 For each it loads a new game, saves and restores it, and talks with everyone who has a conversation (199 people in
