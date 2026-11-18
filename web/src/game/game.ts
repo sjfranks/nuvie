@@ -1248,7 +1248,40 @@ export class Game implements ConvWorld {
   // ---- getting and dropping ----
 
   /** Pick up what is on a square, or take `o` from an opened container; it goes to whoever has room. */
-  get(x: number, y: number, o: Obj | null = null): void {
+  /** Whether a thing on the map can be taken up and dragged: within reach, not fixed in place. */
+  canDrag(o: Obj): boolean {
+    const p = this.player;
+    return o.loc === 'map' && !(o.status & 0x02) && o.z === p.z && Math.max(Math.abs(o.x - p.x), Math.abs(o.y - p.y)) <= 1 &&
+      !this.objects.isDoor(o) && this.objects.weightOf(o) > 0 && !this.vehicle;
+  }
+
+  /**
+   * Set a dragged thing down (the original's Move): on someone of the party, it is theirs (as Get); else on a free
+   * square near enough to throw it to, in plain sight.
+   */
+  dragTo(o: Obj, x: number, y: number): void {
+    const p = this.player;
+    const who = this.actors.at(x, y, p.z);
+    if (who && who.inParty) return this.get(o.x, o.y, o, who);
+    if (x === o.x && y === o.y) return;
+    if (who || Math.max(Math.abs(x - p.x), Math.abs(y - p.y)) > 3 || !this.combat.clearLine(p.x, p.y, x, y, p.z) ||
+      !this.map.isPassable(x, y, p.z)) {
+      this.say('sys', 'Blocked.');
+      this.sfx('blocked');
+      this.onChange();
+      return;
+    }
+    if (!(o.status & STATUS_OK_TO_TAKE) && this.objects.weightOf(o) < 25.5 && this.objects.tileOf(o).passable) {
+      // Moving what is not yours is as taking it.
+      this.karma = Math.max(0, this.karma - 1);
+      o.status |= STATUS_OK_TO_TAKE;
+    }
+    this.objects.move(o, x, y, p.z);
+    this.say('sys', `Move ${this.objects.look(o)}.`);
+    this.endTurn();
+  }
+
+  get(x: number, y: number, o: Obj | null = null, to: Actor | null = null): void {
     const p = this.player;
     o ??= this.objects.get(x, y, p.z);
     if (!o || o.status & 0x02) {
@@ -1263,7 +1296,7 @@ export class Game implements ConvWorld {
       this.onChange();
       return;
     }
-    const taker = this.party.find((m) => this.invRoom(m.actor.id) >= w);
+    const taker = to ? (this.invRoom(to.id) >= w ? this.party.find((m) => m.actor === to) : undefined) : this.party.find((m) => this.invRoom(m.actor.id) >= w);
     if (!taker) {
       this.say('sys', `Get ${this.objects.look(o)}: too heavy for anyone to carry.`);
       this.onChange();
@@ -1275,7 +1308,7 @@ export class Game implements ConvWorld {
       this.karma = Math.max(0, this.karma - 1);
       o.status |= STATUS_OK_TO_TAKE;
       this.say('sys', `Get ${what}. Stealing!`);
-    } else this.say('sys', `Get ${what}.`);
+    } else this.say('sys', to ? `${taker.name} takes ${what}.` : `Get ${what}.`);
     // A moonstone taken from the ground no longer holds a moongate (U6UseCode::use_moonstone).
     if (o.objN === 73 && o.loc === 'map' && this.kind === 'u6') {
       this.moonstones[o.frameN & 7] = [0, 0, 0];

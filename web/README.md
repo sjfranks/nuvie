@@ -73,6 +73,14 @@ default Avatar. The animated intro itself (the lounge, the stones, the moongate)
   and book read.
 - The game saves itself as you play. A keyboard works too: arrows walk, space passes, L/T/U/G choose a command.
 
+
+Touch: a tap acts, a finger held down walks; a thing within reach can be dragged - onto someone of the party to give it
+to them, or onto a free square nearby to move it. Two fingers pinch the map out to see more (the usual zoom is the
+closest; the Zoom button brings it back). The menu sets the battle speed (each fighter's turn is shown in turn), the
+text size, the paper frame round the map, sounds and music. In a conversation the window holds only the current
+exchange; a Continue comes before the topics, and topics already asked - or leading to an answer already heard - are
+greyed and listed last. The app has its own red ankh icon for the Home Screen.
+
 ## What is ported, and what is not
 
 Ported from the C++ (each file's header names its source):

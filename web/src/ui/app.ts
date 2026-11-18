@@ -137,7 +137,10 @@ export class App {
       const r = canvas.getBoundingClientRect();
       return this.view.squareAt(e.clientX - r.left, e.clientY - r.top);
     };
-    let down: { id: number; sq: { x: number; y: number }; holding: boolean; timer: number } | null = null;
+    let down: {
+      id: number; sq: { x: number; y: number }; holding: boolean; timer: number;
+      from: { x: number; y: number }; carry: Obj | null; ghost: HTMLCanvasElement | null;
+    } | null = null;
     // Two fingers pinch the map: apart to come back in (never closer than the default), together to see more.
     const fingers = new Map<number, { x: number; y: number }>();
     let pinch: { dist: number; extra: number } | null = null;
@@ -175,7 +178,10 @@ export class App {
       if (fingers.size > 1) return;
       canvas.setPointerCapture(e.pointerId);
       const sq = at(e);
-      down = { id: e.pointerId, sq, holding: false, timer: 0 };
+      // A thing within reach may be dragged: a finger that moves off it carries it.
+      const g = this.game;
+      const top = !g.converse && !this.mode ? [...(g.objects.list(sq.x, sq.y, g.player.z) ?? [])].reverse().find((o) => g.canDrag(o)) : undefined;
+      down = { id: e.pointerId, sq, holding: false, timer: 0, from: { x: e.clientX, y: e.clientY }, carry: top ?? null, ghost: null };
       const d = down;
       d.timer = window.setTimeout(() => {
         // Held: walking, not a tap - unless a command waits on a square, or someone is talking.
@@ -185,13 +191,31 @@ export class App {
       }, 280);
     });
     canvas.addEventListener('pointermove', (e) => {
-      if (down && e.pointerId === down.id) down.sq = at(e);
+      if (!down || e.pointerId !== down.id) return;
+      down.sq = at(e);
+      const d = down;
+      if (d.carry && !d.holding && !d.ghost && Math.hypot(e.clientX - d.from.x, e.clientY - d.from.y) > 14) {
+        // Dragging, not walking: the thing follows the finger.
+        clearTimeout(d.timer);
+        d.ghost = this.view.tileImage(this.game.objects.tileNum(d.carry));
+        d.ghost.className = 'dragghost';
+        document.body.append(d.ghost);
+      }
+      if (d.ghost) {
+        d.ghost.style.left = `${e.clientX}px`;
+        d.ghost.style.top = `${e.clientY}px`;
+      }
     });
     const up = (e: PointerEvent): void => {
       if (!down || e.pointerId !== down.id) return;
       const d = down;
       down = null;
       clearTimeout(d.timer);
+      if (d.ghost) {
+        d.ghost.remove();
+        if (e.type === 'pointerup' && d.carry && !this.busy) this.game.dragTo(d.carry, d.sq.x, d.sq.y);
+        return;
+      }
       if (!d.holding && e.type === 'pointerup') this.tap(d.sq);
       if (d.holding) {
         this.walk = null;
