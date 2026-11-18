@@ -38,6 +38,15 @@ export interface Frame {
   rot?: [number, number, number];
   /** A palette of the scene's own (turned or changed as its script does), in place of the one it began with. */
   pal?: Uint8Array;
+  /** Words shown with the frame, and their colour in the palette (a text sprite). */
+  text?: string;
+  textColor?: number;
+}
+
+/** What a scene tells whoever shows it: its words as they change, and its end. */
+export interface Hooks {
+  text?: (text: string, rgb: [number, number, number]) => void;
+  end?: () => void;
 }
 
 /** A scene: its frames, made on demand in order, and how many (Infinity for one that goes on); after the last it holds, or begins again. */
@@ -64,7 +73,7 @@ export function fromGen(gen: Generator<Frame>): Scene {
 }
 
 /** Play a scene on a new canvas; stop() ends it (the canvas keeps its last frame). Null where the files lack it. */
-export function play(files: GameFiles, palette: [string, number], scene: Scene): { canvas: HTMLCanvasElement; stop: () => void } | null {
+export function play(files: GameFiles, palette: [string, number], scene: Scene, hooks: Hooks = {}): { canvas: HTMLCanvasElement; stop: () => void } | null {
   const base = loadPalette(files, palette[0], palette[1]);
   if (!base) return null;
   const libs = new Map<string, Shape[][]>();
@@ -133,15 +142,25 @@ export function play(files: GameFiles, palette: [string, number], scene: Scene):
   };
   let i = 0;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let said = '';
   const step = (): void => {
     const f = scene.frame(i);
     draw(f);
+    if (hooks.text && f.text !== undefined) {
+      const c = f.textColor ?? 15;
+      const key = `${c}:${f.text}`;
+      if (key !== said) {
+        said = key;
+        hooks.text(f.text, [pal[c * 3], pal[c * 3 + 1], pal[c * 3 + 2]]);
+      }
+    }
     i++;
     if (i >= scene.frames) {
-      if (!scene.loop) return;
+      if (!scene.loop) return hooks.end?.();
       i = 0;
     }
     if (f.ms < 1e9) timer = setTimeout(step, f.ms);
+    else hooks.end?.();
   };
   step();
   return {

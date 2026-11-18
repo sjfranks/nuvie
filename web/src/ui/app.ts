@@ -17,7 +17,9 @@ import { endingPicture, stillPicture } from './endings.ts';
 import { mdEndingScene } from './mdending.ts';
 import { u6EndingScene } from './u6ending.ts';
 import { u6IntroScene } from './u6intro.ts';
-import { loadMidgame, shapeRgba } from '../files/cutscene.ts';
+import { mdIntroScene } from './mdintro.ts';
+import { seTitleScene } from './seintro.ts';
+import { loadImages, loadMidgame, shapeRgba } from '../files/cutscene.ts';
 import type { Shape } from '../files/shape.ts';
 import { INTRO_U6 } from './intro6.ts';
 import { Gypsy } from './gypsy.ts';
@@ -452,6 +454,35 @@ export class App {
         body.append(row);
       });
     };
+    // The introduction in motion, on its own clock as run_introduction plays it, the words beneath; or page by page where it cannot play.
+    const film = (): void => {
+      let moving: ReturnType<typeof play> = null;
+      const done = (): void => {
+        moving?.stop();
+        this.onClose = null;
+        show(it.next(''));
+      };
+      this.open('Martian Dreams', (body) => {
+        const caption = el('p', 'caption');
+        const row = el('div', 'row');
+        const skip = btn('Skip', done);
+        moving = play(g.files, ['md_title.pal', 0], mdIntroScene((n) => g.sceneText('scenetxt.lzc', n), () => loadImages(g.files, 'scene2.lzc')[0]?.[0] ?? null), {
+          text: (t, [r, gr, b]) => {
+            caption.textContent = t;
+            caption.style.color = `rgb(${r},${gr},${b})`;
+          },
+          end: () => {
+            skip.textContent = 'Continue';
+            skip.classList.add('primary');
+          },
+        });
+        if (!moving) return introPage(0);
+        moving.canvas.className = 'scene';
+        row.append(skip);
+        body.append(moving.canvas, caption, row);
+      });
+      this.onClose = () => moving?.stop();
+    };
     const show = (r: IteratorResult<Step, Hero>): void => {
       if (r.done) {
         g.createHero({ ...r.value, face: 0 });
@@ -488,7 +519,7 @@ export class App {
       this.open('Martian Dreams', (body) => {
         body.append(el('p', '', 'A new Avatar: the introduction, then Freud\'s questions.'));
         const row = el('div', 'row');
-        row.append(btn('Skip the introduction', () => show(it.next(''))), btn('Watch the introduction', () => introPage(0), 'primary'));
+        row.append(btn('Skip the introduction', () => show(it.next(''))), btn('Watch the introduction', () => film(), 'primary'));
         body.append(row);
       });
     } else show(it.next(''));
@@ -559,11 +590,33 @@ export class App {
         body.append(row);
       });
     };
+    // The title first, in motion as intro_sequence plays it (where intro.lzc is there).
+    const title = (): void => {
+      let moving: ReturnType<typeof play> = null;
+      const next = (): void => {
+        moving?.stop();
+        this.onClose = null;
+        story(0);
+      };
+      this.open('The Savage Empire', (body) => {
+        const row = el('div', 'row');
+        const go = btn('Skip', next);
+        moving = g.files.has('intro.lzc') ? play(g.files, ['savage.pal', 0], seTitleScene(), { end: () => {
+          go.textContent = 'Continue';
+          go.classList.add('primary');
+        } }) : null;
+        if (!moving) return story(0);
+        moving.canvas.className = 'scene';
+        row.append(go);
+        body.append(moving.canvas, row);
+      });
+      this.onClose = () => moving?.stop();
+    };
     if (g.files.has('create.lzc')) {
       this.open('The Savage Empire', (body) => {
         body.append(el('p', '', 'A new Avatar: the story so far, then Intanya\'s questions.'));
         const row = el('div', 'row');
-        row.append(btn('Skip the story', begin), btn('The story so far', () => story(0), 'primary'));
+        row.append(btn('Skip the story', begin), btn('The story so far', () => title(), 'primary'));
         body.append(row);
       });
     } else begin();

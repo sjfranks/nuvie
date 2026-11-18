@@ -3,6 +3,8 @@ import { mdEndingScene } from '../src/ui/mdending.ts';
 import { u6EndingScene } from '../src/ui/u6ending.ts';
 import { u6IntroScene } from '../src/ui/u6intro.ts';
 import { INTRO_U6 } from '../src/ui/intro6.ts';
+import { mdIntroScene } from '../src/ui/mdintro.ts';
+import { seTitleScene } from '../src/ui/seintro.ts';
 
 describe('the endings in motion', () => {
   it('plays every page of Ultima VI\'s ending, each from where the last left off', () => {
@@ -45,5 +47,23 @@ describe('the endings in motion', () => {
     };
     expect(at(19, 10).sprites.some((s) => s.lib === 'intro.shp' && s.grp === 12)).toBe(true);
     expect(at(29, 400).sprites.some((s) => s.lib === 'intro.shp' && s.grp === 0)).toBe(true);
+  });
+
+  it('plays Martian Dreams\' introduction and Savage Empire\'s title through to their ends', () => {
+    const lines = (n: number) => Array.from({ length: 30 }, (_, i) => `line ${n}.${i}`);
+    for (const scene of [mdIntroScene(lines, () => null), seTitleScene()]) {
+      let ms = 0;
+      let f = scene.frame(0);
+      const said = new Set<string>();
+      for (let i = 1; i < 5000 && f.ms < 1e9; i++) {
+        ms += f.ms;
+        if (f.text) said.add(f.text);
+        f = scene.frame(i);
+      }
+      // Each ends, after a minute or few.
+      expect(f.ms).toBeGreaterThanOrEqual(1e9);
+      expect(ms).toBeGreaterThan(60_000);
+      if (scene !== undefined && said.size) expect(said.has('line 2.26')).toBe(true);
+    }
   });
 });

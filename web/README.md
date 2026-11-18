@@ -243,11 +243,15 @@ among the stones, and the doors opening on it; the stones, the hand and the obsi
 quivering and the Avatar walking into it; then the altar, the gargoyles closing in and swaying, the priest and his
 dagger, the gate in the dark, the rescue and the gate sinking. Each page goes on until Continue.
 
-Martian Dreams offers its introduction before Freud (Spector's study, Tesla's lab now and in 1895: scenetxt.lzc's
-dialogue over scene1/3/4a.lzc), and Savage Empire its story so far before Intanya (ten pictures from create.lzc).
+Martian Dreams offers its introduction before Freud, in motion as run_introduction plays it (mdintro.ts): one film
+on its own clock, scenetxt.lzc's words changing beneath it in each speaker's colour - Spector's study and the
+letter, the crosshairs marching across the map, the hike, Spector's lab with the moongate rising and the two
+stepping through, and Tesla's lab in 1895 with its sparks, Freud's blood, Mr Garrett and Nellie. Savage Empire offers
+its title in motion (seintro.ts: the two logos, the title rising over the jungle, the jungle sliding by in three
+layers under the credits), then its story so far before Intanya (ten pictures from create.lzc, still as its script
+has them).
 
-Not ported yet: the animation of Martian Dreams' and Savage Empire's introductions (shown as stills);
-the rest of Martian Dreams' and Savage Empire's usecode, and Savage Empire's fighting (Nuvie has none to port).
+Not ported yet: the rest of Martian Dreams' and Savage Empire's usecode, and Savage Empire's fighting (Nuvie has none to port).
 
 `tests/real.test.ts` runs on your copies put in `web/gamedata/ultima6/`, `savage/` and `martian/` (git-ignored).
 For each it loads a new game, saves and restores it, and talks with everyone who has a conversation (199 people in
