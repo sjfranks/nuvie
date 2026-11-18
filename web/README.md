@@ -194,6 +194,10 @@ has the quest; the gargish vocabulary teaches gargish; the vortex cube, at the C
 moonstones, ends the game: ending.lua's scenes told in its own words over the ending music, and how long the
 quest took. The crystal ball shows a far place, a spellbook opens the spell list, cannons fire down
 the way they face, and a lit powder keg blows up after a few turns (doors, kegs and anyone near).
+Magic things: a readied staff lets loose the spell charged into it (aim it if the spell needs aiming); an
+invisibility ring hides whoever wears it; the storm cloak brings a rain that stills all magic for a while; the
+amulet of submission will not come off once worn; and a fountain grants a wish, now and then, if the wish is for
+food, mutton, wine, fruit or mead. Looking at a holy brazier names its flame: truth, love or courage.
 
 **Rest** (the moon button): pass a turn, or camp 1-8 hours - not in towns, near foes or others, or on horseback.
 Each member eats a meal if the party has food, and those fed heal, once in twelve hours. On a ship the crew mends

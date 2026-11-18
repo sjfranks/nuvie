@@ -930,6 +930,11 @@ export class Game implements ConvWorld {
       text = m ? m.name : a.met ? this.cleanName(this.lib.name(this.lib.scriptNum(a))) || this.tiles.look(this.objects.objToTile[a.objN], 0) : this.tiles.look(this.objects.objToTile[a.objN], 0);
     } else if (o && !(o.status & 0x02)) text = this.objects.look(o);
     else text = this.tiles.look(this.map.tileNum(x, y, p.z), 0);
+    // A holy brazier is named for the virtue it burns for (holy_flame).
+    if (!a && o && this.kind === 'u6' && o.objN === 206 && o.quality >= 1 && o.quality <= 3) {
+      this.say('sys', `The flame of ${['truth', 'love', 'courage'][o.quality - 1]}.`);
+      return this.onChange();
+    }
     this.say('sys', `Thou dost see ${text}.`);
     if (o && !a && READABLE.has(o.objN)) this.read(o);
     this.onChange();
@@ -1232,6 +1237,10 @@ export class Game implements ConvWorld {
     } else if (READABLE.has(o.objN)) {
       this.say('sys', `Reading ${this.objects.look(o)}:`);
       this.read(o);
+    } else if (o.objN === 78 && this.kind === 'u6') {
+      // A staff is used, not searched: it holds its charges (use_staff).
+      this.usecode.use(o);
+      return;
     } else if (o.container && o.objN !== OBJ.EGG) {
       if (o.objN === OBJ.CHEST && o.frameN >= 2) this.say('sys', o.frameN === 3 ? 'Magically locked.' : 'Locked.');
       else {
@@ -1752,6 +1761,7 @@ export class Game implements ConvWorld {
     }
     item.loc = 'readied';
     this.say('sys', `${this.partyMemberName(a.id) || 'They'} readied ${what}.`);
+    if (this.kind === 'u6') this.u6Worn(item, a, true);
     this.onChange();
     return true;
   }
@@ -1759,9 +1769,29 @@ export class Game implements ConvWorld {
   unready(o: Obj): void {
     if (o.loc !== 'readied') return;
     if (this.kind === 'md' && !this.mdUse.ready(o, this.actors.get(o.holder) ?? this.player, false)) return this.onChange();
+    // The amulet of submission will not come off (amulet_of_submission).
+    if (this.kind === 'u6' && o.objN === 76) {
+      this.say('sys', 'Magical energy prevents you from removing the amulet.');
+      return this.onChange();
+    }
     o.loc = 'inv';
     this.say('sys', `Unreadied ${this.objects.look(o)}.`);
+    if (this.kind === 'u6') this.u6Worn(o, this.actors.get(o.holder) ?? this.player, false);
     this.onChange();
+  }
+
+  /**
+   * What putting on or taking off a magic thing does in Ultima VI: an invisibility ring hides its wearer while one is
+   * worn (magic_ring), and the storm cloak stills magic about the party while worn (storm_cloak's TIMER_U6_STORM).
+   */
+  private u6Worn(o: Obj, a: Actor, on: boolean): void {
+    if (o.objN === 258) {
+      const worn = this.objects.inventories[a.id].some((r) => r.loc === 'readied' && r.objN === 258);
+      if (worn) a.objFlags |= 0x02;
+      else a.objFlags &= ~0x02;
+    } else if (o.objN === 81) {
+      this.stormTurns = on ? 20 : 0;
+    }
   }
 
   /** Hand something to another member of the party. */

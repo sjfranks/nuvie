@@ -151,6 +151,11 @@ export class Magic {
    * A spell cast without book, points or reagents: a monster's charge in a fight (actor_attack with a charge), or a
    * staff's. Spell 128 is the monsters' own invisibility.
    */
+  /** What a spell is aimed at: nothing, a square, a thing or someone. */
+  aimOf(num: number): Aim | undefined {
+    return CASTS.get(num)?.aim;
+  }
+
   castAs(a: Actor, num: number, x: number, y: number): void {
     const g = this.g;
     const near = a.z === g.player.z && Math.max(Math.abs(a.x - g.player.x), Math.abs(a.y - g.player.y)) <= 10;

@@ -35,6 +35,8 @@ export const USED_IN_PLACE: ReadonlySet<number> = new Set([
 ]);
 
 const MOONSTONE = 73;
+const STAFF = 78;
+const CHARGE = 336;
 const RUNE_FIRST = 242;
 const RUNE_LAST = 249;
 /** The mantras, rune by rune (use_rune). */
@@ -61,7 +63,7 @@ export class UseCode {
       (USED_IN_PLACE.has(o.objN) || FOODS.has(o.objN) || o.objN in INSTRUMENTS ||
         (o.objN >= RUNE_FIRST && o.objN <= RUNE_LAST) ||
         [OBJ.KEY, OBJ.LOCK_PICK, U.FISHING_POLE, U.SHOVEL, U.PICK, U.POTION, U.SEXTANT, U.FAN, U.RUBBER_DUCKY, U.GEM,
-          BALLOON_PLANS, MOONSTONE, GARGISH_VOCABULARY, VORTEX_CUBE, CRYSTAL_BALL, SPELLBOOK, CANNON, POWDER_KEG].includes(o.objN as never))
+          BALLOON_PLANS, STAFF, MOONSTONE, GARGISH_VOCABULARY, VORTEX_CUBE, CRYSTAL_BALL, SPELLBOOK, CANNON, POWDER_KEG].includes(o.objN as never))
     );
   }
 
@@ -90,8 +92,7 @@ export class UseCode {
       case U.WELL:
         return this.fill(U.BUCKET_OF_WATER);
       case U.FOUNTAIN:
-        g.say('sys', 'You drink from the fountain. It is cool and fresh.');
-        return this.done();
+        return this.wish();
       case U.CHURN:
         return this.swap(U.BUCKET_OF_MILK, U.BUCKET, 'You need some milk.', 'You need some milk.', U.BUTTER);
       case U.BEEHIVE:
@@ -140,6 +141,8 @@ export class UseCode {
     switch (o.objN) {
       case MOONSTONE:
         return this.bury(o);
+      case STAFF:
+        return this.staff(o);
       case GARGISH_VOCABULARY:
         g.gargFlag = 1;
         g.say('sys', 'You study the scroll!');
@@ -170,6 +173,56 @@ export class UseCode {
     if (FOODS.has(o.objN)) return this.eat(o);
     g.say('sys', 'Not usable.');
     this.done();
+  }
+
+  /** A fountain grants a wish, now and then, if the wish is for something to eat (use_fountain). */
+  private wish(): void {
+    const g = this.g;
+    const who = g.player;
+    g.askChoice = { label: 'Make a wish?', options: ['Yes', 'No'], then: (i) => {
+      g.askChoice = null;
+      if (i !== 0) return this.done();
+      g.askText = { label: 'Wish for:', then: (text) => {
+        g.askText = null;
+        const w = text.trim().toLowerCase();
+        if (!['food', 'mutton', 'wine', 'fruit', 'mead'].includes(w)) g.say('sys', 'Failed');
+        else if (Math.floor(Math.random() * 4) !== 0) g.say('sys', 'No effect');
+        else {
+          const food = g.objects.create(U.MEAT_PORTION, 1, 0);
+          if (g.invRoom(who.id) < g.objects.weightOf(food)) g.say('sys', "You got food, but you can't carry it.");
+          else {
+            g.objects.toInventory(food, who.id);
+            g.say('sys', 'You got food.');
+          }
+        }
+        this.done();
+      } };
+      g.onChange();
+    } };
+    g.onChange();
+  }
+
+  /** A readied staff lets loose the spell charged into it (use_staff). */
+  private staff(o: Obj): void {
+    const g = this.g;
+    if (o.loc !== 'readied') {
+      g.say('sys', 'Not readied.');
+      return this.done();
+    }
+    const charge = o.container?.find((k) => k.objN === CHARGE);
+    if (!charge) {
+      g.say('sys', 'No effect.');
+      return this.done();
+    }
+    const who = g.actors.get(o.holder) ?? g.player;
+    const fire = (x: number, y: number): void => {
+      o.container!.splice(o.container!.indexOf(charge), 1);
+      g.magic.castAs(who, charge.quality, x, y);
+      this.done();
+    };
+    const aim = g.magic.aimOf(charge.quality);
+    if (!aim || aim === 'none') fire(who.x, who.y);
+    else this.ask('Staff: tap where the spell goes', fire);
   }
 
   private done(): void {

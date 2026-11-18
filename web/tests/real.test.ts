@@ -237,6 +237,57 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     expect(g.objects.all().some((o) => o.objN === 420 && Math.abs(o.x - p.x) <= 1 && Math.abs(o.y - p.y) <= 1)).toBe(true);
   });
 
+  it.runIf(folder === 'ultima6')('wears magic things, fires a charged staff, and wishes at a fountain', () => {
+    const g = new Game(load());
+    for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
+    const p = g.player;
+    const give = (n: number, q = 0) => {
+      const o = g.objects.create(n, 1, q);
+      g.objects.toInventory(o, p.id);
+      return o;
+    };
+    // The amulet of submission will not come off.
+    const amulet = give(76);
+    expect(g.ready(amulet, p)).toBe(true);
+    g.unready(amulet);
+    expect(amulet.loc).toBe('readied');
+    // An invisibility ring hides its wearer while worn.
+    const ring = give(258);
+    g.ready(ring, p);
+    expect(p.objFlags & 2).toBe(2);
+    g.unready(ring);
+    expect(p.objFlags & 2).toBe(0);
+    // The storm cloak stills magic.
+    const cloak = give(81);
+    for (const r of g.objects.inventories[p.id]) if (r.loc === 'readied' && g.readySlot(r) === g.readySlot(cloak)) g.unready(r);
+    g.ready(cloak, p);
+    expect(g.stormTurns).toBe(20);
+    g.unready(cloak);
+    expect(g.stormTurns).toBe(0);
+    // A staff charged with Light lets it loose.
+    for (const r of g.objects.inventories[p.id]) if (r.loc === 'readied' && (g.readySlot(r) === 3 || g.readySlot(r) === 4)) g.unready(r);
+    const staff = give(78);
+    staff.container = [g.objects.create(336, 1, 9)];
+    g.useObj(staff);
+    expect(g.log.at(-1)!.text).toBe('Not readied.');
+    g.ready(staff, p);
+    const light = g.lightTurns;
+    g.useObj(staff);
+    expect(staff.container.length).toBe(0);
+    expect(g.lightTurns).toBeGreaterThan(light);
+    // A fountain grants food, now and then.
+    const fountain = g.objects.create(234, 1, 0);
+    const before = g.objects.inventories[p.id].filter((o) => o.objN === 129).length;
+    let got = 0;
+    for (let i = 0; i < 40; i++) {
+      g.usecode.use(fountain);
+      g.askChoice!.then(0);
+      g.askText!.then('mutton');
+      got = g.objects.inventories[p.id].filter((o) => o.objN === 129).length - before;
+    }
+    expect(got).toBeGreaterThan(0);
+  });
+
   it.runIf(folder === 'ultima6')('draws a silver serpent whole, its body following its head', () => {
     const g = new Game(load());
     const s = g.combat.spawn(413, 0x133 + 40, 0x160 + 40, 0, 2, 0)!;

@@ -466,6 +466,20 @@ export class MapView {
       c.fillStyle = `rgba(255,150,60,${glow * 0.09})`;
       c.fillRect(0, 0, W, H);
     }
+    // A storm (the storm cloak) rains on the map (MapWindow::drawRain).
+    if (this.game.kind === 'u6' && this.game.stormTurns > 0) {
+      c.globalCompositeOperation = 'source-over';
+      c.strokeStyle = 'rgba(170,190,230,0.55)';
+      c.lineWidth = Math.max(1, LP / 16);
+      c.beginPath();
+      for (let i = 0, n = (W * H) / (LP * LP) * 1.5; i < n; i++) {
+        const x = Math.random() * W;
+        const y = Math.random() * H;
+        c.moveTo(x, y);
+        c.lineTo(x - LP * 0.12, y + LP * 0.4);
+      }
+      c.stroke();
+    }
   }
 
   /** Shots in flight and blows landing (combat.ts), drawn into the picture; returns blows with no tile to show them. */
