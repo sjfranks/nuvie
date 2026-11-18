@@ -62,8 +62,9 @@ button:disabled { opacity: .45; }
 .tabs button.news::after { content: ''; position: absolute; top: 4px; right: 4px; width: 6px; height: 6px; background: var(--key); }
 
 /* The pane's one row is the room left, never its content's height: what does not fit scrolls inside it. */
-.pane { flex: 1 1 0; min-height: calc(3 * var(--lh) + 2 * var(--edge) + 4px); display: flex; flex-direction: column; overflow: hidden; }
-.panebody { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 2px 4px; }
+.pane { position: relative; flex: 1 1 0; min-height: calc(3 * var(--lh) + 2 * var(--edge) + 4px); display: flex; flex-direction: column; overflow: hidden; }
+.panebody { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 2px 12px 2px 4px; scrollbar-width: none; }
+.panebody::-webkit-scrollbar { display: none; }
 
 .log p { margin: 0 0 var(--lh); white-space: pre-wrap; overflow-wrap: anywhere; }
 .log p:last-child { margin-bottom: 0; }
@@ -159,3 +160,8 @@ label.field input { min-height: 40px; border: 2px solid #000; border-radius: 3px
 .answers button { text-align: left; padding: 8px; min-height: 44px; white-space: normal; }
 .sheet p.speech { color: var(--key); }
 .answers.row { flex-direction: row; }
+
+.scrolltrack { position: absolute; right: 3px; top: var(--edge, 8px); bottom: var(--edge, 8px); width: 5px; border-radius: 3px; background: color-mix(in srgb, var(--muted) 30%, transparent); pointer-events: none; }
+.scrolltrack i { position: absolute; left: 0; right: 0; border-radius: 3px; background: var(--burn); }
+.member { box-sizing: border-box; min-height: 40px; }
+.opts button.heard { background: #d8cfb8; color: #7a7262; border-color: #7a7262; box-shadow: none; }

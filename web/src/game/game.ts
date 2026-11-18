@@ -48,6 +48,8 @@ export interface Clock {
 export interface SayOption {
   label: string;
   say: string;
+  /** Already asked: this, or a word that gives the same answer. */
+  heard?: boolean;
 }
 
 /** What a saved game holds (kept in this browser). */
@@ -59,6 +61,7 @@ export interface SaveState {
   rest?: number;
   keg?: number;
   wind?: [number, number];
+  heard?: string[];
   /** Martian Dreams: the Avatar is dreaming, the party waiting. */
   dream?: unknown;
   moonstones?: [number, number, number][];
@@ -1035,6 +1038,11 @@ export class Game implements ConvWorld {
     this.say('you', s || 'bye');
     this.asked = s || 'bye';
     this.said = '';
+    // What was asked, by the answer it leads to: every word that gives it is then heard.
+    if (c.ask.type === 'keyword') {
+      const at = c.answerFor(s);
+      if (at !== null) this.heard.add(`${c.npc.id}:${at}`);
+    }
     c.reply(s);
     this.pump();
   }
@@ -1078,8 +1086,15 @@ export class Game implements ConvWorld {
       if (has(w) && !seen.has(w) && this.partyContains(c.npc.id) === (w === 'leave')) out.push({ label: cap(w), say: w });
     }
     out.push({ label: 'Bye', say: 'bye' });
+    for (const o of out) {
+      const at = o.say === 'bye' ? null : c.answerFor(o.say);
+      o.heard = at !== null && this.heard.has(`${c.npc.id}:${at}`);
+    }
     return out;
   }
+
+  /** The answers heard, by person and where they begin in their script (kept with the game). */
+  heard = new Set<string>();
 
   // ---- using ----
 
@@ -1830,6 +1845,7 @@ export class Game implements ConvWorld {
       rest: this.restCounter,
       keg: this.kegTurns,
       wind: this.wind,
+      heard: [...this.heard],
       dream: this.kind === 'md' ? this.mdUse.saveDream() : undefined,
       moonstones: this.moonstones,
       party: this.party.map((m) => ({ id: m.actor.id, name: m.name })),
@@ -1849,6 +1865,7 @@ export class Game implements ConvWorld {
     this.turns = s.turns;
     this.lightTurns = s.light ?? 0;
     if (s.wind) this.wind = s.wind;
+    if (s.heard) this.heard = new Set(s.heard);
     if (this.kind === 'md') this.mdUse.loadDream(s.dream);
     this.restCounter = s.rest ?? 0;
     this.kegTurns = s.keg ?? 0;

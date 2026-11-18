@@ -103,16 +103,25 @@ export class App {
     tabs.append(this.tabLog, this.tabParty, this.status, btn('Menu', () => this.menu()));
     divider.append(tabs);
     const pane = el('div', 'pane paper');
-    pane.append(this.body);
+    // A scroll bar of our own (phones hide theirs): where the view is in what there is.
+    this.thumb = el('i');
+    const track = el('div', 'scrolltrack');
+    track.append(this.thumb);
+    pane.append(this.body, track);
     const side = el('div', 'side');
     side.append(divider, pane, this.foot);
     this.root.append(wrap, side);
     host.replaceChildren(this.root);
     this.body.addEventListener('scroll', () => {
-      this.stick = this.body.scrollTop + this.body.clientHeight >= this.body.scrollHeight - 6;
+      if (this.pane === 'log') this.stick = this.body.scrollTop + this.body.clientHeight >= this.body.scrollHeight - 6;
+      this.drawThumb();
     });
     // The pane changes size (a conversation shrinks the map): the newest line stays in view.
-    new ResizeObserver(() => this.toBottom()).observe(this.body);
+    new ResizeObserver(() => {
+      if (this.pane === 'log') this.toBottom();
+      else this.sizeParty();
+      this.drawThumb();
+    }).observe(this.body);
 
     // A tap acts (tap()); a finger held down walks the party towards it while it stays, sliding to steer.
     const at = (e: PointerEvent): { x: number; y: number } => {
@@ -670,7 +679,18 @@ export class App {
       const lw = w.toLowerCase().replace(/'s$/, '');
       return lw.length >= 3 && keys.some((k) => k.length >= Math.min(4, lw.length) && lw.slice(0, k.length) === k);
     };
-    g.log.slice(-60).forEach((line, i, shown) => {
+    // In a conversation the window holds only this exchange: from what was last said to them (or their greeting).
+    let from = Math.max(0, g.log.length - 60);
+    if (c) {
+      from = Math.max(from, this.talkFrom);
+      for (let i = g.log.length - 1; i >= from; i--) {
+        if (g.log[i].kind === 'you') {
+          from = i;
+          break;
+        }
+      }
+    }
+    g.log.slice(from).forEach((line, i, shown) => {
       const p = el('p', line.kind);
       const text = line.text.replace(/^\n+|\n+$/g, '');
       if (!text) return;
@@ -684,17 +704,61 @@ export class App {
     });
     log.addEventListener('click', (e) => {
       const say = (e.target as HTMLElement).dataset?.say;
-      if (say && g.asking()?.type === 'keyword') g.reply(say);
+      if (say && g.asking()?.type === 'keyword') {
+        this.optsAt = g.log.length;
+        g.reply(say);
+      }
     });
     const grew = g.log.length !== this.logLength;
     this.logLength = g.log.length;
     this.body.replaceChildren(log);
+    if (c) {
+      // A new exchange is read from its top; nothing to scroll down to find.
+      if (from !== this.exchangeFrom) {
+        this.exchangeFrom = from;
+        this.body.scrollTop = 0;
+      }
+      this.stick = false;
+      requestAnimationFrame(() => this.drawThumb());
+      return;
+    }
+    this.exchangeFrom = -1;
     if (grew) this.stick = true;
     this.toBottom();
   }
 
+  /** Where the conversation's exchange now shown begins in the log. */
+  private exchangeFrom = -1;
+  /** The log's length when the player last chose to see the topics: until then, Continue. */
+  private optsAt = -1;
+
+  private thumb!: HTMLElement;
+
+  /** The scroll bar's thumb: shown only when there is more than fits. */
+  private drawThumb(): void {
+    const b = this.body;
+    const more = b.scrollHeight > b.clientHeight + 2;
+    this.thumb.parentElement!.hidden = !more;
+    if (!more) return;
+    const track = this.thumb.parentElement!.clientHeight;
+    const h = Math.max(16, (b.clientHeight / b.scrollHeight) * track);
+    this.thumb.style.height = `${h}px`;
+    this.thumb.style.top = `${(b.scrollTop / (b.scrollHeight - b.clientHeight)) * (track - h)}px`;
+  }
+
+  /** Party rows sized so four fill the pane and a fifth shows its top: there is more below. */
+  private sizeParty(): void {
+    const list = this.body.firstElementChild as HTMLElement | null;
+    if (!list || this.pane !== 'party') return;
+    const head = list.querySelector<HTMLElement>('.partyhead');
+    const room = this.body.clientHeight - (head?.offsetHeight ?? 0);
+    const rowH = Math.max(40, Math.floor(room / 4.4));
+    for (const r of list.querySelectorAll<HTMLElement>('.member')) r.style.height = `${rowH}px`;
+  }
+
   /** Keep the newest lines in view, unless the player has scrolled back to read. */
   private toBottom(): void {
+    requestAnimationFrame(() => this.drawThumb());
     if (!this.stick) return;
     this.body.scrollTop = this.body.scrollHeight;
     requestAnimationFrame(() => {
@@ -730,8 +794,10 @@ export class App {
       row.addEventListener('click', () => this.character(m.actor, m.name));
       list.append(row);
     }
-    list.append(el('p', 'small', 'Tap a member for their numbers and what they carry.'));
     this.body.replaceChildren(list);
+    this.body.scrollTop = 0;
+    this.sizeParty();
+    this.drawThumb();
   }
 
   private drawFoot(): void {
@@ -739,7 +805,8 @@ export class App {
     const ask = g.asking();
     const opts = ask ? g.sayOptions() : [];
     // Rebuilt only when what it offers changes, so a text being typed is not lost.
-    const key = g.converse ? `say:${g.paused}:${ask?.type}:${opts.map((o) => o.say).join()}:${g.log.length}` : `cmd:${this.mode}`;
+    const gate = !!g.converse && !g.paused && ask?.type === 'keyword' && this.optsAt !== g.log.length;
+    const key = g.converse ? `say:${g.paused}:${gate}:${ask?.type}:${opts.map((o) => o.say + o.heard).join()}:${g.log.length}` : `cmd:${this.mode}`;
     if (key === this.footKey) return;
     this.footKey = key;
     if (!g.converse) {
@@ -772,9 +839,20 @@ export class App {
     }
     const say = el('div', 'say');
     if (g.paused) say.append(btn('Continue', () => g.continueTalk(), 'primary'));
-    else if (ask) {
+    else if (gate) {
+      // They have said their piece: Continue, and then the topics.
+      say.append(btn('Continue', () => {
+        this.optsAt = g.log.length;
+        this.drawFoot();
+      }, 'primary'));
+    } else if (ask) {
       const list = el('div', 'opts');
-      for (const o of opts) list.append(btn(o.label, () => g.reply(o.say), opts.length <= 2 || o.say === 'bye' ? 'wide' : ''));
+      // What has not been asked first; what has, greyed, after.
+      const sorted = [...opts.filter((o) => !o.heard && o.say !== 'bye'), ...opts.filter((o) => o.heard && o.say !== 'bye'), ...opts.filter((o) => o.say === 'bye')];
+      for (const o of sorted) {
+        const cls = [opts.length <= 2 || o.say === 'bye' ? 'wide' : '', o.heard ? 'heard' : ''].filter(Boolean).join(' ');
+        list.append(btn(o.label, () => g.reply(o.say), cls));
+      }
       if (opts.length) say.append(list);
       if (ask.type !== 'char') {
         const form = el('form');
