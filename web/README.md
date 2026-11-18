@@ -261,9 +261,12 @@ each, over its scenes in motion as the script plays them (u6intro.ts): the loung
 programmes and the clock telling the real time; the storm at the window, with clouds, rain, lightning and the bolt
 among the stones, and the doors opening on it; the stones, the hand and the obsidian stone, the red gate rising and
 quivering and the Avatar walking into it; then the altar, the gargoyles closing in and swaying, the priest and his
-dagger, the gate in the dark, the rescue and the gate sinking. Each page goes on until Continue.
+dagger, the gate in the dark, the rescue and the gate sinking. Each page goes on until Continue. It opens, as the game
+does, with its two logos fading in and out.
 
-Martian Dreams offers its introduction before Freud, in motion as run_introduction plays it (mdintro.ts): one film
+Martian Dreams can show its opening first ("Watch the opening first": play_intro - the logos, the fairground,
+Lowell and his space cannon, the fuse and the explosion, the capsule's flight, the cabin, the flash on Mars, each
+credit flashing up white between), but not yet its Origin logo with the orchestra and fireworks. Martian Dreams offers its introduction before Freud, in motion as run_introduction plays it (mdintro.ts): one film
 on its own clock, scenetxt.lzc's words changing beneath it in each speaker's colour - Spector's study and the
 letter, the crosshairs marching across the map, the hike, Spector's lab with the moongate rising and the two
 stepping through, and Tesla's lab in 1895 with its sparks, Freud's blood, Mr Garrett and Nellie. Savage Empire offers

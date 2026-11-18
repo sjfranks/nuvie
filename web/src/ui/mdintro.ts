@@ -422,3 +422,219 @@ export function mdIntroScene(text: (item: number) => string[], bgShape: () => Sh
   }
   return fromGen(script());
 }
+
+/**
+ * Martian Dreams' opening, as intro.lua's play_intro shows it before the menu: the logos, the fairground, Percival
+ * Lowell at his telescope, the fuse, the explosion, the capsule's flight, the cabin and its hats, and the flash on
+ * Mars - each credit flashing up white and fading in between.
+ */
+export function mdOpeningScene(): Scene {
+  let sprites: S[] = [];
+  let screen = 1;
+  const mk = (lib: string, grp: number, pic: number, x: number, y: number, clip = false): S => {
+    const s: S = { lib, grp, pic, x, y, visible: true, clip };
+    sprites.push(s);
+    return s;
+  };
+  const frame = (ms: number): Frame => ({ ms, opacity: screen, sprites: sprites.filter((s) => s.visible && (s.opacity ?? 1) > 0) });
+  function* hold(n: number): Generator<Frame> {
+    yield frame(poll(n));
+  }
+  function* fadeIn(speed = 3): Generator<Frame> {
+    for (let i = 0; i <= 0xff; i += speed) {
+      screen = i / 0xff;
+      yield frame(25);
+    }
+    screen = 1;
+  }
+  const white: Shape = { w: 320, h: 200, data: new Uint8Array(320 * 200).fill(15) };
+  /** flash_effect: a credit, under white that fades away; then held. */
+  function* flash(credit: number, delay = 300): Generator<Frame> {
+    sprites = [];
+    screen = 1;
+    mk('credits.lzc', credit, 0, 0, 0);
+    const bg: S = { shape: white, x: 0, y: 0, visible: true };
+    sprites.push(bg);
+    yield* hold(6);
+    for (let i = 0; i <= 0xff; i += 10) {
+      bg.opacity = (0xff - i) / 0xff;
+      yield frame(25);
+    }
+    bg.visible = false;
+    yield* hold(delay);
+  }
+
+  function* logos(): Generator<Frame> {
+    sprites = [];
+    const s = mk('logos.lzc', 0, 0, 0, 0);
+    screen = 0;
+    yield* fadeIn();
+    yield* hold(195);
+    s.grp = 1;
+    yield* fadeIn();
+    yield* hold(195);
+    s.grp = 2;
+    s.x = 15;
+    yield* fadeIn();
+    yield* hold(175);
+  }
+
+  function* fair(): Generator<Frame> {
+    sprites = [];
+    const F = 'fair.lzc';
+    mk(F, 0, 0, 0, 24);
+    const b0 = mk(F, 1, 0, 0, 24);
+    const b1 = mk(F, 1, 1, 320, 24);
+    const wheel = mk(F, 2, 0, 0, 24);
+    const column = mk(F, 3, 0, 190, 24);
+    const podium = mk(F, 4, 0, 240, 24);
+    const p0 = mk(F, 5, 0, 0, 24);
+    const p1 = mk(F, 5, 1, 320, 24);
+    for (let i = 0; i <= 9; i++) {
+      wheel.pic = i % 5;
+      yield* hold(7);
+    }
+    for (let i = 0; i <= 79; i++) {
+      b0.x = -i;
+      b1.x = 320 - i;
+      wheel.x = -i * 2;
+      wheel.pic = i % 5;
+      column.x = 190 - i * 2;
+      podium.x = 240 - i * 2;
+      p0.x = -i * 3;
+      p1.x = 320 - i * 3;
+      yield* hold(7);
+    }
+    yield* hold(15);
+  }
+
+  function* lowell(): Generator<Frame> {
+    yield* flash(0);
+    sprites = [];
+    mk('lowell.lzc', 0, 0, 0, 24);
+    const l = mk('lowell.lzc', 0, 1, 0, 24);
+    screen = 0;
+    yield* fadeIn();
+    for (let i = 1; i <= 20; i++) {
+      l.pic = i;
+      yield* hold(5);
+    }
+    yield* flash(1);
+    yield* hold(70);
+  }
+
+  function* fuse(): Generator<Frame> {
+    sprites = [];
+    mk('fuse.lzc', 0, 0, 0, 24);
+    const f = mk('fuse.lzc', 0, 1, 0, 24);
+    screen = 0;
+    yield* fadeIn(4);
+    for (let i = 1; i <= 28; i++) {
+      f.pic = i;
+      yield* hold(2);
+    }
+    yield* flash(2);
+  }
+
+  function* boom(): Generator<Frame> {
+    sprites = [];
+    const F = 'fair.lzc';
+    mk(F, 0, 0, 0, 24);
+    mk(F, 1, 0, -80, 24);
+    mk(F, 1, 1, 240, 24);
+    mk(F, 3, 0, 30, 24);
+    mk(F, 4, 0, 80, 24);
+    screen = 0;
+    yield* fadeIn(8);
+    const s = mk('flash.lzc', 0, 0, 80, 24);
+    for (let i = 0; i <= 9; i++) {
+      s.pic = i;
+      yield* hold(7);
+    }
+    s.grp = 1;
+    for (let i = 0; i <= 8; i++) {
+      s.pic = i;
+      yield* hold(6);
+    }
+    yield* flash(3, 215);
+  }
+
+  function* flight(): Generator<Frame> {
+    sprites = [];
+    mk('flight.lzc', 0, 0, 0, 24);
+    screen = 0;
+    yield* fadeIn(12);
+    const c = mk('flight.lzc', 1, 0, 270, 140, true);
+    for (let i = 0; i <= 12; i++) {
+      c.scale = 1 + i * i + i * 2;
+      c.x = 270 - i * 4 * i;
+      c.y = 140 - i * 2 * i;
+      yield* hold(6);
+    }
+    yield* hold(98);
+    yield* hold(8);
+  }
+
+  function* cabin(): Generator<Frame> {
+    sprites = [];
+    const C = 'cabin.lzc';
+    mk(C, 0, 0, 0, 24);
+    const cloud = mk(C, 1, 0, 116, 28);
+    const cloud1 = mk(C, 1, 0, 222, 53);
+    const man = mk(C, 2, 0, 0, 50, true);
+    const shadow = mk(C, 3, 0, -900, -150, true);
+    const hat1 = mk(C, 4, 0, 62, -150, true);
+    const hat2 = mk(C, 5, 0, 62, 0, true);
+    const hat3 = mk(C, 6, 0, 62, 0, true);
+    for (let i = 0; i <= 30; i++) {
+      cloud.pic = (i + 2) % 15;
+      cloud1.pic = i % 15;
+      shadow.x = i * 64 - 900;
+      shadow.y = i * 16 - 150;
+      man.x = -i * 4;
+      man.y = i * i * 2 + 50;
+      man.scale = 100 + i * 32;
+      hat1.x = i * 32 + 62;
+      hat1.y = i > 6 ? i * 4 + 15 : i * 8 + 15;
+      hat2.x = i * 32 - 150;
+      hat2.y = i * 8;
+      hat3.x = i * 32 - 500;
+      hat3.y = i * 4;
+      yield* hold(8);
+    }
+    yield* flash(4, 250);
+  }
+
+  function* mars(): Generator<Frame> {
+    sprites = [];
+    mk('mars.lzc', 0, 0, 0, 24);
+    const f = mk('mars.lzc', 0, 1, 0, 24);
+    screen = 0;
+    yield* fadeIn(12);
+    yield* hold(60);
+    for (let i = -1; i <= 1; i++) {
+      for (let j = 0; j <= 2; j++) {
+        for (let k = -1; k <= 2; k++) {
+          f.pic = 3 - Math.abs(k);
+          yield* hold(i === 0 && k === 0 ? 10 : 3);
+        }
+        yield* hold(5);
+      }
+      yield* hold(30);
+    }
+    yield* hold(40);
+    yield* flash(5);
+  }
+
+  function* script(): Generator<Frame> {
+    yield* logos();
+    yield* fair();
+    yield* lowell();
+    yield* fuse();
+    yield* boom();
+    yield* flight();
+    yield* cabin();
+    yield* mars();
+  }
+  return fromGen(script());
+}

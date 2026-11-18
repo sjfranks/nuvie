@@ -17,7 +17,7 @@ import { endingPicture, stillPicture } from './endings.ts';
 import { mdEndingScene } from './mdending.ts';
 import { u6EndingScene } from './u6ending.ts';
 import { u6IntroScene } from './u6intro.ts';
-import { mdIntroScene } from './mdintro.ts';
+import { mdIntroScene, mdOpeningScene } from './mdintro.ts';
 import { seTitleScene } from './seintro.ts';
 import { loadImages, loadMidgame, shapeRgba } from '../files/cutscene.ts';
 import type { Shape } from '../files/shape.ts';
@@ -465,7 +465,8 @@ export class App {
       });
     };
     // The introduction in motion, on its own clock as run_introduction plays it, the words beneath; or page by page where it cannot play.
-    const film = (): void => {
+    const film = (opening = false): void => {
+      if (opening) return openingFilm();
       let moving: ReturnType<typeof play> = null;
       const done = (): void => {
         moving?.stop();
@@ -490,6 +491,28 @@ export class App {
         moving.canvas.className = 'scene';
         row.append(skip);
         body.append(moving.canvas, caption, row);
+      });
+      this.onClose = () => moving?.stop();
+    };
+    // play_intro's opening, then on to the introduction.
+    const openingFilm = (): void => {
+      let moving: ReturnType<typeof play> = null;
+      const next = (): void => {
+        moving?.stop();
+        this.onClose = null;
+        film();
+      };
+      this.open('Martian Dreams', (body) => {
+        const row = el('div', 'row');
+        const go = btn('Skip', next);
+        moving = play(g.files, ['md_title.pal', 0], mdOpeningScene(), { end: () => {
+          go.textContent = 'Continue';
+          go.classList.add('primary');
+        } });
+        if (!moving) return film();
+        moving.canvas.className = 'scene';
+        row.append(go);
+        body.append(moving.canvas, row);
       });
       this.onClose = () => moving?.stop();
     };
@@ -530,7 +553,10 @@ export class App {
         body.append(el('p', '', 'A new Avatar: the introduction, then Freud\'s questions.'));
         const row = el('div', 'row');
         row.append(btn('Skip the introduction', () => show(it.next(''))), btn('Watch the introduction', () => film(), 'primary'));
-        body.append(row);
+        // The opening the game shows before its menu (play_intro), if wished.
+        const more = el('div', 'row');
+        more.append(btn('Watch the opening first', () => film(true)));
+        body.append(row, more);
       });
     } else show(it.next(''));
   }

@@ -43,10 +43,11 @@ const TV_Y_BASE = [
 const NEWS = [0x5, 0x6, 0x7, 0x0d, 0x0e, 0x18, 0x19, 0x1f, 0x20];
 
 export function u6IntroScene(files: GameFiles, page: number): Scene {
-  const palettes = [1, 2, 3, 7].map((i) => loadPalette(files, 'palettes.int', i) ?? new Uint8Array(0x300));
-  let pal = new Uint8Array(palettes[0]);
+  const USED = [0, 1, 2, 3, 7];
+  const palettes = USED.map((i) => loadPalette(files, 'palettes.int', i) ?? new Uint8Array(0x300));
+  let pal = new Uint8Array(palettes[1]);
   const setPalette = (i: number): void => {
-    pal = new Uint8Array(palettes[[1, 2, 3, 7].indexOf(i)]);
+    pal = new Uint8Array(palettes[USED.indexOf(i)]);
   };
   const rotate = (at: number, n: number): void => {
     const last = [pal[(at + n - 1) * 3], pal[(at + n - 1) * 3 + 1], pal[(at + n - 1) * 3 + 2]];
@@ -83,6 +84,23 @@ export function u6IntroScene(files: GameFiles, page: number): Scene {
   // ---- the lounge ----
   function* lounge(): Generator<Frame> {
     lib = 'intro_1.shp';
+    // First the two logos, each fading in and out (play's opening, before the lounge).
+    if (here()) {
+      setPalette(0);
+      const logo = mk(0x45, 0, 0);
+      for (const g of [0x45, 0x46]) {
+        logo.grp = g;
+        for (let i = 0; i <= 0xff; i += 3) {
+          logo.opacity = i / 0xff;
+          yield* update();
+        }
+        for (let i = 0xff; i >= 0; i -= 3) {
+          logo.opacity = i / 0xff;
+          yield* update();
+        }
+      }
+      sprites = [];
+    }
     setPalette(1);
     let tvX = 0xe5;
     const tvY = 0x32;

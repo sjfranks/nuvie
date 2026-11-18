@@ -3,7 +3,7 @@ import { mdEndingScene } from '../src/ui/mdending.ts';
 import { u6EndingScene } from '../src/ui/u6ending.ts';
 import { u6IntroScene } from '../src/ui/u6intro.ts';
 import { INTRO_U6 } from '../src/ui/intro6.ts';
-import { mdIntroScene } from '../src/ui/mdintro.ts';
+import { mdIntroScene, mdOpeningScene } from '../src/ui/mdintro.ts';
 import { seTitleScene } from '../src/ui/seintro.ts';
 
 describe('the endings in motion', () => {
@@ -51,7 +51,7 @@ describe('the endings in motion', () => {
 
   it('plays Martian Dreams\' introduction and Savage Empire\'s title through to their ends', () => {
     const lines = (n: number) => Array.from({ length: 30 }, (_, i) => `line ${n}.${i}`);
-    for (const scene of [mdIntroScene(lines, () => null), seTitleScene()]) {
+    for (const scene of [mdIntroScene(lines, () => null), seTitleScene(), mdOpeningScene()]) {
       let ms = 0;
       let f = scene.frame(0);
       const said = new Set<string>();
