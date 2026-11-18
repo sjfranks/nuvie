@@ -198,6 +198,8 @@ Magic things: a readied staff lets loose the spell charged into it (aim it if th
 invisibility ring hides whoever wears it; the storm cloak brings a rain that stills all magic for a while; the
 amulet of submission will not come off once worn; and a fountain grants a wish, now and then, if the wish is for
 food, mutton, wine, fruit or mead. Looking at a holy brazier names its flame: truth, love or courage.
+A trapped door or chest springs its trap when opened - acid, poison, a fire blast or gas about the opener - unless
+Detect Trap found it first and Untrap took it away.
 
 **Rest** (the moon button): pass a turn, or camp 1-8 hours - not in towns, near foes or others, or on horseback.
 Each member eats a meal if the party has food, and those fed heal, once in twelve hours. On a ship the crew mends

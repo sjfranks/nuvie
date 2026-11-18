@@ -1145,8 +1145,47 @@ export class Game implements ConvWorld {
         this.say('sys', 'Closed.');
       }
     } else {
+      this.springTraps(o);
       o.frameN -= 4;
       this.say('sys', 'Opened.');
+    }
+  }
+
+  /**
+   * Opening a trapped door or chest springs what was set in it (process_effects, actor_use_effect): acid on the
+   * opener, poison, a fire blast or a cloud of gas about them. The trap is spent.
+   */
+  springTraps(o: Obj, who: Actor = this.player): void {
+    if (this.kind !== 'u6' || !o.container) return;
+    for (const e of [...o.container].reverse()) {
+      if (e.objN !== 337) continue;
+      o.container.splice(o.container.indexOf(e), 1);
+      const kind = this.random(4);
+      const near = (): Actor[] =>
+        this.actors.list.filter((a) => a.alive && a.visible && a.objN && a.z === who.z && Math.abs(a.x - who.x) <= 1 && Math.abs(a.y - who.y) <= 1);
+      const poison = (a: Actor): void => {
+        a.statusFlags |= 0x08;
+        this.combat.flash(a.x, a.y, a.z, 'hit');
+      };
+      if (kind === 0) {
+        this.say('sys', 'Acid!');
+        this.combat.flash(who.x, who.y, who.z, 'hit');
+        this.sfx('hit');
+        this.combat.harm(who, this.random(20) + 1);
+      } else if (kind === 1) {
+        this.say('sys', 'Poison!');
+        poison(who);
+      } else if (kind === 2) {
+        this.say('sys', 'Bomb!');
+        this.sfx('quake');
+        for (const a of near()) {
+          this.combat.flash(a.x, a.y, a.z, 'miss', { tile: 0x17e, fromX: a.x, fromY: a.y });
+          this.combat.harm(a, this.random(20) + 1);
+        }
+      } else {
+        this.say('sys', 'Gas!');
+        for (const a of near()) poison(a);
+      }
     }
   }
 
@@ -1244,7 +1283,10 @@ export class Game implements ConvWorld {
     } else if (o.container && o.objN !== OBJ.EGG) {
       if (o.objN === OBJ.CHEST && o.frameN >= 2) this.say('sys', o.frameN === 3 ? 'Magically locked.' : 'Locked.');
       else {
-        if (o.objN === OBJ.CHEST) o.frameN = 0;
+        if (o.objN === OBJ.CHEST) {
+          if (o.frameN === 1) this.springTraps(o);
+          o.frameN = 0;
+        }
         this.openContainer = o;
         this.say('sys', o.container.length ? `Searching the ${name}.` : `The ${name} is empty.`);
       }

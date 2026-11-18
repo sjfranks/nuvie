@@ -288,6 +288,19 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     expect(got).toBeGreaterThan(0);
   });
 
+  it.runIf(folder === 'ultima6')('springs a trap set in a chest when it is opened', () => {
+    const g = new Game(load());
+    for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
+    const p = g.player;
+    const chest = g.objects.create(98, 1, 0);
+    chest.frameN = 1;
+    g.objects.toContainer(g.objects.create(337, 0, 0), chest);
+    g.objects.toInventory(chest, p.id);
+    g.useObj(chest);
+    expect(chest.container!.some((k) => k.objN === 337)).toBe(false);
+    expect(g.log.some((l) => ['Acid!', 'Poison!', 'Bomb!', 'Gas!'].includes(l.text))).toBe(true);
+  });
+
   it.runIf(folder === 'ultima6')('draws a silver serpent whole, its body following its head', () => {
     const g = new Game(load());
     const s = g.combat.spawn(413, 0x133 + 40, 0x160 + 40, 0, 2, 0)!;
