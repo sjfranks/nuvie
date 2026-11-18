@@ -16,6 +16,7 @@ import { play } from './anim.ts';
 import { endingPicture, stillPicture } from './endings.ts';
 import { mdEndingScene } from './mdending.ts';
 import { u6EndingScene } from './u6ending.ts';
+import { u6IntroScene } from './u6intro.ts';
 import { loadMidgame, shapeRgba } from '../files/cutscene.ts';
 import type { Shape } from '../files/shape.ts';
 import { INTRO_U6 } from './intro6.ts';
@@ -404,17 +405,26 @@ export class App {
     const g = this.game;
     if (i >= INTRO_U6.length) return this.creation();
     const [text, [file, pal, layers]] = INTRO_U6[i];
+    let moving: ReturnType<typeof play> = null;
     this.open('Ultima VI', (body) => {
-      const pic = stillPicture(g.files, file, ['palettes.int', pal], layers);
+      // The scene moves as intro.lua plays it; a still where it cannot.
+      moving = play(g.files, ['palettes.int', pal], u6IntroScene(g.files, i));
+      const pic = moving?.canvas ?? stillPicture(g.files, file, ['palettes.int', pal], layers);
       if (pic) {
         pic.className = 'scene';
         body.append(pic);
       }
       body.append(el('p', '', text));
       const row = el('div', 'row');
-      row.append(btn('Skip', () => this.creation()), btn('Continue', () => this.introU6(i + 1), 'primary'));
+      const go = (next: () => void): void => {
+        moving?.stop();
+        this.onClose = null;
+        next();
+      };
+      row.append(btn('Skip', () => go(() => this.creation())), btn('Continue', () => go(() => this.introU6(i + 1)), 'primary'));
       body.append(row);
     });
+    this.onClose = () => moving?.stop();
   }
 
   /** Martian Dreams' new Avatar: Freud's interview aboard the capsule (intro.lua's create_character). */

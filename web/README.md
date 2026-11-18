@@ -40,7 +40,7 @@ A new game of Ultima VI begins as the original's does, in the gypsy's wagon (int
 man or woman, one of six faces, and then the gypsy's questions of the eight virtues - four pairs, the winners in two
 pairs, then the last two - each answer adding to strength, dexterity or intelligence. The Avatar starts at level 3
 with magic twice their intelligence (SaveGame::update_objlist_for_new_game_u6). Close the sheet to keep the
-default Avatar. The animated intro itself (the lounge, the stones, the moongate) is not ported.
+default Avatar. The introduction can be watched first, in motion (below).
 
 ## The screen
 
@@ -236,14 +236,17 @@ and raise their lenses, the wall fades to streaming stars and the Codex wavers i
 the capsule rockets from Mars and bobs in the sea, the photographer's flash goes off by the moongate, and the dust
 storm blows. Savage Empire's ending is still pictures, as its script has it.
 
-Ultima VI's introduction can be watched before the gypsy ("Watch the introduction first"): intro.lua's words, from the
-lounge and the storm to the stones, the altar and the rescue, each over a still composed from intro_1/2/3.shp and
-intro.shp as the script lays them out.
+Ultima VI's introduction can be watched before the gypsy ("Watch the introduction first"): intro.lua's words, a page
+each, over its scenes in motion as the script plays them (u6intro.ts): the lounge, its television running through its
+programmes and the clock telling the real time; the storm at the window, with clouds, rain, lightning and the bolt
+among the stones, and the doors opening on it; the stones, the hand and the obsidian stone, the red gate rising and
+quivering and the Avatar walking into it; then the altar, the gargoyles closing in and swaying, the priest and his
+dagger, the gate in the dark, the rescue and the gate sinking. Each page goes on until Continue.
 
 Martian Dreams offers its introduction before Freud (Spector's study, Tesla's lab now and in 1895: scenetxt.lzc's
 dialogue over scene1/3/4a.lzc), and Savage Empire its story so far before Intanya (ten pictures from create.lzc).
 
-Not ported yet: the animation of the intros (they are shown as stills);
+Not ported yet: the animation of Martian Dreams' and Savage Empire's introductions (shown as stills);
 the rest of Martian Dreams' and Savage Empire's usecode, and Savage Empire's fighting (Nuvie has none to port).
 
 `tests/real.test.ts` runs on your copies put in `web/gamedata/ultima6/`, `savage/` and `martian/` (git-ignored).

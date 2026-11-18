@@ -46,7 +46,8 @@ export async function createOpl(rate: number, factory?: (o: object) => Promise<E
   return {
     write: (r, v) => chip.write(r, v),
     generate: (n) => {
-      chip.generate(n);
+      // The chip will not make fewer than two samples at a call; for one, it makes two and the second is let go.
+      chip.generate(Math.max(2, n));
       return new Int16Array(buf.buffer, buf.byteOffset, n * 2);
     },
   };

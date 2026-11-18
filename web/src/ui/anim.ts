@@ -36,6 +36,8 @@ export interface Frame {
   opacity?: number;
   /** The palette turned this many times: [first colour, how many, turns]. */
   rot?: [number, number, number];
+  /** A palette of the scene's own (turned or changed as its script does), in place of the one it began with. */
+  pal?: Uint8Array;
 }
 
 /** A scene: its frames, made on demand in order, and how many (Infinity for one that goes on); after the last it holds, or begins again. */
@@ -80,7 +82,7 @@ export function play(files: GameFiles, palette: [string, number], scene: Scene):
   const px = img.data;
   const pal = new Uint8Array(base);
   const draw = (f: Frame): void => {
-    pal.set(base);
+    pal.set(f.pal ?? base);
     if (f.rot) {
       const [at, n, turns] = f.rot;
       for (let c = 0; c < n; c++) {

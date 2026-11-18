@@ -1,6 +1,7 @@
 /**
  * intro6.ts - Ultima VI's introduction (data/scripts/u6/intro.lua's intro): its words, a page each, over stills
- * composed as the script lays out its pictures - the lounge, the storm at the window, the stones, the altar.
+ * composed as the script lays out its pictures - the lounge, the storm at the window, the stones, the altar. The stills
+ * stand in where the scenes cannot move (u6intro.ts plays them).
  */
 
 /** [image file, palette index in palettes.int, layers: [picture, x, y]] */
