@@ -37,7 +37,7 @@ const SCENES: Record<'u6' | 'md' | 'se', { images: string; palette: [string, num
 };
 
 /** A still from any of a game's image libraries: layers of [picture (or group, picture), x, y] by their hot spots. */
-export function stillPicture(files: GameFiles, images: string, palette: [string, number], layers: [number, number, number][]): HTMLCanvasElement | null {
+export function stillPicture(files: GameFiles, images: string, palette: [string, number], layers: number[][]): HTMLCanvasElement | null {
   const all = loadImages(files, images);
   const pal = loadPalette(files, palette[0], palette[1]);
   if (!all.length || !pal) return null;
@@ -47,8 +47,10 @@ export function stillPicture(files: GameFiles, images: string, palette: [string,
   const ctx = c.getContext('2d')!;
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, 320, 200);
-  for (const [pic, x, y] of layers) {
-    const s = all[pic]?.[0];
+  for (const layer of layers) {
+    // [picture, x, y] from a library of single pictures, or [group, picture, x, y].
+    const [grp, pic, x, y] = layer.length === 4 ? layer : [layer[0], 0, layer[1], layer[2]];
+    const s = all[grp]?.[pic];
     if (!s) continue;
     const tmp = document.createElement('canvas');
     tmp.width = s.w;

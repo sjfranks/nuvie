@@ -221,8 +221,10 @@ Ultima VI's introduction can be watched before the gypsy ("Watch the introductio
 lounge and the storm to the stones, the altar and the rescue, each over a still composed from intro_1/2/3.shp and
 intro.shp as the script lays them out.
 
-Not ported yet: Martian Dreams' and Savage Empire's intros, and the animation of the intro and endings (they are shown
-as stills);
+Martian Dreams offers its introduction before Freud (Spector's study, Tesla's lab now and in 1895: scenetxt.lzc's
+dialogue over scene1/3/4a.lzc), and Savage Empire its story so far before Intanya (ten pictures from create.lzc).
+
+Not ported yet: the animation of the intros and endings (they are shown as stills);
 the rest of Martian Dreams' and Savage Empire's usecode, and Savage Empire's fighting (Nuvie has none to port).
 
 `tests/real.test.ts` runs on your copies put in `web/gamedata/ultima6/`, `savage/` and `martian/` (git-ignored).

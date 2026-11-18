@@ -15,7 +15,7 @@ import { kvDelete, kvGet, kvSet } from '../files/gamefiles.ts';
 import { endingPicture, stillPicture } from './endings.ts';
 import { INTRO_U6 } from './intro6.ts';
 import { Gypsy } from './gypsy.ts';
-import { ASK_NAME, INTRO, Intanya, QUESTIONS as QUESTIONS_SE, SE_ENDING } from './intanya.ts';
+import { ASK_NAME, INTRO, Intanya, QUESTIONS as QUESTIONS_SE, SE_ENDING, SE_STORY } from './intanya.ts';
 import { interview, type Hero, type Step } from './freud.ts';
 import { MapView } from './mapview.ts';
 import { haveIcons } from './theme.ts';
@@ -375,6 +375,25 @@ export class App {
     const lines = g.sceneText('scenetxt.lzc', 5);
     if (lines.length < 60) return;
     const it = interview(lines, (lo, hi) => lo + g.random(hi - lo + 1));
+    // The introduction first, if wished (intro.lua's run_introduction): its words over each scene's picture.
+    const scenes: [number, string, number[][]][] = [[0, 'scene1.lzc', [[0, 0, 0, 24], [0, 1, 0, 24], [1, 0, 240, 151]]], [1, 'scene3.lzc', [[0, 0, 0, 24]]], [2, 'scene4a.lzc', [[0, 0, 0, 24]]]];
+    const intro: [string, string, number[][]][] = [];
+    for (const [item, file, layers] of scenes) for (const l of g.sceneText('scenetxt.lzc', item)) if (l.trim()) intro.push([l.replace(/\^/g, ' '), file, layers]);
+    const introPage = (i: number): void => {
+      if (i >= intro.length) return show(it.next(''));
+      const [text, file, layers] = intro[i];
+      this.open('Martian Dreams', (body) => {
+        const pic = stillPicture(g.files, file, ['md_title.pal', 0], layers);
+        if (pic) {
+          pic.className = 'scene';
+          body.append(pic);
+        }
+        body.append(el('p', '', text));
+        const row = el('div', 'row');
+        row.append(btn('Skip', () => show(it.next(''))), btn('Continue', () => introPage(i + 1), 'primary'));
+        body.append(row);
+      });
+    };
     const show = (r: IteratorResult<Step, Hero>): void => {
       if (r.done) {
         g.createHero({ ...r.value, face: 0 });
@@ -407,7 +426,14 @@ export class App {
         body.append(row);
       });
     };
-    show(it.next(''));
+    if (intro.length && g.files.has('scene1.lzc')) {
+      this.open('Martian Dreams', (body) => {
+        body.append(el('p', '', 'A new Avatar: the introduction, then Freud\'s questions.'));
+        const row = el('div', 'row');
+        row.append(btn('Skip the introduction', () => show(it.next(''))), btn('Watch the introduction', () => introPage(0), 'primary'));
+        body.append(row);
+      });
+    } else show(it.next(''));
   }
 
   /** Savage Empire's new Avatar: Intanya the shaman's questions (intro.lua's create_new_character). */
@@ -459,7 +485,30 @@ export class App {
         setTimeout(() => input.focus(), 50);
       });
     };
-    page(INTRO[0], () => page(INTRO[1], () => page(INTRO[2], askName)));
+    const begin = (): void => page(INTRO[0], () => page(INTRO[1], () => page(INTRO[2], askName)));
+    // The story so far, as the game's menu offers it: ten pictures with their words.
+    const story = (i: number): void => {
+      if (i >= SE_STORY.length) return begin();
+      this.open('The story so far', (body) => {
+        const pic = stillPicture(g.files, 'create.lzc', ['savage.pal', 1], [[5, 0, 0, 0], [5, i + 1, 120, 45]]);
+        if (pic) {
+          pic.className = 'scene';
+          body.append(pic);
+        }
+        body.append(el('p', '', SE_STORY[i]));
+        const row = el('div', 'row');
+        row.append(btn('Skip', begin), btn('Continue', () => story(i + 1), 'primary'));
+        body.append(row);
+      });
+    };
+    if (g.files.has('create.lzc')) {
+      this.open('The Savage Empire', (body) => {
+        body.append(el('p', '', 'A new Avatar: the story so far, then Intanya\'s questions.'));
+        const row = el('div', 'row');
+        row.append(btn('Skip the story', begin), btn('The story so far', () => story(0), 'primary'));
+        body.append(row);
+      });
+    } else begin();
   }
 
   private gypsy(name: string, female: boolean, face: number): void {

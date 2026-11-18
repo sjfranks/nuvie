@@ -68,3 +68,17 @@ export const SE_ENDING = [
   'But Rafkin does not.  "I\'m staying, my friend," he says, "Someone must.  I will stay here... and hope other scientists come.  Farewell."',
   'Saddened, you follow your friends and allies into the moongate, leaving the Valley of Eodon.  Perhaps someday you will return to those you have left behind.',
 ];
+
+/** intro.lua's story_so_far: ten pages, each a picture (create.lzc group 5) in its frame. */
+export const SE_STORY = [
+  'You had disturbing dreams of a faraway jungle, an endangered princess, and the black moonstone you carried away from Britannia in your last adventure there.',
+  'The spirit of Lord British commanded you to find out all you could about the stone.',
+  'So you took it to your old friend Dr. Rafkin, curator of the local museum of natural history, hoping that he could unravel the mystery.',
+  'At Dr. Rafkin\'s, you met ace reporter and "Ultimate Adventures" correspondent Jimmy Malone. Malone\'s a little too nosy to suit you...',
+  '...but he kept his wits when everything went haywire, when Dr. Rafkin\'s experiments on your moonstone sent the whole museum lab through a bizarre black moongate!',
+  'You were shocked to lift your head and see jungle around you: Jungle, and this enormous creature descending... descending upon--',
+  'Her! The woman you dreamt of! A fiery tribal she-warrior of some time-lost land... You and your friends rescued her from the giant pteranodon and befriended her.',
+  'She said her name was Aiela, princess of the Kurak tribe, and seemed to be quite taken with you, her most unusual rescuer.',
+  'But Aiela\'s hated suitor, Darden the Huge, prince of the Urali tribe, arrived with his men, scattering your friends and smashing you into the earth.',
+  'Now you lie broken and defeated, struggling to regain consciousness...',
+];
