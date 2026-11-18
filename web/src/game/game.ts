@@ -341,7 +341,12 @@ export class Game implements ConvWorld {
     return v && v.objN !== 0 && v.visible && VEHICLES.has(v.objN) ? v : null;
   }
 
+  /** One of the party the player moves in a fight, by their command (player_set_actor); else the leader. */
+  controlled: Actor | null = null;
+
   get player(): Actor {
+    const c = this.controlled;
+    if (c && c.inParty && c.alive && this.party.some((m) => m.actor === c)) return c;
     return this.party[0].actor;
   }
   playerActor(): Actor {
@@ -586,6 +591,7 @@ export class Game implements ConvWorld {
       }
     }
     if (this.kind === 'u6') this.enterGate(nx, ny, p.z);
+    this.cost = dx !== 0 && dy !== 0 ? 10 : 5;
     this.endTurn();
     return true;
   }
@@ -684,7 +690,12 @@ export class Game implements ConvWorld {
     this.endTurn();
   }
 
+  /** What the player's last action cost in a fight's movement points: a step's, else a blow's (Actor::move, Actor::attack). */
+  private cost: number | null = null;
+
   private endTurn(): void {
+    if (this.combat.fighting) this.combat.spend(this.player, this.cost ?? 10);
+    this.cost = null;
     this.turns++;
     if (this.turns % 2 === 0) this.advance(1);
     if (this.lightTurns > 0) this.lightTurns--;
@@ -844,8 +855,8 @@ export class Game implements ConvWorld {
         if (!(this.stepActor(a, dx, dy) || (dx !== 0 && this.stepActor(a, dx, 0)) || (dy !== 0 && this.stepActor(a, 0, dy)))) {
           const [rx, ry] = DIRS[this.random(4)];
           this.stepActor(a, rx, ry);
-          if (++a.moves > 40) {
-            a.moves = 0;
+          if (++a.stuck > 40) {
+            a.stuck = 0;
             if (!this.actors.at(a.dest.x, a.dest.y, a.dest.z)) Object.assign(a, a.dest);
             a.dest = null;
           }

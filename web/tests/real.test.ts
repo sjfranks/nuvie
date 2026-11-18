@@ -69,6 +69,63 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     expect(g.party.length).toBe(4);
   });
 
+  it.runIf(folder === 'ultima6')('takes turns in a fight by movement points, and hands companions under command to the player', () => {
+    const g = new Game(load());
+    for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
+    const p = g.player;
+    const troll = g.combat.spawn(371, p.x + 6, p.y, p.z, 0, 8)!;
+    for (const m of g.party.slice(1)) m.actor.combatMode = 0x3; // front
+    // A quick Avatar and a slow troll: the Avatar acts more often.
+    p.dex = 30;
+    troll.dex = 6;
+    const acts = new Map<number, number>();
+    const c = g.combat as unknown as { perform: (a: { id: number }) => void };
+    const perform = c.perform.bind(g.combat);
+    c.perform = (a: { id: number }) => {
+      acts.set(a.id, (acts.get(a.id) ?? 0) + 1);
+      perform(a);
+    };
+    let mine = 0;
+    for (let i = 0; i < 20 && troll.alive && troll.objN; i++) {
+      g.pass();
+      mine++;
+    }
+    expect(acts.get(troll.id) ?? 0).toBeLessThan(mine);
+    expect(acts.get(troll.id) ?? 0).toBeGreaterThan(0);
+    // The companions fight by themselves at the front.
+    expect(g.party.slice(1).some((m) => (acts.get(m.actor.id) ?? 0) > 0)).toBe(true);
+    // Dupre under command: his turn comes to the player.
+    const dupre = g.party[1].actor;
+    dupre.combatMode = 0x2;
+    let handed = false;
+    for (let i = 0; i < 12 && !handed; i++) {
+      g.pass();
+      handed = g.player === dupre;
+    }
+    expect(handed).toBe(true);
+    expect(g.log.some((l) => l.text.endsWith("'s turn."))).toBe(true);
+    g.pass();
+  });
+
+  it.runIf(folder === 'ultima6')('fights a band of trolls with the party in each way of fighting', () => {
+    const g = new Game(load());
+    for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
+    const p = g.player;
+    const trolls = [0, 1, 2, 3].map((i) => g.combat.spawn(371, p.x + 5, p.y - 2 + i, p.z, 0, [3, 4, 5, 6][i])!).filter(Boolean);
+    expect(trolls.length).toBeGreaterThan(1);
+    const modes = [0x4, 0x5, 0x6, 0x7, 0x8];
+    g.party.slice(1).forEach((m, i) => (m.actor.combatMode = modes[i % modes.length]));
+    const start = new Map(g.party.map((m) => [m.actor.id, `${m.actor.x},${m.actor.y}`]));
+    for (let i = 0; i < 80 && trolls.some((t) => t.alive && t.objN); i++) {
+      const t = trolls.find((x) => x.alive && x.objN);
+      if (t && g.player === g.party[0].actor && g.attackAt(t.x, t.y)) continue;
+      g.pass();
+    }
+    // The companions moved of their own accord, and the fight went on without fault.
+    expect(g.party.slice(1).some((m) => start.get(m.actor.id) !== `${m.actor.x},${m.actor.y}`)).toBe(true);
+    expect(g.log.some((l) => /killed!/.test(l.text))).toBe(true);
+  });
+
   it.runIf(folder === 'ultima6')('casts spells from a readied book, using magic points and reagents', () => {
     const g = new Game(load());
     const avatar = g.player;

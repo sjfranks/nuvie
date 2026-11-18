@@ -81,6 +81,13 @@ export interface AppHooks {
   leave(forget: boolean): void;
 }
 
+/** The ways one of the party may fight (U6 combat modes), and how each is told. */
+const FIGHT_MODES: [number, string][] = [[0x2, 'Command'], [0x3, 'Front'], [0x4, 'Rear'], [0x5, 'Flank'], [0x6, 'Berserk'], [0x7, 'Retreat'], [0x8, 'Assault']];
+const FIGHT_SAYS: Record<number, string> = {
+  0x2: 'fight as you command', 0x3: 'hold the front line', 0x4: 'keep to the rear', 0x5: 'go round the flank',
+  0x6: 'go berserk at the strongest foe', 0x7: 'keep out of harm\'s way', 0x8: 'attack the nearest foe',
+};
+
 export class App {
   private readonly view: MapView;
   private readonly root = el('div', 'play');
@@ -285,11 +292,11 @@ export class App {
     game.combat.paced = true;
     this.timers.push(window.setInterval(() => {
       const c = game.combat;
-      if (!c.queue.length || performance.now() < this.turnAt) return;
+      if (!c.waiting || performance.now() < this.turnAt) return;
       const p = game.player;
       let a = c.nextTurn();
       // Turns far off the map need no watching.
-      while (a && (a.z !== p.z || Math.max(Math.abs(a.x - p.x), Math.abs(a.y - p.y)) > 8) && c.queue.length) a = c.nextTurn();
+      while (a && (a.z !== p.z || Math.max(Math.abs(a.x - p.x), Math.abs(a.y - p.y)) > 8) && c.waiting) a = c.nextTurn();
       this.turnAt = performance.now() + BATTLE_SPEEDS[this.battleSpeed].ms;
       this.changed();
       this.view.render();
@@ -1056,7 +1063,7 @@ export class App {
 
   /** While fighters take their turns, the player waits. */
   private get busy(): boolean {
-    return this.game.combat.queue.length > 0;
+    return this.game.combat.waiting;
   }
 
   /** The scroll bar's thumb: shown only when there is more than fits. */
@@ -1342,6 +1349,17 @@ export class App {
         const doll = this.doll(a, (o) => draw(picked === o ? null : o));
         if (doll) body.append(doll);
         body.append(stats);
+        // How they fight (the combat mode each keeps): the leader is always the player's to move.
+        if (g.kind !== 'se' && a.inParty && a !== g.party[0]?.actor) {
+          const modes = el('div', 'seg modes');
+          for (const [m, label] of FIGHT_MODES) modes.append(btn(label, () => {
+            a.combatMode = m;
+            g.say('sys', `${name} will ${FIGHT_SAYS[m]}.`);
+            draw(picked);
+            this.changed();
+          }, (a.combatMode || 0x3) === m ? 'on' : ''));
+          body.append(el('div', 'small', 'In a fight'), modes);
+        }
         const inv = g.objects.inventories[a.id];
         if (inv.length === 0) body.append(el('p', 'small', 'Carrying nothing.'));
         const add = (o: Obj, depth: number): void => {
