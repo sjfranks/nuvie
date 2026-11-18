@@ -192,6 +192,9 @@ export class Game implements ConvWorld {
   private said = '';
   private pending: Converse['events'] = [];
 
+  /** A mid-game scene to show (Martian Dreams' midgameN.lzc), or null. */
+  cutscene: number | null = null;
+
   /** Martian Dreams' usecode (usecode.lua). */
   readonly mdUse = new MdUseCode(this);
   /** Savage Empire's usecode (usecode.lua). */
@@ -797,7 +800,7 @@ export class Game implements ConvWorld {
     }
   }
 
-  private stepActor(a: Actor, dx: number, dy: number): boolean {
+  stepActor(a: Actor, dx: number, dy: number): boolean {
     const nx = wrap(a.x + dx, a.z);
     const ny = wrap(a.y + dy, a.z);
     if (!this.canStand(nx, ny, a.z)) return false;
@@ -864,6 +867,9 @@ export class Game implements ConvWorld {
         case WT.FACE_WEST:
           if (a.direction !== a.worktype - WT.FACE_NORTH) a.setDirection(a.worktype - WT.FACE_NORTH);
           break;
+        default:
+          // Martian Dreams' miners: the cokers and stokers of the coal works (worktype.lua).
+          if (this.kind === 'md') this.mdUse.work(a);
       }
     }
   }

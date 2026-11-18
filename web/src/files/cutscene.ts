@@ -71,3 +71,42 @@ export function shapeRgba(s: Shape, pal: Uint8Array): Uint8ClampedArray {
   }
   return out;
 }
+
+/** load_midgame_file: each scene's three lines of words and its pictures (a background, then the Avatar as a man and as a woman). */
+export function loadMidgame(files: GameFiles, name: string, md: boolean): { text: string[]; images: Shape[] }[] {
+  const data = files.get(name);
+  if (!data) return [];
+  const lib = new Lib(data, 4, true);
+  const out: { text: string[]; images: Shape[] }[] = [];
+  const pics = (i: number): Shape[] => {
+    const item = lib.item(i);
+    if (!item) return [];
+    const sub = new Lib(item, 4, true);
+    const got: Shape[] = [];
+    for (let j = 0; j < 16; j++) {
+      const it = sub.item(j);
+      if (!it) break;
+      const s = readShape(it, 0);
+      if (s) got.push(s);
+    }
+    return got;
+  };
+  // Martian Dreams' first entry is bogus.
+  for (let idx = md ? 1 : 0; idx < 200; ) {
+    const text: string[] = [];
+    for (let i = 0; i < 3; i++, idx++) {
+      const t = lib.item(idx);
+      if (!t) return out;
+      let s = '';
+      for (const c of t) {
+        if (c === 0) break;
+        s += String.fromCharCode(c);
+      }
+      text.push(s);
+    }
+    const images = pics(idx++);
+    if (md) images.push(...pics(idx++));
+    out.push({ text, images });
+  }
+  return out;
+}

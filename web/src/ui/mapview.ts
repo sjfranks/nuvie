@@ -31,7 +31,8 @@ export class MapView {
   private th = 0;
   private buf = new Uint8Array(0);
   private image: ImageData | null = null;
-  private readonly palette = new Uint8Array(768);
+  /** The game's palette, 8 bits each of red, green and blue. */
+  readonly palette = new Uint8Array(768);
   private readonly pal32 = new Uint32Array(256);
   private rotCounter = 0;
   private readonly ctx: CanvasRenderingContext2D;

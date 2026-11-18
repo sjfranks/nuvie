@@ -13,6 +13,8 @@ import { MD_IN_PLACE } from '../game/mdusecode.ts';
 import { REAGENTS, reagentCounts, reagentNames, words, type Spell } from '../game/magic.ts';
 import { kvDelete, kvGet, kvSet } from '../files/gamefiles.ts';
 import { endingPicture, stillPicture } from './endings.ts';
+import { loadMidgame, shapeRgba } from '../files/cutscene.ts';
+import type { Shape } from '../files/shape.ts';
 import { INTRO_U6 } from './intro6.ts';
 import { Gypsy } from './gypsy.ts';
 import { ASK_NAME, INTRO, Intanya, QUESTIONS as QUESTIONS_SE, SE_ENDING, SE_STORY } from './intanya.ts';
@@ -349,6 +351,49 @@ export class App {
         body.append(watch);
       }
     });
+  }
+
+  /** play_midgame_sequence: a scene's pictures (the Avatar as they are) and its words, a line at a time. */
+  private midgame(n: number): void {
+    const g = this.game;
+    const scenes = loadMidgame(g.files, `midgame${n.toString(16)}.lzc`, g.kind === 'md');
+    const pages: { text: string; pic: number }[] = [];
+    scenes.forEach((s, i) => s.text.forEach((t) => t && t !== '*END*' && pages.push({ text: t.replace(/\^/g, ' '), pic: i })));
+    if (!pages.length) return;
+    const draw = (k: number): void => {
+      if (k >= pages.length) return this.close();
+      const sc = scenes[pages[k].pic];
+      this.open(g.kind === 'md' ? 'Martian Dreams' : 'The Savage Empire', (body) => {
+        const c = document.createElement('canvas');
+        // The scene's own size: its background, drawn where its hot spot falls.
+        c.width = sc.images[0]?.w ?? 320;
+        c.height = sc.images[0]?.h ?? 200;
+        c.className = 'scene midgame';
+        const ctx = c.getContext('2d')!;
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, c.width, c.height);
+        const pal = this.view.palette;
+        const layer = (s: Shape | undefined): void => {
+          if (!s) return;
+          const tmp = document.createElement('canvas');
+          tmp.width = s.w;
+          tmp.height = s.h;
+          tmp.getContext('2d')!.putImageData(new ImageData(new Uint8ClampedArray(shapeRgba(s, pal)), s.w, s.h), 0, 0);
+          const bg = sc.images[0];
+          ctx.drawImage(tmp, (bg?.hx ?? 0) - (s.hx ?? 0), (bg?.hy ?? 0) - (s.hy ?? 0));
+        };
+        layer(sc.images[0]);
+        if (sc.images.length > 1) layer(sc.images[1 + (g.gender === 1 ? 1 : 0)]);
+        body.append(c, el('p', '', pages[k].text));
+        const row = el('div', 'row');
+        row.append(btn(k + 1 < pages.length ? 'Continue' : 'Close', () => {
+          this.onClose = null;
+          draw(k + 1);
+        }, 'primary'));
+        body.append(row);
+      });
+    };
+    draw(0);
   }
 
   /** Ultima VI's introduction, a page of its words over a still at a time; then the gypsy. */
@@ -808,6 +853,11 @@ export class App {
       });
     }
     if (g.won && !this.sheet) this.ending();
+    if (g.cutscene !== null && !this.sheet) {
+      const n = g.cutscene;
+      g.cutscene = null;
+      this.midgame(n);
+    }
     if (g.peer) {
       g.peer = false;
       this.open(g.kind === 'u6' ? 'Peer' : 'Map', (body) => {
