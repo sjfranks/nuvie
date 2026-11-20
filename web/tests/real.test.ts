@@ -1049,6 +1049,41 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     console.log('Dupre readied:', inv.filter((o) => o.loc === 'readied').map((o) => g.objects.look(o)));
   });
 
+  it('answers the copy protection\'s questions from the manual, every one', () => {
+    const who = { ultima6: 5, martian: 16, savage: 33 }[folder];
+    const right = { ultima6: /correct/i, martian: /pleased with your answers/i, savage: /memory has returned/i }[folder];
+    const wrong = /not the correct answer|not fully returned|not studied|incorrect|wrong/i;
+    const asked = new Set<string>();
+    let tries = 0;
+    for (; tries < 60; tries++) {
+      const g = new Game(load());
+      for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
+      const a = g.actors.list.find((x) => g.lib.scriptNum(x) === who && x.objN !== 0);
+      if (!a) break;
+      // Martian Dreams asks when the hatch is pried open (use_prybar_on_hatch).
+      if (folder === 'martian') a.talkFlags |= 1 << 2;
+      g.talkTo(a);
+      for (let i = 0; i < 80 && g.converse; i++) {
+        const ask = g.asking();
+        if (g.paused) g.continueTalk();
+        else if (ask) {
+          if (ask.type === 'char') g.reply('y');
+          else if (ask.type === 'keyword') g.reply('bye');
+          else g.reply('Avatar');
+        } else break;
+      }
+      const text = g.log.map((l) => l.text).join('\n');
+      const answered = g.log.filter((l) => l.text === '(The answer, from the manual:)').length;
+      if (answered === 0) continue;
+      expect(text).toMatch(right);
+      expect(text).not.toMatch(wrong);
+      for (let i = 0; i < g.log.length; i++) if (g.log[i].text === '(The answer, from the manual:)') asked.add(g.log[i + 1].text);
+      if (asked.size >= ({ ultima6: 10, martian: 9, savage: 9 }[folder])) break;
+    }
+    console.log(folder, 'answers given', [...asked].join(', '), 'in', tries + 1, 'conversations');
+    expect(asked.size).toBeGreaterThan(0);
+  });
+
   it('holds a conversation with everyone who has one, without the interpreter failing', () => {
     const g = new Game(load());
     let talked = 0;

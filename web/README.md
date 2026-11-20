@@ -190,6 +190,10 @@ the original: in it each of the party fights their own way; out of it they follo
 whether or not, taking their turns by movement points; the button flashes when foes are in sight and the party is not
 in combat mode. Not alone, nor aboard a boat.
 
+The copy protection is answered for the player: Lord British's question from the Compendium, Tesla's from the
+Mysteries of Mars and Time Travel (when the capsule's hatch is pried open), and Intanya's from Rafkin's notes and the
+magazine - each answered as the script asks it, the answer shown in the log.
+
 The three gargoyles in Lord British's throne room are the new game's opening fight: their egg hatches at the start and
 is then gone, so they never come again (a game saved before this loses the egg when loaded).
 

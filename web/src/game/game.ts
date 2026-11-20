@@ -171,6 +171,29 @@ export function facing(dx: number, dy: number): number {
   return dy > 0 ? 2 : 0;
 }
 
+/**
+ * The copy protection's questions, by words of each, and the answers its script takes (the first letters of these are
+ * what it checks).
+ */
+const COPY_ANSWERS: Record<Kind, [string, string][]> = {
+  u6: [
+    ['trolls lack', 'endurance'], ['tangle vine', 'centre pod'], ['headlesses', 'wizard experiment'],
+    ['spawning grounds of hydras', 'nightshade mushroom'], ['rotworms', 'torch'], ['sea serpents attack', 'fireball'],
+    ['wisps oft mistaken', 'fireflies'], ['giant squids', 'beak'], ['images of the silver serpent', 'tombs'],
+    ['reapers remnants', 'ancient forest'],
+  ],
+  md: [
+    ['martian year', '687'], ['airsquid', 'hydrogen'], ["earth's wolves", 'hedgehound'], ['crude weapons', 'protomartian'],
+    ['birthing plot', 'cultivator'], ['towers discovered by peary', 'ruby'], ['buffalo bill', '4000'],
+    ['marie curie', 'polonium'], ['lowell built his observatory', 'Arizona'],
+  ],
+  se: [
+    ["jimmy's notebook", 'weatherproof'], ['what sort of eyes', 'cold reptilian'], ['what was it that you lacked', 'memory'],
+    ['old and trusty friend', 'bowie knife'], ['valley is akin to', 'time capsule'], ['happens frequently between tribes', 'clashes'],
+    ['what expedition has returned', 'wild basin'], ['cover of ultimate adventures', 'coat'], ['first tribe rafkin', 'Nahuatla'],
+  ],
+};
+
 export class Game implements ConvWorld {
   readonly kind: Kind;
   readonly tiles: Tiles;
@@ -1275,8 +1298,30 @@ export class Game implements ConvWorld {
         break;
       }
     }
-    if (!this.paused && c.ask) this.keepNote(c);
+    if (!this.paused && c.ask) {
+      const answer = c.ask.type === 'keyword' ? this.copyAnswer() : null;
+      this.keepNote(c);
+      // The question from the manual that came in the box: answered for the player, the answer said aloud.
+      if (answer) {
+        this.say('sys', '(The answer, from the manual:)');
+        this.reply(answer);
+        return;
+      }
+    }
     this.onChange();
+  }
+
+  /**
+   * The copy protection's question just asked, if it is one, and its answer as the game's script accepts it (Lord
+   * British's from the Compendium; Tesla's from the Mysteries of Mars and Time Travel; Intanya's from Rafkin's notes
+   * and the magazine).
+   */
+  private copyAnswer(): string | null {
+    let asked = '';
+    for (let i = this.log.length - 1; i >= 0 && this.log[i].kind !== 'you'; i--) if (this.log[i].kind === 'npc') asked = this.log[i].text + ' ' + asked;
+    const q = asked.toLowerCase();
+    const hit = COPY_ANSWERS[this.kind].find(([k]) => q.includes(k));
+    return hit ? hit[1] : null;
   }
 
   private keepNote(c: Converse): void {
