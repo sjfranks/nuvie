@@ -18,6 +18,7 @@ import { mdEndingScene } from './mdending.ts';
 import { u6EndingScene } from './u6ending.ts';
 import { u6IntroScene } from './u6intro.ts';
 import { mdIntroScene, mdOpeningScene } from './mdintro.ts';
+import type { VoxelView } from './voxelview.ts';
 import { seTitleScene } from './seintro.ts';
 import { loadImages, loadMidgame, shapeRgba } from '../files/cutscene.ts';
 import type { Shape } from '../files/shape.ts';
@@ -62,10 +63,12 @@ function mapCalibration(kind: string, aspect: number): { u: [number, number]; v:
 }
 
 /** The battle speeds: how long each fighter's turn is shown. */
+/** How long each turn seen in a fight is shown. The original, and Nuvie, show none: creatures' turns pass at once. */
 const BATTLE_SPEEDS = [
-  { name: 'slow', ms: 750 },
-  { name: 'normal', ms: 420 },
-  { name: 'fast', ms: 200 },
+  { name: 'slow', ms: 500 },
+  { name: 'normal', ms: 220 },
+  { name: 'fast', ms: 80 },
+  { name: 'instant, as the original', ms: 0 },
 ];
 const esc = (s: string): string => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]!);
 
@@ -140,13 +143,15 @@ export class App {
     this.zoomReset.setAttribute('aria-label', 'Back to the usual zoom');
     this.zoomReset.hidden = true;
     box.append(canvas, this.view.light, this.modeTag, this.face, this.zoomReset);
+    this.mapCanvas = canvas;
+    if (this.voxelsWanted()) void this.setVoxels(true);
     this.status.className = 'clock';
     wrap.append(box);
     const divider = el('div', 'divider');
     const tabs = el('div', 'tabs');
     this.tabLog = btn('Log', () => this.setPane('log'));
     this.tabParty = btn('Party', () => this.setPane('party'));
-    tabs.append(this.tabLog, this.tabParty, this.status, btn('Menu', () => this.menu()));
+    tabs.append(this.tabLog, this.tabParty, this.status, btn('Journal', () => this.journal()));
     divider.append(tabs);
     const pane = el('div', 'pane paper');
     // A scroll bar of our own (phones hide theirs): where the view is in what there is.
@@ -158,8 +163,15 @@ export class App {
     side.append(divider, pane, this.foot);
     this.root.append(wrap, side);
     host.replaceChildren(this.root);
+    // Only the player's own scrolling leaves the newest lines: back to read stops following, down to the end follows
+    // again. Text and buttons coming and going move the scroll too, and must not.
+    let touching = 0;
+    const hold = (): void => {
+      touching = performance.now() + 1200;
+    };
+    for (const ev of ['touchstart', 'touchmove', 'wheel', 'pointerdown', 'keydown']) this.body.addEventListener(ev, hold, { passive: true });
     this.body.addEventListener('scroll', () => {
-      if (this.pane === 'log') this.stick = this.body.scrollTop + this.body.clientHeight >= this.body.scrollHeight - 6;
+      if (this.pane === 'log' && performance.now() < touching) this.stick = this.body.scrollTop + this.body.clientHeight >= this.body.scrollHeight - 6;
       this.drawThumb();
     });
     // The pane changes size (a conversation shrinks the map): the newest line stays in view.
@@ -289,20 +301,22 @@ export class App {
     game.onChange = () => this.changed();
     this.timers.push(window.setInterval(() => {
       this.view.tick();
-      this.view.render();
+      this.renderMap();
+      // What the party sees changes as the map is drawn: the combat button lights when foes come into sight.
+      this.drawFoot();
     }, 150));
     // A fight's turns, one at a time, at the battle speed: each fighter is seen to act.
     game.combat.paced = true;
     this.timers.push(window.setInterval(() => {
       const c = game.combat;
       if (!c.waiting || performance.now() < this.turnAt) return;
-      const p = game.player;
+      const ms = BATTLE_SPEEDS[this.battleSpeed].ms;
       let a = c.nextTurn();
-      // Turns far off the map need no watching.
-      while (a && (a.z !== p.z || Math.max(Math.abs(a.x - p.x), Math.abs(a.y - p.y)) > 8) && c.waiting) a = c.nextTurn();
-      this.turnAt = performance.now() + BATTLE_SPEEDS[this.battleSpeed].ms;
+      // Turns out of sight need no watching; at the original's speed, none do.
+      for (let n = 0; a && c.waiting && n < 500 && (ms === 0 || !this.view.canSee(a.x, a.y, a.z)); n++) a = c.nextTurn();
+      this.turnAt = performance.now() + ms;
       this.changed();
-      this.view.render();
+      this.renderMap();
     }, 30));
     this.layout();
     this.changed();
@@ -715,6 +729,54 @@ export class App {
   /** Squares added across by pinching out (even, so the party stays in the middle). */
   private zoomOut = 0;
   private zoomReset!: HTMLButtonElement;
+  private mapCanvas!: HTMLCanvasElement;
+  /** The map in voxels, when chosen (loaded only then). */
+  private voxels: VoxelView | null = null;
+
+  private voxelsWanted(): boolean {
+    try {
+      return localStorage.getItem('nuvie.view') === 'voxels';
+    } catch {
+      return false;
+    }
+  }
+
+  /** Show the map in voxels, or flat again. */
+  private async setVoxels(on: boolean): Promise<void> {
+    try {
+      localStorage.setItem('nuvie.view', on ? 'voxels' : 'flat');
+    } catch {
+      // Not kept.
+    }
+    if (!on) {
+      this.voxels?.canvas.remove();
+      this.voxels?.dispose();
+      this.voxels = null;
+      this.view.pick = null;
+      this.mapCanvas.classList.remove('under');
+      this.renderMap();
+      return;
+    }
+    if (this.voxels) return;
+    try {
+      const { VoxelView } = await import('./voxelview.ts');
+      const v = new VoxelView();
+      this.mapCanvas.after(v.canvas);
+      this.mapCanvas.classList.add('under');
+      this.voxels = v;
+      this.view.pick = (cx, cy) => v.pick(cx, cy);
+      this.renderMap();
+    } catch (e) {
+      this.game.say('sys', `The voxel view cannot be shown here (${(e as Error).message}).`);
+      this.mapCanvas.classList.remove('under');
+    }
+  }
+
+  /** Draw the map: flat, and in voxels if they are shown. */
+  private renderMap(): void {
+    this.view.render();
+    this.voxels?.draw(this.view.frame());
+  }
 
   /** The default zoom: as many squares across as keeps each a comfortable size for a finger. */
   private baseCols(): number {
@@ -736,7 +798,7 @@ export class App {
     const n = this.baseCols() + this.zoomOut;
     if (n !== this.view.cols) this.view.resize(n, n);
     this.zoomReset.hidden = this.zoomOut === 0;
-    this.view.render();
+    this.renderMap();
   }
 
   // ---- what a tap on the map means ----
@@ -899,7 +961,7 @@ export class App {
       }
       this.view.marks.push({ x: w.x, y: w.y, color, kind: 'box' });
     }
-    this.view.render();
+    this.renderMap();
   }
 
   private key(e: KeyboardEvent): void {
@@ -973,7 +1035,7 @@ export class App {
       this.sheet = null;
       this.setMode('where');
     }
-    this.view.render();
+    this.renderMap();
     this.status.textContent = `${String(g.clock.hour).padStart(2, '0')}:${String(g.clock.minute).padStart(2, '0')}`;
     // Afloat or aloft, the wind matters: shown as the way it blows from.
     if (g.vehicle) {
@@ -995,7 +1057,7 @@ export class App {
     }
     if (this.root.classList.toggle('talking', !!g.converse) !== this.wasTalking) {
       this.wasTalking = !this.wasTalking;
-      if (this.wasTalking) this.talkFrom = Math.max(0, g.log.length - 3);
+      if (this.wasTalking) this.talkFrom = Math.min(g.talkStart, g.log.length);
       requestAnimationFrame(() => this.layout());
     }
     this.tabLog.classList.toggle('on', pane === 'log');
@@ -1070,7 +1132,14 @@ export class App {
     this.exchangeFrom = -1;
     if (grew) this.stick = true;
     this.toBottom();
+    // Lines that grow as they settle (fonts, wrapping) keep the end in view.
+    this.logSize.disconnect();
+    this.logSize.observe(log);
   }
+
+  private readonly logSize = new ResizeObserver(() => {
+    if (this.pane === 'log' && !this.game.converse) this.toBottom();
+  });
 
   /** Where the conversation's exchange now shown begins in the log. */
   private exchangeFrom = -1;
@@ -1177,7 +1246,7 @@ export class App {
     const opts = ask ? g.sayOptions() : [];
     // Rebuilt only when what it offers changes, so a text being typed is not lost.
     const gate = !!g.converse && !g.paused && ask?.type === 'keyword' && this.optsAt !== g.log.length;
-    const key = g.converse ? `say:${g.paused}:${gate}:${ask?.type}:${opts.map((o) => o.say + o.heard).join()}:${g.log.length}` : `cmd:${this.mode}`;
+    const key = g.converse ? `say:${g.paused}:${gate}:${ask?.type}:${opts.map((o) => o.say + o.heard).join()}:${g.log.length}` : `cmd:${this.mode}:${g.combat.mode}:${!g.combat.mode && this.foesSeen()}`;
     if (key === this.footKey) return;
     this.footKey = key;
     if (!g.converse) {
@@ -1195,15 +1264,18 @@ export class App {
       };
       const m = (label: string, mode: Mode, tile: number): HTMLButtonElement =>
         icon(btn(label, () => this.setMode(this.mode === mode ? null : mode), this.mode === mode ? 'on' : ''), tile);
+      // Combat mode, begun and broken off (the original's peace and crossed-swords icon); lit when foes are in sight.
+      const fight = icon(btn('Combat', () => g.combat.toggle(), g.combat.mode ? 'on' : this.foesSeen() ? 'alert' : ''), g.combat.mode ? 415 : 414);
       bar.append(
         m('Attack', 'attack', 400),
+        ...(g.kind === 'se' ? [] : [fight]),
         // Martian Dreams and Savage Empire have no spells: the land about, seen from above, instead.
         g.kind === 'u6' ? icon(btn('Cast', () => this.spellbook()), 401) : btn('Map', () => {
           g.peer = true;
           this.changed();
         }),
         m('Look', 'look', 403), m('Talk', 'talk', 402), m('Use', 'use', 407), m('Get', 'get', 404),
-        icon(btn('Rest', () => this.restSheet()), 408), icon(btn('Notes', () => this.journal()), 409),
+        icon(btn('Rest', () => this.restSheet()), 408), icon(btn('Save', () => this.menu('save')), 409),
       );
       this.foot.replaceChildren(bar);
       return;
@@ -1818,15 +1890,34 @@ export class App {
     });
   }
 
-  private menu(): void {
+  /** Foes the party can see now. */
+  private foesSeen(): boolean {
+    return this.game.combat.foes(12).some((a) => this.view.canSee(a.x, a.y, a.z));
+  }
+
+  /** The disk: saving the game, and the settings. */
+  private menu(tab: 'save' | 'settings' = 'save'): void {
     const g = this.game;
-    this.open('Nuvie Web', (body) => {
+    this.open('Game', (body) => {
+      const seg = el('div', 'seg');
+      seg.append(btn('Save', () => this.menu('save'), tab === 'save' ? 'on' : ''), btn('Settings', () => this.menu('settings'), tab === 'settings' ? 'on' : ''));
+      body.append(seg);
       const item = (label: string, f: () => void, cls = ''): void => {
         const row = el('div', 'row');
         row.append(btn(label, f, cls));
         body.append(row);
       };
-      item('Journal', () => this.journal());
+      if (tab === 'save') {
+        item('Save now', () => {
+          this.hooks.save(g.save());
+          g.say('sys', 'Saved.');
+          this.close();
+        }, 'primary');
+        item('Start this world afresh', () => confirm('Start again from the beginning? The saved game is lost.') && this.hooks.leave(true));
+        item('Change game files', () => this.hooks.leave(false));
+        body.append(el('p', 'small', 'The game also saves itself as you play, in this browser. A TypeScript port of the Nuvie engine (GPL); it plays your own copy of the game and ships none of it.'));
+        return;
+      }
       const big = document.documentElement.classList.contains('big-text');
       item(big ? 'Text: large' : 'Text: small', () => {
         document.documentElement.classList.toggle('big-text', !big);
@@ -1849,11 +1940,13 @@ export class App {
         this.close();
         this.layout();
       });
+      item(this.voxels ? 'View: 3D voxels' : 'View: flat', () => {
+        void this.setVoxels(!this.voxels).then(() => this.menu('settings'));
+      });
       item(`Formation: ${FORMATIONS.find(([f]) => f === this.game.formation)?.[1] ?? 'standard'}`, () => {
         const i = FORMATIONS.findIndex(([f]) => f === this.game.formation);
         this.game.formation = FORMATIONS[(i + 1) % FORMATIONS.length][0];
-        this.close();
-        this.menu();
+        this.menu('settings');
       });
       item(`Battle speed: ${BATTLE_SPEEDS[this.battleSpeed].name}`, () => {
         this.battleSpeed = (this.battleSpeed + 1) % BATTLE_SPEEDS.length;
@@ -1862,8 +1955,7 @@ export class App {
         } catch {
           // Not kept.
         }
-        this.close();
-        this.menu();
+        this.menu('settings');
       });
       item(this.sfx.enabled ? 'Sounds: on' : 'Sounds: off', () => {
         this.sfx.enabled = !this.sfx.enabled;
@@ -1880,14 +1972,6 @@ export class App {
           this.close();
         });
       }
-      item('Save now', () => {
-        this.hooks.save(g.save());
-        g.say('sys', 'Saved.');
-        this.close();
-      });
-      item('Start this world afresh', () => confirm('Start again from the beginning? The saved game is lost.') && this.hooks.leave(true));
-      item('Change game files', () => this.hooks.leave(false));
-      body.append(el('p', 'small', 'The game saves itself as you play, in this browser. A TypeScript port of the Nuvie engine (GPL); it plays your own copy of the game and ships none of it.'));
     });
   }
 }

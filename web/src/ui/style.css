@@ -90,7 +90,7 @@ button:disabled { opacity: .45; }
 
 .foot { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .bar-cmds { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; padding: 6px 8px 8px; }
-.bar-cmds.icons { grid-template-columns: repeat(8, 1fr); gap: 4px; }
+.bar-cmds.icons { grid-template-columns: none; grid-auto-columns: minmax(0, 1fr); grid-auto-flow: column; gap: 3px; }
 .item.spell { grid-template-columns: 1fr auto; }
 .iconbtn { padding: 0; min-height: 52px; display: flex; align-items: center; justify-content: center; }
 .iconbtn .icon { width: 32px; height: 32px; image-rendering: pixelated; }
@@ -201,3 +201,11 @@ label.field input { min-height: 40px; border: 2px solid #000; border-radius: 3px
 /* Solo mode: the one walking alone, and the way back to the party. */
 .row.soloing { align-items: center; justify-content: space-between; margin: 4px 0 8px; }
 .member.alone .name::after { content: ' (alone)'; color: var(--key); }
+
+/* Foes in sight and the party not in combat mode: the combat button asks to be pressed. */
+.bar-cmds button.alert { outline: 3px solid #c0281e; outline-offset: -3px; animation: alert 1s ease-in-out infinite alternate; }
+@keyframes alert { from { outline-color: #c0281e; } to { outline-color: transparent; } }
+
+/* The voxel view over the flat map, which still takes the touches (and works out where they fall through it). */
+.voxels { position: absolute; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none; }
+.view.under { opacity: 0; }

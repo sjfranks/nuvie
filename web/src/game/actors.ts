@@ -130,6 +130,8 @@ export class Actor {
 
   /** What the actor was before mounting a horse. */
   baseObjN = 0;
+  /** The frame they had before lying down to sleep. */
+  oldFrame = 0;
 
   /**
    * The squares an actor fills beyond its own, with the frame drawn on each: a two-square creature's back half
@@ -293,6 +295,14 @@ export class Actors {
       a.moves = r1(o.movementPoints + i);
       a.talkFlags = r1(o.talkFlags + i);
       a.movementFlags = r1(o.movementFlags + i);
+      // What they are when not asleep, on a horse or the like, and the frame they had (ActorManager's base_obj_n).
+      const b1 = r1(o.oldObj + i * 2);
+      const b2 = r1(o.oldObj + i * 2 + 1);
+      const base = b1 | ((b2 & 0x3) << 8);
+      if (base !== 0) {
+        a.baseObjN = base;
+        a.oldFrame = b2 >> 2;
+      } else a.oldFrame = a.frameN;
     }
     // Actor 0 is the party's vehicle, and nothing unless the party is aboard one.
     const v = this.list[0];
