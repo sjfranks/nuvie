@@ -2,8 +2,15 @@
 
 A TypeScript port of the Nuvie engine - Ultima VI, Martian Dreams and The Savage Empire - for a phone held upright
 (or sideways) and for any browser. Like Nuvie, it
-plays **your own copy** of the game and ships none of it: on the first screen, choose the game's folder, its files or
-a .zip, and they are kept in the browser (IndexedDB) and never leave the device.
+plays **your own copy** of the game and ships none of it.
+
+It opens, as the originals do, on their titles: the three games one above the other, each shown by its own title
+picture (Ultima VI's from titles.shp, The Savage Empire's over its jungle from intro.lzc, Martian Dreams' menu from
+mdmenu.lzc) once its files are added - its folder, its files or a .zip, kept in the browser (IndexedDB) and never
+leaving the device. A tap on a game plays it, carrying on its own saved game: each of the three has its own files and
+its own save, and "Choose another game" (on the disk) goes back. Files chosen for the wrong game are kept with the
+right one; a game can be given new files or forgotten. A game kept before there were three places is moved into its
+own, with its save.
 
 **Try the demo world** on the first screen needs no game at all: a small island made for this port (its own tiles,
 people and words), written out in the game's file formats so the whole engine runs on it. The tests use it too.

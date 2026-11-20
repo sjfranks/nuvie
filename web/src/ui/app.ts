@@ -1863,7 +1863,7 @@ export class App {
           this.close();
         }, 'primary');
         item('Start this world afresh', () => confirm('Start again from the beginning? The saved game is lost.') && this.hooks.leave(true));
-        item('Change game files', () => this.hooks.leave(false));
+        item('Choose another game', () => this.hooks.leave(false));
         body.append(el('p', 'small', 'The game also saves itself as you play, in this browser. A TypeScript port of the Nuvie engine (GPL); it plays your own copy of the game and ships none of it.'));
         return;
       }
