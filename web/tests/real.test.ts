@@ -264,6 +264,28 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     expect(g.log.at(-1)!.text).toBe('Break off combat!');
   });
 
+  it.runIf(folder === 'ultima6')('hatches the throne room gargoyles only at a new game\'s start', () => {
+    const g = new Game(load());
+    const gargs = () => g.actors.list.filter((a) => a.id >= 203 && a.objN === 363 && a.alive && a.visible);
+    expect(gargs().length).toBe(3);
+    const egg = g.objects.all().find((o) => o.objN === 335 && o.x === 307 && o.y === 350 && o.z === 0);
+    expect(egg).toBeUndefined();
+    // Gone, then away and back: no more come.
+    for (const a of gargs()) Object.assign(a, { objN: 0, visible: false });
+    const [x, y] = [g.player.x, g.player.y];
+    g.relocate(x + 40, y, 0);
+    g.relocate(x + 12, y, 0);
+    g.relocate(x, y, 0);
+    expect(gargs().length).toBe(0);
+    // A game saved before this, egg and all, loses the egg when loaded.
+    const old = new Game(load());
+    const state = JSON.parse(JSON.stringify(old.save()));
+    state.objs.push([335, 0, 0x62, 307, 350, 0, 100, 2, 0, 0], [363, 0, 0, 0, 0, 0, 3, 0, 1, state.objs.length]);
+    for (const a of old.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
+    const back = new Game(load(), state);
+    expect(back.objects.all().some((o) => o.objN === 335 && o.x === 307 && o.y === 350)).toBe(false);
+  });
+
   it.runIf(folder === 'ultima6')('casts spells from a readied book, using magic points and reagents', () => {
     const g = new Game(load());
     const avatar = g.player;

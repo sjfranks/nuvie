@@ -183,6 +183,9 @@ the original: in it each of the party fights their own way; out of it they follo
 whether or not, taking their turns by movement points; the button flashes when foes are in sight and the party is not
 in combat mode. Not alone, nor aboard a boat.
 
+The three gargoyles in Lord British's throne room are the new game's opening fight: their egg hatches at the start and
+is then gone, so they never come again (a game saved before this loses the egg when loaded).
+
 People go to bed at night: arrived where their schedule sends them to sleep, they lie in the bed there (or on the
 floor), and get up in the morning (U6Actor::wt_sleep). A mouse - Sherry - goes through mouseholes, bars and
 portcullises (U6Actor::check_move).

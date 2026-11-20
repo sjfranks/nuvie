@@ -309,6 +309,8 @@ export class Game implements ConvWorld {
     if (saved) this.restore(saved);
     else this.say('sys', 'The world is loaded. Tap the map to walk.');
     this.combat.update(!saved);
+    // Hatched (or, in a saved game, long since): the throne room's gargoyle egg is gone.
+    this.combat.dropOpeningEgg();
     if (this.kind === 'u6' && !saved) this.updateMoongates();
   }
 

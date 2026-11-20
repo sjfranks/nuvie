@@ -36,6 +36,8 @@ const MD_IMMUNE_ID = new Set([0x5c, 0x5d, 0x59, 0x5a, 0x54, 0x52, 0x6d, 0x68, 0x
 /** A spell held as a weapon: a monster's, or a staff's (obj 336). */
 const CHARGE = 336;
 const BLOOD = 338;
+/** Ultima VI's winged gargoyle. */
+const GARGOYLE = 363;
 const ARROW = 55;
 const BOLT = 56;
 const MOVETYPE_WATER_LOW = 2;
@@ -1500,6 +1502,11 @@ export class Combat {
     }
     for (const egg of this.allEggs()) {
       if (egg.loc !== 'map') continue;
+      // The opening gargoyles hatch at a new game's start, and never after.
+      if (this.isOpeningEgg(egg) && !g.fresh) {
+        g.objects.unlink(egg);
+        continue;
+      }
       const dx = Math.abs(egg.x - p.x);
       const dy = Math.abs(egg.y - p.y);
       if (egg.status & 0x40 && (egg.z !== p.z || dx >= 20 || dy >= 20)) egg.status &= ~0x40;
@@ -1508,6 +1515,20 @@ export class Combat {
         this.hatch(egg, g.random(100));
       }
     }
+  }
+
+  /**
+   * The egg in Lord British's throne room holding the three gargoyles that came through the moongate after the Avatar:
+   * they are the new game's opening fight, and come only then.
+   */
+  isOpeningEgg(egg: Obj): boolean {
+    return this.g.kind === 'u6' && egg.x === 307 && egg.y === 350 && egg.z === 0 && !!egg.container?.length &&
+      egg.container.every((e) => e.objN === GARGOYLE);
+  }
+
+  /** Take the opening egg out of the world, so the gargoyles never come again. */
+  dropOpeningEgg(): void {
+    for (const egg of this.allEggs()) if (egg.loc === 'map' && this.isOpeningEgg(egg)) this.g.objects.unlink(egg);
   }
 
   /** EggManager::spawn_egg. */
