@@ -78,14 +78,7 @@ Touch: a tap acts, a finger held down walks; a thing within reach can be dragged
 to them, or onto a free square nearby to move it. Two fingers pinch the map out to see more (the usual zoom is the
 closest; the Zoom button brings it back). The disk (the last button, as in the original) saves, and has the settings:
 the battle speed (each turn in sight shown in turn - slow, normal, fast - or none shown, as the original and Nuvie
-do), the text size, the paper frame round the map, the formation, sounds and music, and the view: flat, or **3D
-voxels** (voxelview.ts, three.js, loaded only when chosen). In voxels every pixel the flat view draws is raised into
-a column as tall as what is drawn there stands - walls a square high, rocks and mountains and blocking furniture part
-way, things lying about low, the ground flat with a little grain, water sunk - and people, creatures and things two
-squares tall (trees, lamp posts, statues) stand upright, row on row of voxels from the ground up, with the ground
-still beneath them; all lit from the front and seen from the south at a slant. The heights go by each tile's kind
-(its flags), not by hand. The flat view still decides what is seen, so line of sight, roofs and animation agree,
-and a tap falls on the square under the finger. Journal is at the top. The log
+do), the text size, the paper frame round the map, the formation, sounds and music. Journal is at the top. The log
 keeps to its newest line unless scrolled back to read. In a conversation the window holds only the current
 exchange; a Continue comes before the topics, and topics already asked - or leading to an answer already heard - are
 greyed and listed last. The app has its own red ankh icon for the Home Screen.
