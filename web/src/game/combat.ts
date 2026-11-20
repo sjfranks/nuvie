@@ -882,6 +882,8 @@ export class Combat {
       }
     }
     if (this.timeStop > 0) this.timeStop--;
+    // And the party's torches, rings and cloak (advance_time's share for them).
+    g.upkeep(1);
   }
 
   /** Who goes next (actor_update_all's choice): the most points for their dexterity, or one with a full turn's worth. */

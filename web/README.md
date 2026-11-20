@@ -207,9 +207,18 @@ a moongate, board a boat or rest, and only the Avatar may talk. "Party mode" (in
 once everyone is within six squares of the leader and no fight is on.
 
 **Formation** (settings): how the party walks behind its leader, as Party::reform_party lays it out - standard (one
-behind and to the left, then widening rows), column, row, delta (an open triangle), or single file. Each member steps
-towards their place, turned to the way the leader faces, keeping beside someone ahead of them; where no step brings
-them nearer (a doorway, a narrow path) they fall in behind in single file. Kept with the saved game.
+behind and to the left, then widening rows), column, row, delta (an open triangle), or single file. The party follows
+as Party::follow and PartyPathFinder have it (partyfollow.ts): each keeps beside someone ahead of them in the
+formation and steps towards their place, turned to the way the leader faces - trying round about when blocked, and
+shoving aside one further back who is in the way - then catches up, forward or sideways after a diagonal step; one
+left behind makes for the leader (and one far behind is brought up beside them). Kept with the saved game.
+
+Torches burn as in the original: a lit one is put out and spent, one on the ground is lit where it lies, one carried
+is readied - a hand must be free - and lit, and a lit torch held burns down over some two hundred turns and goes out.
+The regeneration ring heals its wearer a point a turn; the storm cloak's storm lasts as long as it is worn; and now
+and then an invisibility or regeneration ring, or the cloak, vanishes (advance_time). Wine, mead and ale go to the
+Avatar's head: after four, the steps go astray ("Hic!"), sobering an hour at a time. Ultima VI's Acknowledgements, on
+the vellum scroll, are on the new Avatar's screen and the disk.
 Monsters that know spells (mages, liches, dragons,
 wisps, gazers and the like) carry them as charges and now and then cast one instead of striking, as actor.lua has it.
 

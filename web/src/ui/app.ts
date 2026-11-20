@@ -18,6 +18,7 @@ import { mdEndingScene } from './mdending.ts';
 import { u6EndingScene } from './u6ending.ts';
 import { u6IntroScene } from './u6intro.ts';
 import { mdIntroScene, mdOpeningScene } from './mdintro.ts';
+import { ACK_PAGES, ackPicture } from './acknowledgements.ts';
 import { seTitleScene } from './seintro.ts';
 import { loadImages, loadMidgame, shapeRgba } from '../files/cutscene.ts';
 import type { Shape } from '../files/shape.ts';
@@ -374,7 +375,7 @@ export class App {
       body.append(go);
       if (g.files.has('intro.shp')) {
         const watch = el('div', 'row');
-        watch.append(btn('Watch the introduction first', () => this.introU6(0)));
+        watch.append(btn('Watch the introduction first', () => this.introU6(0)), btn('Acknowledgements', () => this.acknowledgements(0, () => this.creation())));
         body.append(watch);
       }
     });
@@ -448,6 +449,22 @@ export class App {
       body.append(row);
     });
     this.onClose = () => moving?.stop();
+  }
+
+  /** Ultima VI's Acknowledgements (intro.lua's acknowledgements): four pages on the vellum scroll. */
+  private acknowledgements(i: number, back: () => void): void {
+    const g = this.game;
+    if (i >= ACK_PAGES.length) return back();
+    this.open('Acknowledgements', (body) => {
+      const pic = ackPicture(g.files, i);
+      if (pic) {
+        pic.className = 'scene';
+        body.append(pic);
+      } else for (const [text] of ACK_PAGES[i]) body.append(el('p', '', text));
+      const row = el('div', 'row');
+      row.append(btn(i + 1 < ACK_PAGES.length ? 'Continue' : 'Done', () => this.acknowledgements(i + 1, back), 'primary'));
+      body.append(row);
+    });
   }
 
   /** Martian Dreams' new Avatar: Freud's interview aboard the capsule (intro.lua's create_character). */
@@ -1864,6 +1881,7 @@ export class App {
         }, 'primary');
         item('Start this world afresh', () => confirm('Start again from the beginning? The saved game is lost.') && this.hooks.leave(true));
         item('Choose another game', () => this.hooks.leave(false));
+        if (g.kind === 'u6' && g.files.has('vellum1.shp')) item('Acknowledgements', () => this.acknowledgements(0, () => this.menu('save')));
         body.append(el('p', 'small', 'The game also saves itself as you play, in this browser. A TypeScript port of the Nuvie engine (GPL); it plays your own copy of the game and ships none of it.'));
         return;
       }
