@@ -2,8 +2,15 @@
 
 A TypeScript port of the Nuvie engine - Ultima VI, Martian Dreams and The Savage Empire - for a phone held upright
 (or sideways) and for any browser. Like Nuvie, it
-plays **your own copy** of the game and ships none of it: on the first screen, choose the game's folder, its files or
-a .zip, and they are kept in the browser (IndexedDB) and never leave the device.
+plays **your own copy** of the game and ships none of it.
+
+It opens, as the originals do, on their titles: the three games one above the other, each shown by its own title
+picture (Ultima VI's from titles.shp, The Savage Empire's over its jungle from intro.lzc, Martian Dreams' menu from
+mdmenu.lzc) once its files are added - its folder, its files or a .zip, kept in the browser (IndexedDB) and never
+leaving the device. A tap on a game plays it, carrying on its own saved game: each of the three has its own files and
+its own save, and "Choose another game" (on the disk) goes back. Files chosen for the wrong game are kept with the
+right one; a game can be given new files or forgotten. A game kept before there were three places is moved into its
+own, with its save.
 
 **Try the demo world** on the first screen needs no game at all: a small island made for this port (its own tiles,
 people and words), written out in the game's file formats so the whole engine runs on it. The tests use it too.
@@ -78,14 +85,7 @@ Touch: a tap acts, a finger held down walks; a thing within reach can be dragged
 to them, or onto a free square nearby to move it. Two fingers pinch the map out to see more (the usual zoom is the
 closest; the Zoom button brings it back). The disk (the last button, as in the original) saves, and has the settings:
 the battle speed (each turn in sight shown in turn - slow, normal, fast - or none shown, as the original and Nuvie
-do), the text size, the paper frame round the map, the formation, sounds and music, and the view: flat, or **3D
-voxels** (voxelview.ts, three.js, loaded only when chosen). In voxels every pixel the flat view draws is raised into
-a column as tall as what is drawn there stands - walls a square high, rocks and mountains and blocking furniture part
-way, things lying about low, the ground flat with a little grain, water sunk - and people, creatures and things two
-squares tall (trees, lamp posts, statues) stand upright, row on row of voxels from the ground up, with the ground
-still beneath them; all lit from the front and seen from the south at a slant. The heights go by each tile's kind
-(its flags), not by hand. The flat view still decides what is seen, so line of sight, roofs and animation agree,
-and a tap falls on the square under the finger. Journal is at the top. The log
+do), the text size, the paper frame round the map, the formation, sounds and music. Journal is at the top. The log
 keeps to its newest line unless scrolled back to read. In a conversation the window holds only the current
 exchange; a Continue comes before the topics, and topics already asked - or leading to an answer already heard - are
 greyed and listed last. The app has its own red ankh icon for the Home Screen.
@@ -190,6 +190,10 @@ the original: in it each of the party fights their own way; out of it they follo
 whether or not, taking their turns by movement points; the button flashes when foes are in sight and the party is not
 in combat mode. Not alone, nor aboard a boat.
 
+The copy protection is answered for the player: Lord British's question from the Compendium, Tesla's from the
+Mysteries of Mars and Time Travel (when the capsule's hatch is pried open), and Intanya's from Rafkin's notes and the
+magazine - each answered as the script asks it, the answer shown in the log.
+
 The three gargoyles in Lord British's throne room are the new game's opening fight: their egg hatches at the start and
 is then gone, so they never come again (a game saved before this loses the egg when loaded).
 
@@ -203,9 +207,18 @@ a moongate, board a boat or rest, and only the Avatar may talk. "Party mode" (in
 once everyone is within six squares of the leader and no fight is on.
 
 **Formation** (settings): how the party walks behind its leader, as Party::reform_party lays it out - standard (one
-behind and to the left, then widening rows), column, row, delta (an open triangle), or single file. Each member steps
-towards their place, turned to the way the leader faces, keeping beside someone ahead of them; where no step brings
-them nearer (a doorway, a narrow path) they fall in behind in single file. Kept with the saved game.
+behind and to the left, then widening rows), column, row, delta (an open triangle), or single file. The party follows
+as Party::follow and PartyPathFinder have it (partyfollow.ts): each keeps beside someone ahead of them in the
+formation and steps towards their place, turned to the way the leader faces - trying round about when blocked, and
+shoving aside one further back who is in the way - then catches up, forward or sideways after a diagonal step; one
+left behind makes for the leader (and one far behind is brought up beside them). Kept with the saved game.
+
+Torches burn as in the original: a lit one is put out and spent, one on the ground is lit where it lies, one carried
+is readied - a hand must be free - and lit, and a lit torch held burns down over some two hundred turns and goes out.
+The regeneration ring heals its wearer a point a turn; the storm cloak's storm lasts as long as it is worn; and now
+and then an invisibility or regeneration ring, or the cloak, vanishes (advance_time). Wine, mead and ale go to the
+Avatar's head: after four, the steps go astray ("Hic!"), sobering an hour at a time. Ultima VI's Acknowledgements, on
+the vellum scroll, are on the new Avatar's screen and the disk.
 Monsters that know spells (mages, liches, dragons,
 wisps, gazers and the like) carry them as charges and now and then cast one instead of striking, as actor.lua has it.
 

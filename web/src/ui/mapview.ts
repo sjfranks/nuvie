@@ -19,10 +19,6 @@ export interface Mark {
   kind: 'dot' | 'box';
 }
 
-/** In the height buffer: drawn standing up (a figure, a tree), not raised as columns; and the upper of two squares. */
-export const STAND = 0x80;
-export const UPPER = 0x40;
-
 export class MapView {
   cols = 11;
   rows = 11;
@@ -34,13 +30,6 @@ export class MapView {
   private tw = 0;
   private th = 0;
   private buf = new Uint8Array(0);
-  /** How tall what was drawn at each pixel stands, in pixels, for the voxel view (voxelview.ts). */
-  private hbuf = new Uint8Array(0);
-  /** What lay under a figure drawn standing up (STAND below): the ground the voxel view still shows beneath it. */
-  private ubuf = new Uint8Array(0);
-  private uhbuf = new Uint8Array(0);
-  /** The height of what is being drawn now. */
-  private h = 1;
   private image: ImageData | null = null;
   /** The game's palette, 8 bits each of red, green and blue. */
   readonly palette = new Uint8Array(768);
@@ -70,9 +59,6 @@ export class MapView {
     this.th = rows + BORDER * 2;
     this.tmp = new Uint16Array(this.tw * this.th);
     this.buf = new Uint8Array(cols * 16 * rows * 16);
-    this.hbuf = new Uint8Array(cols * 16 * rows * 16);
-    this.ubuf = new Uint8Array(cols * 16 * rows * 16);
-    this.uhbuf = new Uint8Array(cols * 16 * rows * 16);
     this.canvas.width = cols * 16;
     this.canvas.height = rows * 16;
     this.image = this.ctx.createImageData(cols * 16, rows * 16);
@@ -259,14 +245,7 @@ export class MapView {
         if (x < 0 || x >= W) continue;
         const c = d[j * 16 + i];
         if (t.transparent && c === 0xff) continue;
-        const k = y * W + x;
-        // A figure standing up keeps what it stands on, for the voxel view.
-        if (this.h & STAND && !(this.hbuf[k] & STAND)) {
-          this.ubuf[k] = this.buf[k];
-          this.uhbuf[k] = this.hbuf[k];
-        }
-        this.buf[k] = c;
-        this.hbuf[k] = this.h;
+        this.buf[y * W + x] = c;
       }
     }
   }
@@ -279,40 +258,16 @@ export class MapView {
   private drawTile(t: Tile, x: number, y: number, top: boolean): void {
     const tiles = this.game.tiles;
     let n = t.num;
-    const h = this.h;
     if (x < this.cols && y < this.rows) this.drawPart(tiles.get(n), x, y, top);
     if (t.dblWidth) {
       n--;
       if (x > 0 && y < this.rows) this.drawPart(tiles.get(n), x - 1, y, top);
     }
-    // The upper half of a thing two squares tall, standing up, stands on top of the lower.
-    if (h & STAND) this.h = h | UPPER;
     if (t.dblHeight) {
       n--;
       if (y > 0 && x < this.cols) this.drawPart(tiles.get(n), x, y - 1, top);
     }
     if (x > 0 && y > 0 && t.dblWidth && t.dblHeight) this.drawPart(tiles.get(n - 1), x - 1, y - 1, top);
-    this.h = h;
-  }
-
-  /**
-   * How tall a tile stands in the voxel view, in pixels (a square is 16): water sunk, ground flat, walls a full square,
-   * the tops of trees and the like above that, the blocking things of the land (rocks, mountains) and of a room
-   * (tables, chests) part way, things lying about low, and people a little under a square.
-   */
-  private heightOf(t: Tile, kind: 'base' | 'obj' | 'actor'): number {
-    // People and creatures, and things two squares tall (trees, lamp posts, statues), stand up from the ground.
-    if (kind === 'actor' || (t.dblHeight && !(t.flags1 & F1_WALL))) return STAND;
-    if (t.water) return 0;
-    if (t.flags1 & F1_WALL) return 16;
-    if (t.toptile) return 20;
-    if (kind === 'base') return t.passable ? 1 : 10;
-    return t.passable ? 2 : 8;
-  }
-
-  /** The picture as last drawn, a palette index and a height for each pixel, for the voxel view. */
-  frame(): { buf: Uint8Array; hbuf: Uint8Array; ubuf: Uint8Array; uhbuf: Uint8Array; pal: Uint32Array; w: number; h: number } {
-    return { buf: this.buf, hbuf: this.hbuf, ubuf: this.ubuf, uhbuf: this.uhbuf, pal: this.pal32, w: this.cols * 16, h: this.rows * 16 };
   }
 
   /** Whether a square of the world is on the map now and in the party's sight. */
@@ -336,7 +291,6 @@ export class MapView {
     if (!this.seen(vx, vy)) return;
     // Nothing on a wall shows where the room beyond it is dark.
     if ((!this.seen(vx + 1, vy) || !this.seen(vx, vy + 1)) && (!(t.flags1 & F1_WALL) || o.objN === OBJ.BARS)) return;
-    this.h = this.heightOf(t, 'obj');
     this.drawTile(t, vx, vy, top);
   }
 
@@ -366,7 +320,6 @@ export class MapView {
       if (vx > this.cols || vy > this.rows || (!infra && !this.seen(Math.min(vx, this.cols - 1), Math.min(vy, this.rows - 1)))) continue;
       if (!infra && vx < this.cols && vy < this.rows && !this.seen(vx, vy)) continue;
       const t = g.tiles.get(g.objects.objToTile[a.objN] + a.frameN);
-      this.h = this.heightOf(t, 'actor');
       for (const part of a.parts()) {
         const bx = wrap(part.x - this.curX, z);
         const by = wrap(part.y - this.curY, z);
@@ -385,23 +338,19 @@ export class MapView {
     const g = this.game;
     this.updateSight();
     this.buf.fill(0);
-    this.hbuf.fill(0);
     for (let vy = 0; vy < this.rows; vy++) {
       for (let vx = 0; vx < this.cols; vx++) {
         const raw = this.tmp[(vy + BORDER) * this.tw + vx + BORDER];
         if (raw === 0) continue;
         const n = raw & 0x7fff;
-        const t = g.tiles.get(n);
-        this.h = this.heightOf(t, 'base');
         if (g.kind === 'u6' && n >= 16 && n < 48) this.blit(g.tiles.animBase(n), vx * 16, vy * 16);
-        this.blit(t, vx * 16, vy * 16);
+        this.blit(g.tiles.get(n), vx * 16, vy * 16);
       }
     }
     this.drawObjs(true, false);
     this.drawObjs(false, false);
     this.drawActors();
     this.drawObjs(false, true);
-    this.h = 6;
     const blows = this.drawFlashes();
     const out = new Uint32Array(this.image!.data.buffer);
     for (let i = 0; i < this.buf.length; i++) out[i] = this.pal32[this.buf[i]];
@@ -576,17 +525,11 @@ export class MapView {
   }
 
   /** The map square under a point of the canvas (CSS pixels from its corner). */
-  /** Where a point of the canvas falls on the picture, when it is shown some other way (the voxel view). */
-  pick: ((cx: number, cy: number) => { fx: number; fy: number } | null) | null = null;
-
   squareAt(cx: number, cy: number): { x: number; y: number } {
     const r = this.canvas.getBoundingClientRect();
     const z = this.game.player.z;
-    const p = this.pick?.(cx, cy);
-    const fx = p ? p.fx : cx / r.width;
-    const fy = p ? p.fy : cy / r.height;
-    const vx = Math.max(0, Math.min(this.cols - 1, Math.floor(fx * this.cols)));
-    const vy = Math.max(0, Math.min(this.rows - 1, Math.floor(fy * this.rows)));
+    const vx = Math.max(0, Math.min(this.cols - 1, Math.floor((cx / r.width) * this.cols)));
+    const vy = Math.max(0, Math.min(this.rows - 1, Math.floor((cy / r.height) * this.rows)));
     return { x: wrap(this.curX + vx, z), y: wrap(this.curY + vy, z) };
   }
 

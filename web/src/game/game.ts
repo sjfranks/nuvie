@@ -9,6 +9,7 @@ import { lzwDecompress, lzwFile } from '../files/lzw.ts';
 import { Actor, Actors, HYDRA, HYDRA_BODY, MANY_SQUARES, SHIP, STATUS_ASLEEP, STATUS_IN_PARTY, WT } from './actors.ts';
 import { Converse, ConverseLib, checkKeywords, type ConvAsk, type ConvWorld } from './converse.ts';
 import { CHARMED, Combat } from './combat.ts';
+import { PartyFollow } from './partyfollow.ts';
 import { FOODS, UseCode, USED_IN_PLACE } from './usecode.ts';
 import { Magic, type Spell } from './magic.ts';
 import type { SfxId } from '../audio/sfx.ts';
@@ -70,7 +71,7 @@ export interface SaveState {
   dream?: unknown;
   moonstones?: [number, number, number][];
   party: { id: number; name: string }[];
-  flags: { karma: number; quest: number; garg: number; gender: number; face?: number };
+  flags: { karma: number; quest: number; garg: number; gender: number; face?: number; alcohol?: number };
   actors: number[][];
   /** [objN, frameN, status, x, y, z, qty, quality, loc (0 map, 1 container, 2 carried, 3 readied), parent index or holder] */
   objs: number[][];
@@ -170,6 +171,29 @@ export function facing(dx: number, dy: number): number {
   if (Math.abs(dx) > Math.abs(dy)) return dx > 0 ? 1 : 3;
   return dy > 0 ? 2 : 0;
 }
+
+/**
+ * The copy protection's questions, by words of each, and the answers its script takes (the first letters of these are
+ * what it checks).
+ */
+const COPY_ANSWERS: Record<Kind, [string, string][]> = {
+  u6: [
+    ['trolls lack', 'endurance'], ['tangle vine', 'centre pod'], ['headlesses', 'wizard experiment'],
+    ['spawning grounds of hydras', 'nightshade mushroom'], ['rotworms', 'torch'], ['sea serpents attack', 'fireball'],
+    ['wisps oft mistaken', 'fireflies'], ['giant squids', 'beak'], ['images of the silver serpent', 'tombs'],
+    ['reapers remnants', 'ancient forest'],
+  ],
+  md: [
+    ['martian year', '687'], ['airsquid', 'hydrogen'], ["earth's wolves", 'hedgehound'], ['crude weapons', 'protomartian'],
+    ['birthing plot', 'cultivator'], ['towers discovered by peary', 'ruby'], ['buffalo bill', '4000'],
+    ['marie curie', 'polonium'], ['lowell built his observatory', 'Arizona'],
+  ],
+  se: [
+    ["jimmy's notebook", 'weatherproof'], ['what sort of eyes', 'cold reptilian'], ['what was it that you lacked', 'memory'],
+    ['old and trusty friend', 'bowie knife'], ['valley is akin to', 'time capsule'], ['happens frequently between tribes', 'clashes'],
+    ['what expedition has returned', 'wild basin'], ['cover of ultimate adventures', 'coat'], ['first tribe rafkin', 'Nahuatla'],
+  ],
+};
 
 export class Game implements ConvWorld {
   readonly kind: Kind;
@@ -285,6 +309,7 @@ export class Game implements ConvWorld {
     }
     this.karma = r1(0x1bf9);
     this.gargFlag = r1(0x1c5f);
+    if (this.kind === 'u6') this.alcohol = r1(0x1c17);
     this.gender = this.kind === 'se' ? 0 : r1(OFFSETS[this.kind].gender);
     this.avatarPortrait = Math.max(0, r1(0x1c72) - 1);
     const n = Math.min(16, r1(0xff0));
@@ -599,6 +624,8 @@ export class Game implements ConvWorld {
       if (this.kind === 'u6') {
         this.magic.hourly();
         this.updateMoongates();
+        // Sobering up, an hour at a time (player_dec_alcohol).
+        if (this.alcohol > 0) this.alcohol--;
       }
     }
     // Martian Dreams' Mars as time passes: the cold, the air, radium, ice, berries.
@@ -635,9 +662,22 @@ export class Game implements ConvWorld {
   }
 
   /** Step the party one square. Returns whether a turn passed. */
+  /** How much the Avatar has drunk (Player's alcohol): over three, the steps go astray. */
+  alcohol = 0;
+
   move(dx: number, dy: number): boolean {
     if (this.converse) return false;
     if (this.vehicle) return this.vehicle.objN === INFLATED_BALLOON ? this.drift() : this.sail(dx, dy);
+    // Drunk, the Avatar stumbles any which way (Player::moveRelative).
+    if (this.kind === 'u6' && this.alcohol > 3 && this.player.id === 1 && this.random(4) !== 0) {
+      dx = this.random(3) - 1;
+      dy = this.random(3) - 1;
+      this.say('sys', 'Hic!');
+      if (dx === 0 && dy === 0) {
+        this.endTurn();
+        return true;
+      }
+    }
     const p = this.player;
     const nx = wrap(p.x + dx, p.z);
     const ny = wrap(p.y + dy, p.z);
@@ -700,12 +740,18 @@ export class Game implements ConvWorld {
     p.setDirection(facing(dx, dy));
     // Each companion takes the square the one ahead has left - but in a fight, each fights.
     // Alone, the rest stay put; in a fight, each fights.
-    if (!this.combat.mode && !this.isSolo) this.follow(trail, other);
+    if (!this.combat.mode && !this.isSolo) {
+      if (this.formation === 'file') this.follow(trail, other);
+      else this.partyFollow.follow(dx, dy);
+    }
     if (this.kind === 'u6') this.enterGate(nx, ny, p.z);
     this.cost = dx !== 0 && dy !== 0 ? 10 : 5;
     this.endTurn();
     return true;
   }
+
+  /** The party following its leader in its formation (Party::follow, PartyPathFinder). */
+  private readonly partyFollow = new PartyFollow(this);
 
   /** How the party walks behind its leader (Party::reform_party): Nuvie's four, or single file. */
   formation: Formation = 'standard';
@@ -729,48 +775,13 @@ export class Game implements ConvWorld {
     }
   }
 
-  /**
-   * The party follows its leader (Party::follow, much simplified): each steps towards their place in the formation,
-   * keeping beside someone ahead of them in it; where no step brings them nearer (a doorway, a narrow path), they take
-   * the square the one ahead has left, in single file.
-   */
+  /** Single file: each takes the square the one ahead has left. */
   private follow(trail: { x: number; y: number }[], other: Actor | null): void {
     const p = this.party[0].actor;
-    const free = (x: number, y: number, a?: Actor): boolean => this.canStand(x, y, p.z, a);
     for (let i = 1; i < this.party.length; i++) {
       const a = this.party[i].actor;
       if (a === other || a.z !== p.z) continue;
       const t = trail[i - 1];
-      const lost = Math.max(Math.abs(p.x - a.x), Math.abs(p.y - a.y)) > 3;
-      if (this.formation !== 'file' && !lost) {
-        const [tx, ty] = this.formationSpot(i);
-        if (a.x === tx && a.y === ty) continue;
-        const d2 = (x: number, y: number): number => (tx - x) ** 2 + (ty - y) ** 2;
-        // Beside the leader or one of those ahead in the formation, once moved.
-        const kept = (x: number, y: number): boolean => this.party.slice(0, i).some((m) => Math.max(Math.abs(m.actor.x - x), Math.abs(m.actor.y - y)) <= 1);
-        // A step nearer the place; and one more for one still short of it (follow_passA's second chance).
-        let moved = false;
-        for (let tries = 0; tries < 2 && (a.x !== tx || a.y !== ty); tries++) {
-          let best: [number, number] | null = null;
-          let bd = d2(a.x, a.y);
-          for (const [dx, dy] of [[0, -1], [1, 0], [0, 1], [-1, 0], [1, -1], [1, 1], [-1, 1], [-1, -1]]) {
-            const nx = a.x + dx;
-            const ny = a.y + dy;
-            const d = d2(nx, ny);
-            if (d < bd && free(nx, ny, a) && kept(nx, ny)) {
-              bd = d;
-              best = [nx, ny];
-            }
-          }
-          if (!best) break;
-          a.setDirection(facing(best[0] - a.x, best[1] - a.y));
-          [a.x, a.y] = best;
-          moved = true;
-        }
-        if (moved) continue;
-        if (Math.max(Math.abs(p.x - a.x), Math.abs(p.y - a.y)) <= 2 && kept(a.x, a.y)) continue;
-      }
-      // Single file: the square the one ahead has left.
       if (t.x === a.x && t.y === a.y) continue;
       if (Math.abs(t.x - a.x) > 2 || Math.abs(t.y - a.y) > 2 || !this.actors.at(t.x, t.y, p.z)) {
         a.setDirection(facing(t.x - a.x, t.y - a.y));
@@ -805,7 +816,10 @@ export class Game implements ConvWorld {
       if (v.objN !== SHIP) return no('Can not be repaired!');
       v.hp = Math.min(100, v.hp + hours * 10);
       this.say('sys', `The crew mends the ship. Hull ${v.hp}%.`);
-      for (let i = 0; i < hours; i++) this.advance(60);
+      for (let i = 0; i < hours; i++) {
+        this.advance(60);
+        this.upkeep(60);
+      }
       return this.endTurn();
     }
     if (this.inTown()) return no('Only in the wilderness!');
@@ -836,7 +850,10 @@ export class Game implements ConvWorld {
       } else this.say('sys', `${m.name} has no food.`);
     }
     this.say('sys', `The party sleeps for ${hours} hour${hours === 1 ? '' : 's'}.`);
-    for (let i = 0; i < hours; i++) this.advance(60);
+    for (let i = 0; i < hours; i++) {
+      this.advance(60);
+      this.upkeep(60);
+    }
     const heal = this.restCounter === 0;
     if (heal) {
       for (const a of fed) {
@@ -1275,8 +1292,30 @@ export class Game implements ConvWorld {
         break;
       }
     }
-    if (!this.paused && c.ask) this.keepNote(c);
+    if (!this.paused && c.ask) {
+      const answer = c.ask.type === 'keyword' ? this.copyAnswer() : null;
+      this.keepNote(c);
+      // The question from the manual that came in the box: answered for the player, the answer said aloud.
+      if (answer) {
+        this.say('sys', '(The answer, from the manual:)');
+        this.reply(answer);
+        return;
+      }
+    }
     this.onChange();
+  }
+
+  /**
+   * The copy protection's question just asked, if it is one, and its answer as the game's script accepts it (Lord
+   * British's from the Compendium; Tesla's from the Mysteries of Mars and Time Travel; Intanya's from Rafkin's notes
+   * and the magazine).
+   */
+  private copyAnswer(): string | null {
+    let asked = '';
+    for (let i = this.log.length - 1; i >= 0 && this.log[i].kind !== 'you'; i--) if (this.log[i].kind === 'npc') asked = this.log[i].text + ' ' + asked;
+    const q = asked.toLowerCase();
+    const hit = COPY_ANSWERS[this.kind].find(([k]) => q.includes(k));
+    return hit ? hit[1] : null;
   }
 
   private keepNote(c: Converse): void {
@@ -2002,22 +2041,94 @@ export class Game implements ConvWorld {
     return true;
   }
 
-  /** Light a torch and hold it, or put one out (U6UseCode::use_torch, simplified). */
+  /**
+   * A torch (U6UseCode::torch): a lit one is put out, and is spent; an unlit one on the ground is lit where it lies,
+   * one from its stack; one carried is readied - a hand must be free - and lit. A lit torch burns some two hundred
+   * turns, held (light_torch's duration, kept in its quality here).
+   */
   private useTorch(o: Obj): void {
-    if (o.frameN === 1) {
-      o.frameN = 0;
-      if (o.loc === 'readied') o.loc = 'inv';
-      this.say('sys', 'The torch goes out.');
-      return;
+    if (o.frameN === 1) return this.torchOut(o);
+    if (o.loc === 'map') {
+      let t = o;
+      if (o.qty > 1) {
+        o.qty--;
+        t = this.objects.create(OBJ.TORCH, 1, 0);
+        [t.x, t.y, t.z] = [o.x, o.y, o.z];
+        this.objects.add(t);
+      }
+      return this.lightTorch(t);
     }
     const holder = o.loc === 'inv' || o.loc === 'readied' ? this.actors.get(o.holder) : this.player;
     if (!holder) return;
-    if (o.loc === 'map') this.objects.toInventory(o, holder.id);
-    if (this.ready(o, holder)) {
-      const lit = this.objects.inventories[holder.id].find((t) => t.objN === OBJ.TORCH && t.loc === 'readied' && t.frameN === 0);
-      if (lit) lit.frameN = 1;
-      this.say('sys', 'The torch is lit.');
+    if (o.loc === 'readied') return this.lightTorch(o);
+    if (this.readySlot(o) !== undefined && !this.handFree(holder, o)) {
+      this.say('sys', 'No free hand to hold the torch.');
+      return this.onChange();
     }
+    if (this.ready(o, holder)) {
+      const t = this.objects.inventories[holder.id].find((r) => r.objN === OBJ.TORCH && r.loc === 'readied' && r.frameN === 0);
+      if (t) this.lightTorch(t);
+    }
+  }
+
+  /** Whether an actor has a hand free for a thing held in one. */
+  private handFree(a: Actor, o: Obj): boolean {
+    const worn = this.objects.inventories[a.id].filter((r) => r.loc === 'readied' && r !== o).map((r) => this.readySlot(r) ?? -1);
+    return worn.filter((w) => w === 3).length + worn.filter((w) => w === 4).length * 2 < 2;
+  }
+
+  private lightTorch(t: Obj): void {
+    t.frameN = 1;
+    t.quality = 200;
+    this.say('sys', 'Torch is lit.');
+    this.onChange();
+  }
+
+  /** A torch put out, or burnt down, is gone (extinguish_torch). */
+  private torchOut(t: Obj): void {
+    this.objects.unlink(t);
+    this.say('sys', 'A torch burned out.');
+    this.onChange();
+  }
+
+  /**
+   * What the party's readied things do as turns pass (actor.lua's advance_time): lit torches burn down and out; an
+   * invisibility ring, a regeneration ring - which heals its wearer a point a turn - or the storm cloak now and then
+   * vanishes; and while the cloak is worn, the storm it brings goes on.
+   */
+  upkeep(turns: number): void {
+    if (this.kind !== 'u6') return;
+    let cloak = false;
+    for (const m of [...this.party]) {
+      const a = m.actor;
+      for (const o of [...this.objects.inventories[a.id]]) {
+        if (o.loc !== 'readied') continue;
+        let gone = '';
+        if (o.objN === OBJ.TORCH && o.frameN === 1) {
+          if (this.random(2) === 0) {
+            if (o.quality === 0) o.quality = 200; // lit before torches burnt down here
+            if (o.quality > turns) o.quality -= turns;
+            else this.torchOut(o);
+          }
+        } else if (o.objN === 258) {
+          if (this.random(1001) === 429) gone = 'ring';
+        } else if (o.objN === 257) {
+          a.hp = Math.min(a.maxHp, a.hp + turns);
+          if (this.random(1001) === 734) gone = 'ring';
+        } else if (o.objN === 81) {
+          if (this.random(1001) === 588) {
+            gone = 'cloak';
+            this.stormTurns = 0;
+          } else cloak = true;
+        }
+        if (gone) {
+          this.objects.unlink(o);
+          this.say('sys', `A ${gone} has vanished!`);
+          if (o.objN === 258) this.u6Worn(o, a, false);
+        }
+      }
+    }
+    if (cloak) this.stormTurns = Math.max(this.stormTurns, 1);
   }
 
   /** Where a thing is worn or held, or undefined: by object in Ultima VI, by tile in the others. */
@@ -2080,6 +2191,8 @@ export class Game implements ConvWorld {
       this.say('sys', 'Magical energy prevents you from removing the amulet.');
       return this.onChange();
     }
+    // A lit torch taken from the hand is put out, and spent.
+    if (this.kind === 'u6' && o.objN === OBJ.TORCH && o.frameN === 1) return this.torchOut(o);
     o.loc = 'inv';
     this.say('sys', `Unreadied ${this.objects.look(o)}.`);
     if (this.kind === 'u6') this.u6Worn(o, this.actors.get(o.holder) ?? this.player, false);
@@ -2239,7 +2352,7 @@ export class Game implements ConvWorld {
       dream: this.kind === 'md' ? this.mdUse.saveDream() : undefined,
       moonstones: this.moonstones,
       party: this.party.map((m) => ({ id: m.actor.id, name: m.name })),
-      flags: { karma: this.karma, quest: this.questFlag, garg: this.gargFlag, gender: this.gender, face: this.avatarPortrait },
+      flags: { karma: this.karma, quest: this.questFlag, garg: this.gargFlag, gender: this.gender, face: this.avatarPortrait, alcohol: this.alcohol },
       actors: this.actors.list.map((a) => [
         a.x, a.y, a.z, a.objN, a.frameN, a.direction, a.objFlags, a.statusFlags, a.talkFlags, a.movementFlags,
         a.strength, a.dex, a.intelligence, a.exp, a.hp, a.level, a.magic, a.combatMode, a.worktype, a.visible ? 1 : 0,
@@ -2266,6 +2379,7 @@ export class Game implements ConvWorld {
     this.karma = s.flags.karma;
     this.questFlag = s.flags.quest;
     this.gargFlag = s.flags.garg;
+    this.alcohol = s.flags.alcohol ?? 0;
     this.gender = s.flags.gender;
     if (s.flags.face !== undefined) this.avatarPortrait = s.flags.face;
     s.actors.forEach((v, i) => {

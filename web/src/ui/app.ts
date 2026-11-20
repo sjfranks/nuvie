@@ -18,7 +18,7 @@ import { mdEndingScene } from './mdending.ts';
 import { u6EndingScene } from './u6ending.ts';
 import { u6IntroScene } from './u6intro.ts';
 import { mdIntroScene, mdOpeningScene } from './mdintro.ts';
-import type { VoxelView } from './voxelview.ts';
+import { ACK_PAGES, ackPicture } from './acknowledgements.ts';
 import { seTitleScene } from './seintro.ts';
 import { loadImages, loadMidgame, shapeRgba } from '../files/cutscene.ts';
 import type { Shape } from '../files/shape.ts';
@@ -143,8 +143,6 @@ export class App {
     this.zoomReset.setAttribute('aria-label', 'Back to the usual zoom');
     this.zoomReset.hidden = true;
     box.append(canvas, this.view.light, this.modeTag, this.face, this.zoomReset);
-    this.mapCanvas = canvas;
-    if (this.voxelsWanted()) void this.setVoxels(true);
     this.status.className = 'clock';
     wrap.append(box);
     const divider = el('div', 'divider');
@@ -301,7 +299,7 @@ export class App {
     game.onChange = () => this.changed();
     this.timers.push(window.setInterval(() => {
       this.view.tick();
-      this.renderMap();
+      this.view.render();
       // What the party sees changes as the map is drawn: the combat button lights when foes come into sight.
       this.drawFoot();
     }, 150));
@@ -316,7 +314,7 @@ export class App {
       for (let n = 0; a && c.waiting && n < 500 && (ms === 0 || !this.view.canSee(a.x, a.y, a.z)); n++) a = c.nextTurn();
       this.turnAt = performance.now() + ms;
       this.changed();
-      this.renderMap();
+      this.view.render();
     }, 30));
     this.layout();
     this.changed();
@@ -377,7 +375,7 @@ export class App {
       body.append(go);
       if (g.files.has('intro.shp')) {
         const watch = el('div', 'row');
-        watch.append(btn('Watch the introduction first', () => this.introU6(0)));
+        watch.append(btn('Watch the introduction first', () => this.introU6(0)), btn('Acknowledgements', () => this.acknowledgements(0, () => this.creation())));
         body.append(watch);
       }
     });
@@ -451,6 +449,22 @@ export class App {
       body.append(row);
     });
     this.onClose = () => moving?.stop();
+  }
+
+  /** Ultima VI's Acknowledgements (intro.lua's acknowledgements): four pages on the vellum scroll. */
+  private acknowledgements(i: number, back: () => void): void {
+    const g = this.game;
+    if (i >= ACK_PAGES.length) return back();
+    this.open('Acknowledgements', (body) => {
+      const pic = ackPicture(g.files, i);
+      if (pic) {
+        pic.className = 'scene';
+        body.append(pic);
+      } else for (const [text] of ACK_PAGES[i]) body.append(el('p', '', text));
+      const row = el('div', 'row');
+      row.append(btn(i + 1 < ACK_PAGES.length ? 'Continue' : 'Done', () => this.acknowledgements(i + 1, back), 'primary'));
+      body.append(row);
+    });
   }
 
   /** Martian Dreams' new Avatar: Freud's interview aboard the capsule (intro.lua's create_character). */
@@ -729,54 +743,6 @@ export class App {
   /** Squares added across by pinching out (even, so the party stays in the middle). */
   private zoomOut = 0;
   private zoomReset!: HTMLButtonElement;
-  private mapCanvas!: HTMLCanvasElement;
-  /** The map in voxels, when chosen (loaded only then). */
-  private voxels: VoxelView | null = null;
-
-  private voxelsWanted(): boolean {
-    try {
-      return localStorage.getItem('nuvie.view') === 'voxels';
-    } catch {
-      return false;
-    }
-  }
-
-  /** Show the map in voxels, or flat again. */
-  private async setVoxels(on: boolean): Promise<void> {
-    try {
-      localStorage.setItem('nuvie.view', on ? 'voxels' : 'flat');
-    } catch {
-      // Not kept.
-    }
-    if (!on) {
-      this.voxels?.canvas.remove();
-      this.voxels?.dispose();
-      this.voxels = null;
-      this.view.pick = null;
-      this.mapCanvas.classList.remove('under');
-      this.renderMap();
-      return;
-    }
-    if (this.voxels) return;
-    try {
-      const { VoxelView } = await import('./voxelview.ts');
-      const v = new VoxelView();
-      this.mapCanvas.after(v.canvas);
-      this.mapCanvas.classList.add('under');
-      this.voxels = v;
-      this.view.pick = (cx, cy) => v.pick(cx, cy);
-      this.renderMap();
-    } catch (e) {
-      this.game.say('sys', `The voxel view cannot be shown here (${(e as Error).message}).`);
-      this.mapCanvas.classList.remove('under');
-    }
-  }
-
-  /** Draw the map: flat, and in voxels if they are shown. */
-  private renderMap(): void {
-    this.view.render();
-    this.voxels?.draw(this.view.frame());
-  }
 
   /** The default zoom: as many squares across as keeps each a comfortable size for a finger. */
   private baseCols(): number {
@@ -798,7 +764,7 @@ export class App {
     const n = this.baseCols() + this.zoomOut;
     if (n !== this.view.cols) this.view.resize(n, n);
     this.zoomReset.hidden = this.zoomOut === 0;
-    this.renderMap();
+    this.view.render();
   }
 
   // ---- what a tap on the map means ----
@@ -961,7 +927,7 @@ export class App {
       }
       this.view.marks.push({ x: w.x, y: w.y, color, kind: 'box' });
     }
-    this.renderMap();
+    this.view.render();
   }
 
   private key(e: KeyboardEvent): void {
@@ -1035,7 +1001,7 @@ export class App {
       this.sheet = null;
       this.setMode('where');
     }
-    this.renderMap();
+    this.view.render();
     this.status.textContent = `${String(g.clock.hour).padStart(2, '0')}:${String(g.clock.minute).padStart(2, '0')}`;
     // Afloat or aloft, the wind matters: shown as the way it blows from.
     if (g.vehicle) {
@@ -1914,7 +1880,8 @@ export class App {
           this.close();
         }, 'primary');
         item('Start this world afresh', () => confirm('Start again from the beginning? The saved game is lost.') && this.hooks.leave(true));
-        item('Change game files', () => this.hooks.leave(false));
+        item('Choose another game', () => this.hooks.leave(false));
+        if (g.kind === 'u6' && g.files.has('vellum1.shp')) item('Acknowledgements', () => this.acknowledgements(0, () => this.menu('save')));
         body.append(el('p', 'small', 'The game also saves itself as you play, in this browser. A TypeScript port of the Nuvie engine (GPL); it plays your own copy of the game and ships none of it.'));
         return;
       }
@@ -1939,9 +1906,6 @@ export class App {
         }
         this.close();
         this.layout();
-      });
-      item(this.voxels ? 'View: 3D voxels' : 'View: flat', () => {
-        void this.setVoxels(!this.voxels).then(() => this.menu('settings'));
       });
       item(`Formation: ${FORMATIONS.find(([f]) => f === this.game.formation)?.[1] ?? 'standard'}`, () => {
         const i = FORMATIONS.findIndex(([f]) => f === this.game.formation);

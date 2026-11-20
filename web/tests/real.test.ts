@@ -173,7 +173,11 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
       for (let i = 0; i < 5; i++) g.move(0, -1);
       for (let i = 1; i < g.party.length; i++) {
         const a = g.party[i].actor;
-        if (f !== 'file') expect([f, a.x, a.y]).toEqual([f, ...g.formationSpot(i)]);
+        // Nuvie's following keeps each beside someone ahead of them in the formation.
+        if (f !== 'file') {
+          const beside = g.party.slice(0, i).some((m) => Math.max(Math.abs(m.actor.x - a.x), Math.abs(m.actor.y - a.y)) <= 1);
+          expect([f, i, beside]).toEqual([f, i, true]);
+        }
         expect(Math.max(Math.abs(a.x - p.x), Math.abs(a.y - p.y))).toBeLessThanOrEqual(4);
       }
       // Turning, the party wheels round behind.
@@ -284,6 +288,57 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     for (const a of old.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
     const back = new Game(load(), state);
     expect(back.objects.all().some((o) => o.objN === 335 && o.x === 307 && o.y === 350)).toBe(false);
+  });
+
+  it.runIf(folder === 'ultima6')('burns torches down, heals by the regeneration ring, keeps the cloak\'s storm, and staggers when drunk', () => {
+    const g = new Game(load());
+    for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
+    const p = g.player;
+    for (const o of g.objects.inventories[p.id]) if (o.loc === 'readied' && [3, 4].includes(g.readySlot(o) ?? -1)) o.loc = 'inv';
+    // A torch from a stack of three is readied and lit; two stay.
+    const torches = g.objects.create(90, 3, 0);
+    g.objects.toInventory(torches, p.id);
+    g.useObj(torches);
+    const lit = g.objects.inventories[p.id].find((o) => o.objN === 90 && o.loc === 'readied')!;
+    expect([lit.frameN, lit.quality, torches.qty]).toEqual([1, 200, 2]);
+    expect(g.log.at(-1)!.text).toBe('Torch is lit.');
+    // It burns down, and out.
+    lit.quality = 3;
+    for (let i = 0; i < 40 && lit.loc !== 'none'; i++) g.upkeep(1);
+    expect(lit.loc).toBe('none');
+    expect(g.log.some((l) => l.text === 'A torch burned out.')).toBe(true);
+    // Another, lit and then taken from the hand, is spent.
+    g.useObj(torches);
+    const lit2 = g.objects.inventories[p.id].find((o) => o.objN === 90 && o.loc === 'readied')!;
+    g.unready(lit2);
+    expect(lit2.loc).toBe('none');
+    // The regeneration ring heals.
+    const ring = g.objects.create(257, 1, 0);
+    g.objects.toInventory(ring, p.id);
+    g.ready(ring, p);
+    p.hp = 10;
+    g.upkeep(5);
+    expect(p.hp).toBe(15);
+    // The storm cloak's storm goes on while it is worn.
+    const cloak = g.objects.create(81, 1, 0);
+    g.objects.toInventory(cloak, p.id);
+    for (const o of g.objects.inventories[p.id]) if (o.loc === 'readied' && g.readySlot(o) === g.readySlot(cloak)) o.loc = 'inv';
+    g.ready(cloak, p);
+    g.stormTurns = 0;
+    g.upkeep(1);
+    expect(g.stormTurns).toBeGreaterThan(0);
+    // Four drinks, and the Avatar stumbles.
+    for (let i = 0; i < 4; i++) {
+      const wine = g.objects.create(115, 1, 0);
+      g.objects.toInventory(wine, p.id);
+      g.usecode.use(wine);
+    }
+    expect(g.alcohol).toBe(4);
+    for (let i = 0; i < 20; i++) g.move(0, 1);
+    expect(g.log.some((l) => l.text === 'Hic!')).toBe(true);
+    // Sober again after some hours.
+    g.advance(60 * 4);
+    expect(g.alcohol).toBe(0);
   });
 
   it.runIf(folder === 'ultima6')('casts spells from a readied book, using magic points and reagents', () => {
@@ -1047,6 +1102,41 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     expect(g.ready(halberd, dupre)).toBe(false);
     expect(g.ready(g.objects.create(55, 5, 0), dupre)).toBe(false); // arrows
     console.log('Dupre readied:', inv.filter((o) => o.loc === 'readied').map((o) => g.objects.look(o)));
+  });
+
+  it('answers the copy protection\'s questions from the manual, every one', () => {
+    const who = { ultima6: 5, martian: 16, savage: 33 }[folder];
+    const right = { ultima6: /correct/i, martian: /pleased with your answers/i, savage: /memory has returned/i }[folder];
+    const wrong = /not the correct answer|not fully returned|not studied|incorrect|wrong/i;
+    const asked = new Set<string>();
+    let tries = 0;
+    for (; tries < 60; tries++) {
+      const g = new Game(load());
+      for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
+      const a = g.actors.list.find((x) => g.lib.scriptNum(x) === who && x.objN !== 0);
+      if (!a) break;
+      // Martian Dreams asks when the hatch is pried open (use_prybar_on_hatch).
+      if (folder === 'martian') a.talkFlags |= 1 << 2;
+      g.talkTo(a);
+      for (let i = 0; i < 80 && g.converse; i++) {
+        const ask = g.asking();
+        if (g.paused) g.continueTalk();
+        else if (ask) {
+          if (ask.type === 'char') g.reply('y');
+          else if (ask.type === 'keyword') g.reply('bye');
+          else g.reply('Avatar');
+        } else break;
+      }
+      const text = g.log.map((l) => l.text).join('\n');
+      const answered = g.log.filter((l) => l.text === '(The answer, from the manual:)').length;
+      if (answered === 0) continue;
+      expect(text).toMatch(right);
+      expect(text).not.toMatch(wrong);
+      for (let i = 0; i < g.log.length; i++) if (g.log[i].text === '(The answer, from the manual:)') asked.add(g.log[i + 1].text);
+      if (asked.size >= ({ ultima6: 10, martian: 9, savage: 9 }[folder])) break;
+    }
+    console.log(folder, 'answers given', [...asked].join(', '), 'in', tries + 1, 'conversations');
+    expect(asked.size).toBeGreaterThan(0);
   });
 
   it('holds a conversation with everyone who has one, without the interpreter failing', () => {

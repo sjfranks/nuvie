@@ -763,6 +763,8 @@ export class UseCode {
     const g = this.g;
     const drink = o.objN === U.WINE || o.objN === U.MEAD || o.objN === U.ALE;
     g.say('sys', drink ? 'You drink it.' : 'You eat the food.');
+    // Drink goes to the Avatar's head (use_food's add_alcohol).
+    if (drink) g.alcohol = Math.min(255, g.alcohol + 1);
     if (g.objects.isStackable(o) && o.qty > 1) o.qty--;
     else g.objects.unlink(o);
     this.done();
