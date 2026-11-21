@@ -20,7 +20,7 @@ import { u6IntroScene } from './u6intro.ts';
 import { mdIntroScene, mdOpeningScene } from './mdintro.ts';
 import { ACK_PAGES, ackPicture } from './acknowledgements.ts';
 import { seTitleScene } from './seintro.ts';
-import { loadImages, loadMidgame, shapeRgba } from '../files/cutscene.ts';
+import { loadImages, loadMidgame, loadPalette, shapeRgba } from '../files/cutscene.ts';
 import type { Shape } from '../files/shape.ts';
 import { INTRO_U6 } from './intro6.ts';
 import { Gypsy } from './gypsy.ts';
@@ -82,6 +82,18 @@ export interface AppHooks {
   save(state: SaveState): void;
   /** Back to the first screen; `forget` drops the saved game. */
   leave(forget: boolean): void;
+}
+
+/** image_blit: pictures laid into one, each at its place (Origin's logo is three side by side). */
+function joinShapes(parts: [Shape, number, number][], w: number, h: number): Shape {
+  const data = new Uint8Array(w * h).fill(0xff);
+  for (const [sh, ox, oy] of parts) {
+    for (let y = 0; y < sh.h; y++) for (let x = 0; x < sh.w; x++) {
+      const c = sh.data[y * sh.w + x];
+      if (c !== 0xff && ox + x < w && oy + y < h) data[(oy + y) * w + ox + x] = c;
+    }
+  }
+  return { w, h, data };
 }
 
 /** How the party may walk behind its leader (Nuvie's party_formation setting, and single file). */
@@ -533,7 +545,11 @@ export class App {
       this.open('Martian Dreams', (body) => {
         const row = el('div', 'row');
         const go = btn('Skip', next);
-        moving = play(g.files, ['md_title.pal', 0], mdOpeningScene(), { end: () => {
+        // Origin's opening first, its logo made of three pictures side by side (origin_fx_sequence).
+        const t = loadImages(g.files, 'title.lzc')[0] ?? [];
+        const strax = loadPalette(g.files, 'strax.pal', 0);
+        const origin = t[1] && t[2] && t[3] && strax ? { logo: joinShapes([[t[1], 0, 16], [t[2], t[1].w, 14], [t[3], t[1].w + t[2].w, 0]], 282, 82), pal: strax } : undefined;
+        moving = play(g.files, ['md_title.pal', 0], mdOpeningScene(origin), { end: () => {
           go.textContent = 'Continue';
           go.classList.add('primary');
         } });
@@ -987,6 +1003,20 @@ export class App {
       const n = g.cutscene;
       g.cutscene = null;
       this.midgame(n);
+    }
+    if (g.picture && !this.sheet) {
+      const pic = g.picture;
+      g.picture = null;
+      this.open(pic.title, (body) => {
+        const s = loadImages(g.files, pic.file)[pic.item]?.[0];
+        if (!s) return void body.append(el('p', '', pic.title));
+        const c = document.createElement('canvas');
+        c.width = s.w;
+        c.height = s.h;
+        c.className = 'scene';
+        c.getContext('2d')!.putImageData(new ImageData(new Uint8ClampedArray(shapeRgba(s, this.view.palette)), s.w, s.h), 0, 0);
+        body.append(c);
+      });
     }
     if (g.peer) {
       g.peer = false;

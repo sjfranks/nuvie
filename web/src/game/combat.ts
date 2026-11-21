@@ -253,6 +253,33 @@ export class Combat {
     return best;
   }
 
+  /**
+   * Martian Dreams' player attack (player.lua's player_attack): with each readied weapon in turn - two pistols, two
+   * shots - or bare hands; one out of rounds, or out of reach, is passed over with a word.
+   */
+  attackWithEach(att: Actor, foe: Actor): void {
+    const g = this.g;
+    const arms = [...carried(g.objects, att.id)].filter((o) => o.loc === 'readied' && (this.t.dmg.get(o.objN) ?? 0) > 0);
+    if (!arms.length) {
+      g.say('sys', 'Attack with bare hands.');
+      this.attack(att, foe);
+      return;
+    }
+    for (const w of arms) {
+      if (!foe.alive || !foe.objN) break;
+      g.say('sys', `Attack with ${g.objects.name(w)}.`);
+      if (this.outOfAmmo(att, w.objN, w)) {
+        g.say('sys', 'Out of ammunition!');
+        continue;
+      }
+      if (this.range(att, foe.x, foe.y) > (this.t.range.get(w.objN) ?? 1)) {
+        g.say('sys', 'Out of range!');
+        continue;
+      }
+      this.attack(att, foe, w);
+    }
+  }
+
   /** How far an actor can hit from here: their best weapon's reach. */
   reach(a: Actor): number {
     let r = 1;
@@ -392,9 +419,74 @@ export class Combat {
   }
 
   /** One actor attacks another (actor_attack). Returns false where the foe is out of reach. */
-  attack(att: Actor, foe: Actor): boolean {
-    const w = this.weapon(att, foe.x, foe.y);
+  attack(att: Actor, foe: Actor, use?: Obj): boolean {
+    const w = use ? { objN: use.objN, obj: use } : this.weapon(att, foe.x, foe.y);
     if (this.range(att, foe.x, foe.y) > (this.t.range.get(w.objN) ?? 1)) return false;
+    // Attacked, the party takes up arms: combat mode begins of itself.
+    if (foe.inParty && !att.inParty) this.beginCombat();
+    // Martian Dreams' shotgun, and the ray guns and Belgian combine as they are set (attack_target_with_weapon): a
+    // single shot, a spread, or both.
+    if (this.g.kind === 'md' && w.obj && [43, 45, 240, 241].includes(w.objN)) {
+      const o = w.obj;
+      let single = w.objN !== 43;
+      let spread = w.objN === 43;
+      if (w.objN !== 43) {
+        single = o.quality < 2;
+        spread = o.quality !== 1;
+        if (w.objN === 45) {
+          if (single && !invCount(this.g.objects, att.id, 59)) single = false;
+          if (spread && !invCount(this.g.objects, att.id, 58)) spread = false;
+        } else {
+          if (o.qty === 0) return true;
+          if (o.qty < (spread ? 4 : 0) + (single ? 1 : 0)) spread = false;
+        }
+        if (!single && !spread) return true;
+      }
+      if (single) this.attackOnce(att, foe, w);
+      if (spread) this.spreadShot(att, foe.x, foe.y, o);
+      return true;
+    }
+    return this.attackOnce(att, foe, w);
+  }
+
+  /**
+   * spread_weapon_damage: a spread of shot or rays over the square aimed at and the one up and to its right; each there
+   * may dodge, else takes the spread's harm (the freeze ray holds fast instead). It costs a shell, or four charges.
+   */
+  private spreadShot(att: Actor, tx: number, ty: number, w: Obj): void {
+    const g = this.g;
+    const DMG: Record<number, number> = { 43: 20, 45: 20, 240: 25, 241: 10 };
+    for (const [x, y] of [[tx, ty], [tx + 1, ty - 1]]) {
+      const bucket = w.objN === 241 ? g.objects.list(x, y, att.z)?.find((o) => o.objN === 160 && o.frameN === 1) : undefined;
+      if (bucket) {
+        bucket.frameN = 2;
+        g.say('sys', 'The water freezes.');
+        continue;
+      }
+      const v = g.actors.at(x, y, att.z);
+      if (!v || v === att || !this.standing(v)) continue;
+      this.flash(x, y, att.z, 'hit', { tile: w.objN === 241 ? 0x14f : w.objN === 240 ? 0x14e : 0x106, fromX: att.x, fromY: att.y });
+      if (this.rand(1, 0x2d) <= adj(v, v.dex)) {
+        g.say('sys', `${this.cap(this.name(v))} dodges!`);
+        continue;
+      }
+      if (w.objN === 241) {
+        this.mdSpecial(att, v, { objN: 241, obj: w });
+        continue;
+      }
+      if (w.objN === 240 && mdBit(MD_STATS.get(v.objN), 3)) {
+        g.say('sys', 'It has no effect.');
+        continue;
+      }
+      if (v.inParty && !att.inParty) this.beginCombat();
+      this.takeHit(att, v, DMG[w.objN]);
+    }
+    if (w.objN === 43 || w.objN === 45) invDelete(g.objects, att.id, 58, 1, 0);
+    else w.qty = Math.max(0, w.qty - 4);
+  }
+
+  /** One shot or blow (the rest of actor_attack / attack_target_with_weapon). */
+  private attackOnce(att: Actor, foe: Actor, w: Weapon): boolean {
     att.setDirection(Math.abs(foe.x - att.x) <= Math.abs(foe.y - att.y) ? (foe.y >= att.y ? 2 : 0) : foe.x >= att.x ? 1 : 3);
     if (w.objN === CHARGE && w.obj) {
       if (w.obj.quality === 0x81) return this.wispTeleport(att);
@@ -587,6 +679,20 @@ export class Combat {
     else if (a.id !== 1) this.g.say('sys', `${who} killed!`);
   }
 
+  /** actor_divide: a second of the creature, on a free square beside it, as hurt as it is. */
+  private divide(a: Actor): void {
+    for (let i = 0; i < 8; i++) {
+      const x = wrap(a.x + this.rand(0, 1), a.z);
+      const y = wrap(a.y + this.rand(0, 1), a.z);
+      if ((x === a.x && y === a.y) || !this.canEnter(a, x, y)) continue;
+      const twin = this.spawn(a.objN, x, y, a.z, alignment(a), a.worktype);
+      if (!twin) return;
+      Object.assign(twin, { hp: a.hp, strength: a.strength, dex: a.dex, intelligence: a.intelligence, level: a.level });
+      this.g.say('sys', `${this.cap(this.name(a))} divides!`);
+      return;
+    }
+  }
+
   /** actor_hit: the damage itself. Returns the experience it earns. */
   private hit(def: Actor, dmg: number): number {
     // The party's boat takes blows to its hull. A ship with none left breaks up, and the party is left on a raft, tossed
@@ -620,6 +726,8 @@ export class Combat {
     if (dmg < def.hp) {
       def.hp -= dmg;
       if (def.worktype === WT.FLEE) def.worktype = WT.ASSAULT;
+      // Some of Mars's creatures, hurt, divide in two (actor_hit's stat bit 6: actor_divide).
+      if (this.g.kind === 'md' && mdBit(MD_STATS.get(def.objN), 6)) this.divide(def);
       return 0;
     }
     if (def.hp === 0) return 0;
@@ -815,6 +923,15 @@ export class Combat {
   mode = false;
   /** The combat mode as it stood at the start of this round of turns. */
   private inFight = false;
+
+  /** Combat mode on, as when the party is set upon (not alone, nor aboard a boat). */
+  beginCombat(): void {
+    const g = this.g;
+    if (this.mode || g.kind === 'se' || g.isSolo || g.vehicle) return;
+    this.mode = true;
+    this.inFight = true;
+    g.say('sys', 'Begin combat!');
+  }
 
   /** Begin combat, or break it off (Event::toggle_combat). Returns whether combat mode is now on. */
   toggle(): boolean {

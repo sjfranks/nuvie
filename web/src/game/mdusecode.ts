@@ -63,6 +63,136 @@ export class MdUseCode {
     if (t) this.g.say('sys', t);
   }
 
+  /**
+   * What a closer look tells of a thing (look.lua's look_usecode): the time on a pocket watch, what a barrow or rail car
+   * holds, where a marker flag stands, a ray gun's setting and charges, a lamp's fuel, a locked or rusted door, a
+   * panel's or cabinet's purpose, a seed growing, the sprayer's rubber; an obelisk shows its picture, and a broken
+   * strap sets Spector talking.
+   */
+  look(o: Obj): void {
+    const g = this.g;
+    const q = o.quality;
+    const charges = (n: number): string => this.text$(n === 1 ? 'AND_HAS_1_CHARGE_LEFT' : 'AND_HAS_N_CHARGES_LEFT', n);
+    const mode = (): string => this.text$(q === 0 ? 'COMBINATION' : q === 1 ? 'RIFLE' : 'SHOTGUN');
+    const line = (t: string): void => {
+      const s = t.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
+      if (s) g.say('sys', s);
+    };
+    switch (o.objN) {
+      case 91:
+      case 98: {
+        // The pocket watch.
+        let h = g.clock.hour;
+        const pm = h >= 12;
+        if (h > 12) h -= 12;
+        line(`${this.text$('THE_TIME_IS')} ${h}:${String(g.clock.minute).padStart(2, '0')} ${pm ? 'P.M.' : 'A.M.'}`);
+        return;
+      }
+      case 333:
+        if (q !== 0) this.say('THE_CANNON_WILL_FIRE_STEEL_CANNON_BALLS');
+        return;
+      case 268:
+      case 410: {
+        if (o.qty === 0) return this.say('IT_IS_EMPTY');
+        const stuff = this.text$(['', 'DIRT', 'ROCK', 'IRON_ORE', 'COAL'][q] ?? 'DIRT');
+        line(o.qty === 1 ? this.text$('IT_HAS_1_LOAD_OF', stuff) : this.text$('IT_HAS_N_LOADS_OF', o.qty, stuff));
+        return;
+      }
+      case 172: {
+        const names = ['', 'Coprates Chasma', 'Arsia Mons', 'Pavonis Mons', 'Ascraeus Mons', 'Alber Tholus', 'Elysium Mons', 'Hecates Tholus',
+          'Terra Sirenum', 'Noctis Labyrinthus', 'Deuteronicus Mensae', 'Syrtis Major Planum', 'Olympus Mons'];
+        if (o.z !== 0) return;
+        if (q > 12) return this.say('AARGH');
+        if (q !== 0) line(`${names[q]} ${this.latLong(o.x, o.y)}`);
+        return;
+      }
+      case 460: {
+        const spector = g.actors.get(2);
+        if (spector) {
+          spector.talkFlags |= 1 << 6;
+          g.talkTo(spector);
+        }
+        return;
+      }
+      case 287:
+        if (q !== 0) this.say('IT_HAS_A_HEARTSTONE');
+        return;
+      case 251:
+        if (o.frameN < 4) this.say(q === 15 ? 'IT_IS_GROWING' : q === 16 ? 'IT_IS_RIPE' : 'IT_IS_NOT_GROWING');
+        return;
+      case 276: {
+        const fussy = !!((g.actors.get(0x3e)?.talkFlags ?? 0) & (1 << 5));
+        if (q & 1) {
+          if (fussy && !(q & 2)) this.say('THE_RUBBER_IN_THE_SPRAYER_SYSTEM_IS_NOT_FLESH_COLORED');
+          else this.say('IT_IS_READY_TO_USE');
+        } else {
+          this.say('THERE_IS_NO_RUBBER_IN_THE_SPRAYER_SYSTEM');
+          if (fussy && !(q & 2)) this.say('IT_IS_ALSO_NOT_FLESH_COLORED');
+        }
+        return;
+      }
+      case 457:
+        return this.say(q === 0 || q > 7 ? 'YOU_CANNOT_DECIPHER_WHAT_IT_CONTROLS' : `CABINET_${q}`);
+      case 314:
+        if (q & 1 && o.loc === 'map') this.say('IT_APPEARS_TO_BE_LOOSE');
+        if (q & 2) this.say('IT_APPEARS_TO_BE_BROKEN');
+        return;
+      case 458: {
+        const purpose = o.qty === 0 ? ['THESE_APPEAR_TO_BE_MECHANICAL_CONTROLS', 'THESE_APPEAR_TO_BE_VALVE_CONTROLS', 'THESE_APPEAR_TO_BE_ELECTRICAL_CONTROLS'][o.frameN]
+          : ({ 4: 'IT_APPEARS_TO_CONTROL_A_DREAM_MACHINE', 5: 'IT_APPEARS_TO_CONTROL_A_SPRAY_SYSTEM', 6: 'IT_APPEARS_TO_CONTROL_THE_RUBY_LENS_SYSTEM', 7: 'IT_APPEARS_TO_CONTROL_THE_CISTERN_VALVES' } as Record<number, string>)[o.qty] ?? 'YOU_CANNOT_DECIPHER_ITS_PURPOSE';
+        if (purpose) this.say(purpose);
+        if (q & 1 && o.loc === 'map') this.say('THE_PANEL_IS_LOOSE');
+        if (q & 2) this.say('THE_PANEL_IS_BROKEN');
+        return;
+      }
+      case 129:
+      case 261: {
+        const what = g.tiles.look(q === 0 ? 649 : 640, 0);
+        line(this.text$('IT_IS_LOADED_WITH', what) + charges(o.qty));
+        return;
+      }
+      case 240:
+      case 241:
+        line(this.text$('IT_IS_SET_TO', mode()) + charges(o.qty));
+        return;
+      case 45:
+        line(`${this.text$('IT_IS_SET_TO', mode())}.`);
+        return;
+      case 411:
+        if (q === 1) this.say('IT_SEEMS_TO_BE_LOOSE');
+        else if (q === 2) this.say('IT_IS_NOT_INSTALLED');
+        return;
+      case 179:
+      case 227:
+        if (q >= 128) this.say(q - 128 >= 64 ? 'IT_IS_APPARENTLY_RUSTED_SHUT' : 'IT_IS_APPARENTLY_LOCKED');
+        return;
+      case 292:
+        // An obelisk: its picture (mdream.lzc).
+        if (q !== 0) g.picture = { file: 'mdream.lzc', item: q - 1, title: 'Obelisk' };
+        return;
+    }
+    if (o.objN >= 109 && o.objN <= 118) {
+      // A light source: its fuel or wick.
+      if ((o.objN === 109 || o.objN === 110) && o.qty > 1) return;
+      const lamp = o.objN >= 115;
+      let t: string;
+      if (q > 30) t = this.text$('PLENTY_OF');
+      else if (q > 6) t = this.text$('IT_HAS_N_MORE_MINUTES_OF', q);
+      else if (q > 0) t = this.text$('ITS_ALMOST_OUT_OF');
+      else t = this.text$(lamp ? 'NO' : 'PLENTY_OF');
+      line(t + this.text$(lamp ? 'FUEL' : 'WICK'));
+    }
+  }
+
+  /** get_lat_long_string: where a square lies on Mars in degrees. */
+  latLong(x: number, y: number): string {
+    const lat = Math.trunc(((y - 512) * 240) / 1024);
+    const lng = Math.trunc(((x - 512) * 360) / 1024);
+    const ns = lat > 0 ? 'S' : lat === 0 ? ' ' : 'N';
+    const ew = lng === 180 || lng === -180 || lng === 0 ? ' ' : lng < 0 ? 'E' : 'W';
+    return `${Math.abs(lat)}${ns} ${180 - Math.abs(lng)}${ew}`.replace(/ +/g, ' ').trim();
+  }
+
   private onTable(o: Obj): Record<number, OnEntry> | null {
     const crate: On = (tool, t) => this.crate(tool, t as Obj);
     const misc: On = (_tool, t) => this.misc(t as Obj);
@@ -653,6 +783,57 @@ export class MdUseCode {
   private endAfterTalk = false;
 
   /** talk.lua's talk_script: what a conversation sets going. */
+  /**
+   * Talk aimed where no one answers in the usual way (talk.lua): to oneself - in a dream, trying to wake - or to Your
+   * Mother; and, with green berries eaten, to things, which give up psychic impressions of who used them, or let the
+   * conveyor, the tower and the dream machine speak. True where it was dealt with here.
+   */
+  talkExtra(x: number, y: number, a: Actor | null): boolean {
+    const g = this.g;
+    if (a && (a === g.player || a.id < 2)) {
+      if (this.dream) {
+        this.say('YOU_TRY_TO_WAKE_YOURSELF_UP');
+        if (g.player.z !== 3) this.wake();
+      } else if (g.isSolo) this.say('NOT_WHILE_IN_SOLO_MODE');
+      else this.say('YOU_ARENT_YET_THAT_INSANE');
+      g.onChange();
+      return true;
+    }
+    if (a && a.objN === 391) {
+      this.say(g.gender === 0 ? 'NO_BACKTALK_FROM_YOU_YOUNG_MAN' : 'NO_BACKTALK_FROM_YOU_YOUNG_WOMAN');
+      g.onChange();
+      return true;
+    }
+    if (a) return false;
+    const o = g.objects.get(x, y, g.player.z);
+    if (!o) return false;
+    const green = (this.berries.get(g.player.id)?.[1] ?? 0) > 0;
+    if (!green) {
+      this.say('NOTHING');
+      g.onChange();
+      return true;
+    }
+    const voice = (id: number) => (): void => {
+      const who = g.actors.get(id);
+      if (who) g.talkTo(who);
+    };
+    const said = (key: string) => (): void => this.say(key);
+    const things: Record<number, () => void> = {
+      0xc: said('YOU_RECEIVE_A_MOMENTARY_IMPRESSION'), 0x5c: said('THIS_WAS_WORN_LAST_BY_A_DYING_MAN'),
+      0x64: voice(0x74), 0xbc: voice(0x72), 0xbf: voice(0x72), 0xc0: voice(0x72),
+      0xc8: voice(0x73), 0xc9: voice(0x73), 0xd6: voice(0x73), 0xd7: voice(0x73),
+      0xe7: said('THIS_WAS_USED_BY_A_MARTIAN_MEASURING_TIME'), 0xea: said('THIS_JEWELRY_WAS_WORN_BY'),
+      0xf6: said('THESE_FOOTBAGS_WERE_WORN_BY'), 0xf7: said('THIS_SAW_WAS_USED_BY'), 0xf9: said('THIS_DEVICE_WAS_USED_BY'),
+      0x113: said('THIS_SCULPTURE_HAD_GREAT_RITUAL_OR_RELIGIOUS_SIGNIFICANCE'),
+      0x120: voice(0x74), 0x121: voice(0x74), 0x122: voice(0x74),
+    };
+    const f = o.status & 1 ? things[o.objN] : undefined;
+    if (f) f();
+    else this.say('YOU_RECIEVE_NO_PSYCHIC_IMPRESSIONS');
+    g.onChange();
+    return true;
+  }
+
   talkScript(n: number): void {
     const g = this.g;
     const at = (x: number, y: number, z: number, objN: number): Obj | undefined => (g.objects.list(x, y, z) ?? []).find((o) => o.objN === objN);
@@ -1487,6 +1668,19 @@ export class MdUseCode {
     if (!ok) return;
     from.qty--;
     if (from.objN === 410 && (from.qty === 6 || from.qty === 0)) from.frameN -= 2;
+  }
+
+  /**
+   * Each hour (advance_time): the pocket watch's face shows the hour (update_watch_tile), and the lamp posts light at
+   * night once the power is on (update_lamp_posts).
+   */
+  hourly(): void {
+    const g = this.g;
+    g.tiles.setAnimFirst(616, 416 + (g.clock.hour % 12));
+    const h = g.clock.hour;
+    const lit = !!((g.actors.get(0x73)?.talkFlags ?? 0) & (1 << 4)) && (h < 6 || h > 17);
+    const z = g.player.z;
+    for (const o of g.objects.all()) if (o.objN === 228 && o.z === z) o.frameN = lit ? 7 : 3;
   }
 
   /** activate_power_system: coal in the furnace - steam from the cracks, the furnaces lit, the lamps on. */

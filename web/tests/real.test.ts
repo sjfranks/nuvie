@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import type { GameFiles } from '../src/files/gamefiles.ts';
 import { Game } from '../src/game/game.ts';
 import { SPELLS } from '../src/game/u6combat.ts';
+import { MD_STATS, mdBit } from '../src/game/mdse.ts';
 import { interview } from '../src/ui/freud.ts';
 
 const GAMES = [
@@ -242,13 +243,11 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     expect([sherry.x, sherry.y]).toEqual([hole.x, hole.y]);
   });
 
-  it.runIf(folder === 'ultima6')('begins and breaks off combat at the player\'s word, creatures fighting either way', () => {
+  it.runIf(folder === 'ultima6')('begins combat when the party is set upon, and at the player\'s word', () => {
     const g = new Game(load());
     for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
     expect(g.combat.mode).toBe(false);
     const p = g.player;
-    const troll = g.combat.spawn(371, p.x + 2, p.y, p.z, 0, 8)!;
-    // Out of combat mode the companions only follow, but the troll still comes on and strikes.
     const acts = new Map<number, number>();
     const c = g.combat as unknown as { perform: (a: { id: number }) => void };
     const perform = c.perform.bind(g.combat);
@@ -256,16 +255,22 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
       acts.set(a.id, (acts.get(a.id) ?? 0) + 1);
       perform(a);
     };
-    for (let i = 0; i < 12; i++) g.pass();
-    expect(acts.get(troll.id) ?? 0).toBeGreaterThan(0);
+    // Broken off with no foe about, the companions follow and take no turns of their own.
+    for (let i = 0; i < 4; i++) g.pass();
     expect(g.party.slice(1).every((m) => !acts.has(m.actor.id))).toBe(true);
-    // Begun: the companions fight.
-    expect(g.combat.toggle()).toBe(true);
-    expect(g.log.at(-1)!.text).toBe('Begin combat!');
+    // A troll comes on and strikes: combat mode begins of itself, and the companions fight.
+    const troll = g.combat.spawn(371, p.x + 2, p.y, p.z, 0, 8)!;
+    for (let i = 0; i < 20 && !g.combat.mode; i++) g.pass();
+    expect(acts.get(troll.id) ?? 0).toBeGreaterThan(0);
+    expect(g.combat.mode).toBe(true);
+    expect(g.log.some((l) => l.text === 'Begin combat!')).toBe(true);
     for (let i = 0; i < 6; i++) g.pass();
     expect(g.party.slice(1).some((m) => acts.has(m.actor.id))).toBe(true);
+    // Broken off, and begun again, at the player's word.
     expect(g.combat.toggle()).toBe(false);
     expect(g.log.at(-1)!.text).toBe('Break off combat!');
+    expect(g.combat.toggle()).toBe(true);
+    expect(g.log.at(-1)!.text).toBe('Begin combat!');
   });
 
   it.runIf(folder === 'ultima6')('hatches the throne room gargoyles only at a new game\'s start', () => {
@@ -600,6 +605,79 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     const back = new Game(load(), g.save());
     expect([back.playerName(), back.gender, back.player.intelligence, back.fresh]).toEqual(['Iolanthe', 1, 22, false]);
     expect(back.portrait(back.player)).toEqual(g.avatarFace(2));
+  });
+
+  it.runIf(folder === 'martian')('looks closer, attacks with each weapon, divides, talks to things, and lights the lamps', () => {
+    const g = new Game(load());
+    const p = g.player;
+    const lookAt = (o: { x: number; y: number }) => {
+      g.log = [];
+      g.look(o.x, o.y);
+      return g.log.map((l) => l.text).join(' ');
+    };
+    const free = [[2, 0], [-2, 0], [0, 2], [0, -2], [2, 2], [-2, -2], [3, 0]].find(([dx, dy]) => !g.actors.at(p.x + dx, p.y + dy, p.z))!;
+    const place = (objN: number, q = 0, qty = 1) => {
+      const o = g.objects.create(objN, qty, q);
+      [o.x, o.y, o.z] = [p.x + free[0], p.y + free[1], p.z];
+      for (const n of [...(g.objects.list(o.x, o.y, o.z) ?? [])]) g.objects.unlink(n);
+      g.objects.add(o);
+      return o;
+    };
+    g.clock.hour = 15;
+    g.clock.minute = 7;
+    expect(lookAt(place(91))).toMatch(/3:07 P\.M\./);
+    expect(lookAt(place(268, 4, 3))).toMatch(/3 loads of coal/);
+    expect(lookAt(place(240, 1, 5))).toMatch(/Rifle.*5 charges/);
+    expect(lookAt(place(172, 12))).toMatch(/Olympus Mons/);
+    expect(lookAt(place(179, 128 + 64))).toMatch(/rusted/i);
+    // Two weapons readied: an attack with each.
+    for (const o of g.objects.inventories[p.id]) if (o.loc === 'readied') o.loc = 'inv';
+    const guns = [g.objects.create(43, 1, 0), g.objects.create(43, 1, 0)];
+    for (const w of guns) {
+      g.objects.toInventory(w, p.id);
+      w.loc = 'readied';
+    }
+    const foe = g.actors.list.find((a) => a.objN !== 0 && !a.inParty && a.id > 20)!;
+    Object.assign(foe, { x: p.x + 1, y: p.y + 1, z: p.z, visible: true, hp: 200 });
+    g.log = [];
+    g.combat.attackWithEach(p, foe);
+    expect(g.log.filter((l) => /^Attack with/.test(l.text)).length).toBe(2);
+    // A shotgun spreads over the square aimed at and the one up and to its right, using a shell.
+    const shells = g.objects.create(58, 5, 0);
+    g.objects.toInventory(shells, p.id);
+    for (const w of guns) w.loc = 'inv';
+    const shotgun = g.objects.create(43, 1, 0);
+    g.objects.toInventory(shotgun, p.id);
+    shotgun.loc = 'readied';
+    const second = g.actors.list.find((a) => a.objN !== 0 && !a.inParty && a.id > 20 && a !== foe)!;
+    Object.assign(second, { x: foe.x + 1, y: foe.y - 1, z: p.z, visible: true, hp: 200 });
+    g.log = [];
+    g.combat.attack(p, foe, shotgun);
+    expect(shells.qty).toBe(4);
+    const struck = [foe, second].filter((a) => a.hp < 200).length + g.log.filter((l) => /dodges|grazed/.test(l.text)).length;
+    expect(struck).toBeGreaterThan(0);
+    // Talking to oneself.
+    g.log = [];
+    g.talk(p.x, p.y);
+    expect(g.log.at(-1)!.text).toMatch(/insane/i);
+    // A creature that divides when hurt.
+    const splitter = [...MD_STATS.keys()].find((n) => mdBit(MD_STATS.get(n), 6));
+    if (splitter !== undefined) {
+      const spot = [[3, 3], [-3, 3], [3, -3], [-3, -3]].find(([dx, dy]) => g.canStand(p.x + dx, p.y + dy, p.z) && g.canStand(p.x + dx + 1, p.y + dy + 1, p.z))!;
+      const c = g.combat.spawn(splitter, p.x + spot[0], p.y + spot[1], p.z, 0, 8)!;
+      c.hp = 50;
+      const before = g.actors.list.filter((a) => a.objN === splitter && a.alive && a.visible).length;
+      for (let i = 0; i < 10; i++) (g.combat as unknown as { hit: (a: unknown, d: number) => number }).hit(c, 1);
+      expect(g.actors.list.filter((a) => a.objN === splitter && a.alive && a.visible).length).toBeGreaterThan(before);
+      expect(g.log.some((l) => / divides!$/.test(l.text))).toBe(true);
+    }
+    // Lamp posts light at night once the power is on.
+    const lamp = place(228);
+    lamp.frameN = 3;
+    g.actors.get(0x73)!.talkFlags |= 1 << 4;
+    g.clock.hour = 20;
+    g.mdUse.hourly();
+    expect(lamp.frameN).toBe(7);
   });
 
   it.runIf(folder === 'martian')('fights by Martian Dreams\' rules: guns, rounds, wounds', () => {
