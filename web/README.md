@@ -185,8 +185,8 @@ player's to move on their turn (the map follows them, and the log says whose tur
 daggers land where they were thrown, to be picked up again; a flask of oil bursts into flame; the triple crossbow
 looses three bolts; a wand now and then vanishes. A ship whose hull gives out breaks up, leaving the party on a raft.
 
-**Combat mode** is the player's to begin and break off (the crossed swords beside Attack: Event::toggle_combat), as in
-the original: in it each of the party fights their own way; out of it they follow the leader. Creatures fight
+**Combat mode** begins of itself when a creature attacks the party, and is the player's to begin and break off (the
+crossed swords beside Attack: Event::toggle_combat): in it each of the party fights their own way; out of it they follow the leader. Creatures fight
 whether or not, taking their turns by movement points; the button flashes when foes are in sight and the party is not
 in combat mode. Not alone, nor aboard a boat.
 

@@ -395,6 +395,8 @@ export class Combat {
   attack(att: Actor, foe: Actor): boolean {
     const w = this.weapon(att, foe.x, foe.y);
     if (this.range(att, foe.x, foe.y) > (this.t.range.get(w.objN) ?? 1)) return false;
+    // Attacked, the party takes up arms: combat mode begins of itself.
+    if (foe.inParty && !att.inParty) this.beginCombat();
     att.setDirection(Math.abs(foe.x - att.x) <= Math.abs(foe.y - att.y) ? (foe.y >= att.y ? 2 : 0) : foe.x >= att.x ? 1 : 3);
     if (w.objN === CHARGE && w.obj) {
       if (w.obj.quality === 0x81) return this.wispTeleport(att);
@@ -815,6 +817,15 @@ export class Combat {
   mode = false;
   /** The combat mode as it stood at the start of this round of turns. */
   private inFight = false;
+
+  /** Combat mode on, as when the party is set upon (not alone, nor aboard a boat). */
+  beginCombat(): void {
+    const g = this.g;
+    if (this.mode || g.kind === 'se' || g.isSolo || g.vehicle) return;
+    this.mode = true;
+    this.inFight = true;
+    g.say('sys', 'Begin combat!');
+  }
 
   /** Begin combat, or break it off (Event::toggle_combat). Returns whether combat mode is now on. */
   toggle(): boolean {

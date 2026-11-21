@@ -242,13 +242,11 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     expect([sherry.x, sherry.y]).toEqual([hole.x, hole.y]);
   });
 
-  it.runIf(folder === 'ultima6')('begins and breaks off combat at the player\'s word, creatures fighting either way', () => {
+  it.runIf(folder === 'ultima6')('begins combat when the party is set upon, and at the player\'s word', () => {
     const g = new Game(load());
     for (const a of g.actors.list) if (a.objN === 363) Object.assign(a, { objN: 0, visible: false });
     expect(g.combat.mode).toBe(false);
     const p = g.player;
-    const troll = g.combat.spawn(371, p.x + 2, p.y, p.z, 0, 8)!;
-    // Out of combat mode the companions only follow, but the troll still comes on and strikes.
     const acts = new Map<number, number>();
     const c = g.combat as unknown as { perform: (a: { id: number }) => void };
     const perform = c.perform.bind(g.combat);
@@ -256,16 +254,22 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
       acts.set(a.id, (acts.get(a.id) ?? 0) + 1);
       perform(a);
     };
-    for (let i = 0; i < 12; i++) g.pass();
-    expect(acts.get(troll.id) ?? 0).toBeGreaterThan(0);
+    // Broken off with no foe about, the companions follow and take no turns of their own.
+    for (let i = 0; i < 4; i++) g.pass();
     expect(g.party.slice(1).every((m) => !acts.has(m.actor.id))).toBe(true);
-    // Begun: the companions fight.
-    expect(g.combat.toggle()).toBe(true);
-    expect(g.log.at(-1)!.text).toBe('Begin combat!');
+    // A troll comes on and strikes: combat mode begins of itself, and the companions fight.
+    const troll = g.combat.spawn(371, p.x + 2, p.y, p.z, 0, 8)!;
+    for (let i = 0; i < 20 && !g.combat.mode; i++) g.pass();
+    expect(acts.get(troll.id) ?? 0).toBeGreaterThan(0);
+    expect(g.combat.mode).toBe(true);
+    expect(g.log.some((l) => l.text === 'Begin combat!')).toBe(true);
     for (let i = 0; i < 6; i++) g.pass();
     expect(g.party.slice(1).some((m) => acts.has(m.actor.id))).toBe(true);
+    // Broken off, and begun again, at the player's word.
     expect(g.combat.toggle()).toBe(false);
     expect(g.log.at(-1)!.text).toBe('Break off combat!');
+    expect(g.combat.toggle()).toBe(true);
+    expect(g.log.at(-1)!.text).toBe('Begin combat!');
   });
 
   it.runIf(folder === 'ultima6')('hatches the throne room gargoyles only at a new game\'s start', () => {
