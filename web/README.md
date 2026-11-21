@@ -139,7 +139,9 @@ Things used on something ask where ("On -"). A closer look tells what look.lua h
 what a barrow or rail car holds, where a marker flag stands in degrees, a ray gun's or sprayer's setting and charges,
 a lamp's fuel or wick, a locked or rusted door, a panel's or cabinet's purpose, a seed growing, the sprayer system's
 rubber, a heartstone; an obelisk shows its picture, and the broken strap sets Spector talking. The player attacks
-with each readied weapon in turn, or bare hands (player_attack). With green berries eaten, things can be talked to:
+with each readied weapon in turn, or bare hands (player_attack). The shotgun spreads its shot over the square aimed
+at and the one up and to its right, each there able to dodge; the Belgian combine and the ray guns fire a single shot,
+a spread, or both, as they are set (attack_target_with_weapon, spread_weapon_damage). With green berries eaten, things can be talked to:
 the conveyor, tower and dream machine speak, and other things give psychic impressions of their users; talking to
 oneself or to Your Mother has its own answers. Lamp posts light at night once the power is on. Martian Dreams can
 open with Origin's own opening, the orchestra, the logo and the fireworks. The tent (and the Rest button, with a tent carried) camps as use_tent does: flat

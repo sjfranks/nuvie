@@ -424,6 +424,69 @@ export class Combat {
     if (this.range(att, foe.x, foe.y) > (this.t.range.get(w.objN) ?? 1)) return false;
     // Attacked, the party takes up arms: combat mode begins of itself.
     if (foe.inParty && !att.inParty) this.beginCombat();
+    // Martian Dreams' shotgun, and the ray guns and Belgian combine as they are set (attack_target_with_weapon): a
+    // single shot, a spread, or both.
+    if (this.g.kind === 'md' && w.obj && [43, 45, 240, 241].includes(w.objN)) {
+      const o = w.obj;
+      let single = w.objN !== 43;
+      let spread = w.objN === 43;
+      if (w.objN !== 43) {
+        single = o.quality < 2;
+        spread = o.quality !== 1;
+        if (w.objN === 45) {
+          if (single && !invCount(this.g.objects, att.id, 59)) single = false;
+          if (spread && !invCount(this.g.objects, att.id, 58)) spread = false;
+        } else {
+          if (o.qty === 0) return true;
+          if (o.qty < (spread ? 4 : 0) + (single ? 1 : 0)) spread = false;
+        }
+        if (!single && !spread) return true;
+      }
+      if (single) this.attackOnce(att, foe, w);
+      if (spread) this.spreadShot(att, foe.x, foe.y, o);
+      return true;
+    }
+    return this.attackOnce(att, foe, w);
+  }
+
+  /**
+   * spread_weapon_damage: a spread of shot or rays over the square aimed at and the one up and to its right; each there
+   * may dodge, else takes the spread's harm (the freeze ray holds fast instead). It costs a shell, or four charges.
+   */
+  private spreadShot(att: Actor, tx: number, ty: number, w: Obj): void {
+    const g = this.g;
+    const DMG: Record<number, number> = { 43: 20, 45: 20, 240: 25, 241: 10 };
+    for (const [x, y] of [[tx, ty], [tx + 1, ty - 1]]) {
+      const bucket = w.objN === 241 ? g.objects.list(x, y, att.z)?.find((o) => o.objN === 160 && o.frameN === 1) : undefined;
+      if (bucket) {
+        bucket.frameN = 2;
+        g.say('sys', 'The water freezes.');
+        continue;
+      }
+      const v = g.actors.at(x, y, att.z);
+      if (!v || v === att || !this.standing(v)) continue;
+      this.flash(x, y, att.z, 'hit', { tile: w.objN === 241 ? 0x14f : w.objN === 240 ? 0x14e : 0x106, fromX: att.x, fromY: att.y });
+      if (this.rand(1, 0x2d) <= adj(v, v.dex)) {
+        g.say('sys', `${this.cap(this.name(v))} dodges!`);
+        continue;
+      }
+      if (w.objN === 241) {
+        this.mdSpecial(att, v, { objN: 241, obj: w });
+        continue;
+      }
+      if (w.objN === 240 && mdBit(MD_STATS.get(v.objN), 3)) {
+        g.say('sys', 'It has no effect.');
+        continue;
+      }
+      if (v.inParty && !att.inParty) this.beginCombat();
+      this.takeHit(att, v, DMG[w.objN]);
+    }
+    if (w.objN === 43 || w.objN === 45) invDelete(g.objects, att.id, 58, 1, 0);
+    else w.qty = Math.max(0, w.qty - 4);
+  }
+
+  /** One shot or blow (the rest of actor_attack / attack_target_with_weapon). */
+  private attackOnce(att: Actor, foe: Actor, w: Weapon): boolean {
     att.setDirection(Math.abs(foe.x - att.x) <= Math.abs(foe.y - att.y) ? (foe.y >= att.y ? 2 : 0) : foe.x >= att.x ? 1 : 3);
     if (w.objN === CHARGE && w.obj) {
       if (w.obj.quality === 0x81) return this.wispTeleport(att);

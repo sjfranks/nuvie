@@ -642,6 +642,20 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     g.log = [];
     g.combat.attackWithEach(p, foe);
     expect(g.log.filter((l) => /^Attack with/.test(l.text)).length).toBe(2);
+    // A shotgun spreads over the square aimed at and the one up and to its right, using a shell.
+    const shells = g.objects.create(58, 5, 0);
+    g.objects.toInventory(shells, p.id);
+    for (const w of guns) w.loc = 'inv';
+    const shotgun = g.objects.create(43, 1, 0);
+    g.objects.toInventory(shotgun, p.id);
+    shotgun.loc = 'readied';
+    const second = g.actors.list.find((a) => a.objN !== 0 && !a.inParty && a.id > 20 && a !== foe)!;
+    Object.assign(second, { x: foe.x + 1, y: foe.y - 1, z: p.z, visible: true, hp: 200 });
+    g.log = [];
+    g.combat.attack(p, foe, shotgun);
+    expect(shells.qty).toBe(4);
+    const struck = [foe, second].filter((a) => a.hp < 200).length + g.log.filter((l) => /dodges|grazed/.test(l.text)).length;
+    expect(struck).toBeGreaterThan(0);
     // Talking to oneself.
     g.log = [];
     g.talk(p.x, p.y);
