@@ -253,6 +253,33 @@ export class Combat {
     return best;
   }
 
+  /**
+   * Martian Dreams' player attack (player.lua's player_attack): with each readied weapon in turn - two pistols, two
+   * shots - or bare hands; one out of rounds, or out of reach, is passed over with a word.
+   */
+  attackWithEach(att: Actor, foe: Actor): void {
+    const g = this.g;
+    const arms = [...carried(g.objects, att.id)].filter((o) => o.loc === 'readied' && (this.t.dmg.get(o.objN) ?? 0) > 0);
+    if (!arms.length) {
+      g.say('sys', 'Attack with bare hands.');
+      this.attack(att, foe);
+      return;
+    }
+    for (const w of arms) {
+      if (!foe.alive || !foe.objN) break;
+      g.say('sys', `Attack with ${g.objects.name(w)}.`);
+      if (this.outOfAmmo(att, w.objN, w)) {
+        g.say('sys', 'Out of ammunition!');
+        continue;
+      }
+      if (this.range(att, foe.x, foe.y) > (this.t.range.get(w.objN) ?? 1)) {
+        g.say('sys', 'Out of range!');
+        continue;
+      }
+      this.attack(att, foe, w);
+    }
+  }
+
   /** How far an actor can hit from here: their best weapon's reach. */
   reach(a: Actor): number {
     let r = 1;
@@ -392,8 +419,8 @@ export class Combat {
   }
 
   /** One actor attacks another (actor_attack). Returns false where the foe is out of reach. */
-  attack(att: Actor, foe: Actor): boolean {
-    const w = this.weapon(att, foe.x, foe.y);
+  attack(att: Actor, foe: Actor, use?: Obj): boolean {
+    const w = use ? { objN: use.objN, obj: use } : this.weapon(att, foe.x, foe.y);
     if (this.range(att, foe.x, foe.y) > (this.t.range.get(w.objN) ?? 1)) return false;
     // Attacked, the party takes up arms: combat mode begins of itself.
     if (foe.inParty && !att.inParty) this.beginCombat();
@@ -589,6 +616,20 @@ export class Combat {
     else if (a.id !== 1) this.g.say('sys', `${who} killed!`);
   }
 
+  /** actor_divide: a second of the creature, on a free square beside it, as hurt as it is. */
+  private divide(a: Actor): void {
+    for (let i = 0; i < 8; i++) {
+      const x = wrap(a.x + this.rand(0, 1), a.z);
+      const y = wrap(a.y + this.rand(0, 1), a.z);
+      if ((x === a.x && y === a.y) || !this.canEnter(a, x, y)) continue;
+      const twin = this.spawn(a.objN, x, y, a.z, alignment(a), a.worktype);
+      if (!twin) return;
+      Object.assign(twin, { hp: a.hp, strength: a.strength, dex: a.dex, intelligence: a.intelligence, level: a.level });
+      this.g.say('sys', `${this.cap(this.name(a))} divides!`);
+      return;
+    }
+  }
+
   /** actor_hit: the damage itself. Returns the experience it earns. */
   private hit(def: Actor, dmg: number): number {
     // The party's boat takes blows to its hull. A ship with none left breaks up, and the party is left on a raft, tossed
@@ -622,6 +663,8 @@ export class Combat {
     if (dmg < def.hp) {
       def.hp -= dmg;
       if (def.worktype === WT.FLEE) def.worktype = WT.ASSAULT;
+      // Some of Mars's creatures, hurt, divide in two (actor_hit's stat bit 6: actor_divide).
+      if (this.g.kind === 'md' && mdBit(MD_STATS.get(def.objN), 6)) this.divide(def);
       return 0;
     }
     if (def.hp === 0) return 0;

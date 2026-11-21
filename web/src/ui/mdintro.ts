@@ -428,7 +428,7 @@ export function mdIntroScene(text: (item: number) => string[], bgShape: () => Sh
  * Lowell at his telescope, the fuse, the explosion, the capsule's flight, the cabin and its hats, and the flash on
  * Mars - each credit flashing up white and fading in between.
  */
-export function mdOpeningScene(): Scene {
+export function mdOpeningScene(origin?: { logo: Shape; pal: Uint8Array }): Scene {
   let sprites: S[] = [];
   let screen = 1;
   const mk = (lib: string, grp: number, pic: number, x: number, y: number, clip = false): S => {
@@ -626,7 +626,128 @@ export function mdOpeningScene(): Scene {
     yield* flash(5);
   }
 
+  /**
+   * origin_fx_sequence: Origin's own opening, in its own palette (strax.pal) - the orchestra playing under a starry
+   * sky and a planet, the conductor's flourish, the view drawing back past them as the Origin logo grows over the
+   * sinking planet, and fireworks.
+   */
+  function* originFx(): Generator<Frame> {
+    if (!origin) return;
+    const T = 'title.lzc';
+    const pal = origin.pal;
+    let shown: S[] = [];
+    const put = (grp: number, pic: number, x: number, y: number, clipRect?: [number, number, number, number]): S => {
+      const sp: S = { lib: T, grp, pic, x, y, visible: true, clipRect };
+      shown.push(sp);
+      return sp;
+    };
+    const at = (ms: number): Frame => ({ ms, opacity: screen, pal, sprites: shown.filter((x) => x.visible) });
+    put(0, 0, 0, 24);
+    const planet = put(12, 0, 160, 48, [0, 0, 320, 152]);
+    const PLAYERS: [number, number, number][] = [[1, 58, 118], [2, 186, 118], [3, 278, 118], [4, 58, 126], [5, 186, 126], [6, 278, 126], [7, 58, 134], [8, 186, 134], [9, 278, 134]];
+    const FRAMES = [12, 8, 2, 6, 4, 2, 4, 4, 3];
+    const players = PLAYERS.map(([g, x, y]) => put(g, 0, x, y, [0, 0, 320, 152]));
+    const conductor = put(10, 0, 158, 98, [0, 24, 320, 128]);
+    const logo: S = { shape: origin.logo, x: 20, y: 70, visible: false };
+    shown.push(logo);
+    const play = (): void => {
+      players.forEach((pl, i) => (pl.pic = Math.floor(Math.random() * (FRAMES[i] + 1))));
+    };
+    screen = 0;
+    for (let i = 0; i <= 0xff; i += 3) {
+      screen = i / 0xff;
+      yield at(25);
+    }
+    screen = 1;
+    for (const range of [[0, 6], [7, 13], [7, 12]]) {
+      for (let i = range[0]; i <= range[1]; i++) {
+        conductor.pic = i;
+        play();
+        yield at(poll(4));
+      }
+    }
+    for (let k = 0; k < 4; k++) {
+      for (let j = 13; j <= 15; j++) {
+        conductor.pic = j;
+        yield at(poll(1));
+      }
+      conductor.pic = 14;
+      yield at(poll(2));
+      conductor.pic = 13;
+      yield at(poll(2));
+      conductor.pic = 16;
+      yield at(poll(1));
+    }
+    for (let i = 16; i <= 20; i++) {
+      conductor.pic = i;
+      yield at(poll(4));
+    }
+    yield at(poll(135));
+    // The view draws back.
+    conductor.pic = 6;
+    for (let i = 1; i <= 21; i++) {
+      conductor.y = 98 + i * 12;
+      conductor.scale = 100 + i * 15;
+      players.forEach((pl, j) => {
+        pl.y += 5;
+        pl.scale = 100 + i * 5;
+        if (j % 3 === 0) pl.x -= 2;
+        if (j % 3 === 2) pl.x += 2;
+      });
+      yield at(poll(4));
+    }
+    // The logo grows over the sinking planet.
+    logo.visible = true;
+    let scale = 10;
+    for (let i = 1; i <= 18; i++) {
+      planet.y += 6;
+      scale += 5;
+      logo.scale = scale;
+      logo.x = Math.floor((320 - (origin.logo.w * scale) / 100) / 2);
+      logo.y += i < 10 ? -4 : 1;
+      yield at(poll(4));
+    }
+    yield at(poll(45));
+    // Fireworks: a few at a time, then thirty at once.
+    const bursts: { s: S; colour: number; step: number }[] = [];
+    const burst = (): void => {
+      const colour = Math.floor(Math.random() * 3);
+      const s2: S = { lib: T, grp: 11, pic: 8 * colour, x: Math.floor(Math.random() * 320), y: Math.floor(Math.random() * 128), visible: true, clip: true };
+      shown.splice(shown.indexOf(logo), 0, s2);
+      bursts.push({ s: s2, colour, step: 0 });
+    };
+    const tick = (): void => {
+      for (const b of [...bursts]) {
+        if (b.step === 7) {
+          b.s.visible = false;
+          bursts.splice(bursts.indexOf(b), 1);
+        } else b.s.pic = 8 * b.colour + ++b.step;
+      }
+    };
+    for (let i = 0; i <= 125; i++) {
+      if (bursts.length < 5 && Math.random() < 1 / 6) burst();
+      tick();
+      yield at(poll(1));
+    }
+    while (bursts.length) {
+      tick();
+      yield at(poll(1));
+    }
+    yield at(poll(10));
+    for (let i = 0; i < 30; i++) burst();
+    while (bursts.length) {
+      tick();
+      yield at(poll(1));
+    }
+    for (let i = 0xff; i >= 0; i -= 3) {
+      screen = i / 0xff;
+      yield at(25);
+    }
+    shown = [];
+  }
+
   function* script(): Generator<Frame> {
+    yield* originFx();
     yield* logos();
     yield* fair();
     yield* lowell();

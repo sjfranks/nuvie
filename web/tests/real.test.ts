@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import type { GameFiles } from '../src/files/gamefiles.ts';
 import { Game } from '../src/game/game.ts';
 import { SPELLS } from '../src/game/u6combat.ts';
+import { MD_STATS, mdBit } from '../src/game/mdse.ts';
 import { interview } from '../src/ui/freud.ts';
 
 const GAMES = [
@@ -604,6 +605,65 @@ describe.skipIf(!have)(`a real copy of ${title}`, () => {
     const back = new Game(load(), g.save());
     expect([back.playerName(), back.gender, back.player.intelligence, back.fresh]).toEqual(['Iolanthe', 1, 22, false]);
     expect(back.portrait(back.player)).toEqual(g.avatarFace(2));
+  });
+
+  it.runIf(folder === 'martian')('looks closer, attacks with each weapon, divides, talks to things, and lights the lamps', () => {
+    const g = new Game(load());
+    const p = g.player;
+    const lookAt = (o: { x: number; y: number }) => {
+      g.log = [];
+      g.look(o.x, o.y);
+      return g.log.map((l) => l.text).join(' ');
+    };
+    const free = [[2, 0], [-2, 0], [0, 2], [0, -2], [2, 2], [-2, -2], [3, 0]].find(([dx, dy]) => !g.actors.at(p.x + dx, p.y + dy, p.z))!;
+    const place = (objN: number, q = 0, qty = 1) => {
+      const o = g.objects.create(objN, qty, q);
+      [o.x, o.y, o.z] = [p.x + free[0], p.y + free[1], p.z];
+      for (const n of [...(g.objects.list(o.x, o.y, o.z) ?? [])]) g.objects.unlink(n);
+      g.objects.add(o);
+      return o;
+    };
+    g.clock.hour = 15;
+    g.clock.minute = 7;
+    expect(lookAt(place(91))).toMatch(/3:07 P\.M\./);
+    expect(lookAt(place(268, 4, 3))).toMatch(/3 loads of coal/);
+    expect(lookAt(place(240, 1, 5))).toMatch(/Rifle.*5 charges/);
+    expect(lookAt(place(172, 12))).toMatch(/Olympus Mons/);
+    expect(lookAt(place(179, 128 + 64))).toMatch(/rusted/i);
+    // Two weapons readied: an attack with each.
+    for (const o of g.objects.inventories[p.id]) if (o.loc === 'readied') o.loc = 'inv';
+    const guns = [g.objects.create(43, 1, 0), g.objects.create(43, 1, 0)];
+    for (const w of guns) {
+      g.objects.toInventory(w, p.id);
+      w.loc = 'readied';
+    }
+    const foe = g.actors.list.find((a) => a.objN !== 0 && !a.inParty && a.id > 20)!;
+    Object.assign(foe, { x: p.x + 1, y: p.y + 1, z: p.z, visible: true, hp: 200 });
+    g.log = [];
+    g.combat.attackWithEach(p, foe);
+    expect(g.log.filter((l) => /^Attack with/.test(l.text)).length).toBe(2);
+    // Talking to oneself.
+    g.log = [];
+    g.talk(p.x, p.y);
+    expect(g.log.at(-1)!.text).toMatch(/insane/i);
+    // A creature that divides when hurt.
+    const splitter = [...MD_STATS.keys()].find((n) => mdBit(MD_STATS.get(n), 6));
+    if (splitter !== undefined) {
+      const spot = [[3, 3], [-3, 3], [3, -3], [-3, -3]].find(([dx, dy]) => g.canStand(p.x + dx, p.y + dy, p.z) && g.canStand(p.x + dx + 1, p.y + dy + 1, p.z))!;
+      const c = g.combat.spawn(splitter, p.x + spot[0], p.y + spot[1], p.z, 0, 8)!;
+      c.hp = 50;
+      const before = g.actors.list.filter((a) => a.objN === splitter && a.alive && a.visible).length;
+      for (let i = 0; i < 10; i++) (g.combat as unknown as { hit: (a: unknown, d: number) => number }).hit(c, 1);
+      expect(g.actors.list.filter((a) => a.objN === splitter && a.alive && a.visible).length).toBeGreaterThan(before);
+      expect(g.log.some((l) => / divides!$/.test(l.text))).toBe(true);
+    }
+    // Lamp posts light at night once the power is on.
+    const lamp = place(228);
+    lamp.frameN = 3;
+    g.actors.get(0x73)!.talkFlags |= 1 << 4;
+    g.clock.hour = 20;
+    g.mdUse.hourly();
+    expect(lamp.frameN).toBe(7);
   });
 
   it.runIf(folder === 'martian')('fights by Martian Dreams\' rules: guns, rounds, wounds', () => {

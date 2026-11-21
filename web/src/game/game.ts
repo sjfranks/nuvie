@@ -272,6 +272,8 @@ export class Game implements ConvWorld {
 
   /** A mid-game scene to show (Martian Dreams' midgameN.lzc), or null. */
   cutscene: number | null = null;
+  /** A picture to show, as an obelisk looked at shows its own (look_obelisk). */
+  picture: { file: string; item: number; title: string } | null = null;
 
   /** Martian Dreams' usecode (usecode.lua). */
   readonly mdUse = new MdUseCode(this);
@@ -337,6 +339,7 @@ export class Game implements ConvWorld {
     // Hatched (or, in a saved game, long since): the throne room's gargoyle egg is gone.
     this.combat.dropOpeningEgg();
     if (this.kind === 'u6' && !saved) this.updateMoongates();
+    if (this.kind === 'md') this.mdUse.hourly();
   }
 
   /** Read every object, and return the objlist: a new game's packed files, else a saved game's. */
@@ -621,6 +624,7 @@ export class Game implements ConvWorld {
       }
       this.updateSchedules();
       if (this.restCounter > 0) this.restCounter--;
+      if (this.kind === 'md') this.mdUse.hourly();
       if (this.kind === 'u6') {
         this.magic.hourly();
         this.updateMoongates();
@@ -712,7 +716,8 @@ export class Game implements ConvWorld {
     }
     const other = this.actors.at(nx, ny, p.z);
     if (other && this.combat.hostile(other)) {
-      this.combat.attack(p, other);
+      if (this.kind === 'md') this.combat.attackWithEach(p, other);
+      else this.combat.attack(p, other);
       this.endTurn();
       return true;
     }
@@ -1151,7 +1156,10 @@ export class Game implements ConvWorld {
   attackAt(x: number, y: number): boolean {
     if (this.converse) return false;
     const p = this.player;
-    const foe = this.actors.at(x, y, p.z);
+    // A rockworm's body is struck through to the worm (find_rockworm_actor).
+    const worm = this.kind === 'md' ? this.objects.list(x, y, p.z)?.find((o) => o.objN === 370 || o.objN === 371) : undefined;
+    const wormActor = worm ? this.actors.get(worm.quality) : undefined;
+    const foe = this.actors.at(x, y, p.z) ?? (wormActor?.alive ? wormActor : null);
     if (!foe || foe === p) {
       this.say('sys', 'Nothing to attack there.');
       this.onChange();
@@ -1165,7 +1173,8 @@ export class Game implements ConvWorld {
     if (this.combat.range(p, x, y) > this.combat.reach(p) || !this.combat.clearLine(p.x, p.y, x, y, p.z)) return false;
     this.say('you', `Attack ${this.lookActor(foe).replace(/^(a|an|the) /, '')}`);
     if (!this.combat.hostile(foe) && !foe.inParty && foe.objN !== OBJ.LORD_BRITISH) this.karma = Math.max(0, this.karma - 5);
-    this.combat.attack(p, foe);
+    if (this.kind === 'md') this.combat.attackWithEach(p, foe);
+    else this.combat.attack(p, foe);
     this.endTurn();
     return true;
   }
@@ -1187,10 +1196,11 @@ export class Game implements ConvWorld {
       this.say('sys', `The flame of ${['truth', 'love', 'courage'][o.quality - 1]}.`);
       return this.onChange();
     }
-    this.say('sys', this.kind === 'se' ? `You see ${text}.` : `Thou dost see ${text}.`);
+    this.say('sys', this.kind !== 'u6' ? `You see ${text}.` : `Thou dost see ${text}.`);
     if (o && !a && READABLE.has(o.objN)) this.read(o);
     // Savage Empire searches a container looked at, tipping out what it holds (look_obj, search).
     if (o && !a && this.kind === 'se' && this.objects.isContainer(o.objN)) this.search(o);
+    if (o && !a && this.kind === 'md') this.mdUse.look(o);
     this.onChange();
   }
 
@@ -1232,6 +1242,7 @@ export class Game implements ConvWorld {
 
   talk(x: number, y: number): void {
     const a = this.actors.at(x, y, this.player.z);
+    if (this.kind === 'md' && this.mdUse.talkExtra(x, y, a)) return;
     if (!a || a === this.player) {
       this.say('sys', 'Nobody is there to talk to.');
       this.onChange();

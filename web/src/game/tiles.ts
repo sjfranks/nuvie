@@ -122,6 +122,11 @@ export class Tiles {
     return this.tile[this.index[n & 0x7ff]];
   }
 
+  /** anim_set_first_frame: where an animated tile's frames begin (Martian Dreams' pocket watch shows the hour so). */
+  setAnimFirst(tileNum: number, first: number): void {
+    for (let i = 0; i < this.animCount; i++) if (this.animTile[i] === tileNum) this.animFirst[i] = first;
+  }
+
   /** The tile `n` itself, whatever is animating. */
   original(n: number): Tile {
     return this.tile[n & 0x7ff];
